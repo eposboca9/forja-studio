@@ -22,7 +22,11 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 
 ## Estructura
 
-- `index.html`: toda la app por ahora (HTML + CSS + JS módulo). three.js 0.160.0 desde cdn.jsdelivr.net vía import map.
+- `index.html`: estructura y estilos. three.js 0.160.0 desde cdn.jsdelivr.net vía import map.
+- `src/nurbs.js`: matemática NURBS pura (clampedKnots, greville, fitCurve/fitSurface, rebuild*, loft, extrude, revolve, planeData).
+  OJO: en three 0.160 `NURBSSurface.getPoint(u, v, target)` NO devuelve el punto, solo rellena `target`.
+- `src/main.js`: escena (array `objects`), selección, herramientas, paneles.
+- Para publicar el Artifact: página = index.html sin <!doctype>/<html>/<head>/<body>, y `files` con src/main.js y src/nurbs.js.
 - `docs/capturas/`: capturas de pantalla de cada versión.
 
 ## Decisiones tomadas
@@ -62,12 +66,26 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - La imagen de referencia de interfaz del usuario: vista dividida, menú radial, biblioteca de materiales,
   pestañas de espacio de trabajo, árbol de objetos, línea de tiempo (convertirla en historial de versiones).
 
+## Hecho (v0.5)
+
+- Modelo de escena: `objects` = [{ id, kind: 'surface'|'curve', name, data, mat, visible, parts }]. updateObject(obj) regenera todo.
+  Superficie: data = { degU, degV, knotsU, knotsV, cvs[nu][nv] }. Curva: data = { deg, knots, cvs[], plane }.
+- Selección: pickMode 'object' | 'cv' (teclas O / P). Clic reemplaza, Shift alterna, Ctrl quita. Recuadro = crossing.
+  selObjs guarda el orden (para el loft). El gizmo va en un `proxy` en el centroide y mueve todos los CVs afectados.
+- Pivote: doble clic sobre objeto/suelo (animado), L = a la selección, marcador ámbar al navegar.
+- Grado 1–7 y spans por U/V (y en curvas) desde el panel: rebuild con ajuste en Greville (error < 0.01 dm).
+- Crear: Plano (clic), Loft (≥2 curvas, en orden), Extruir (distancia en el panel), Revolución (eje Y, círculo NURBS exacto).
+  Plano de dibujo: suelo XZ o frontal XY.
+- Paneles auto-ocultables (clase .auto en #app), chincheta para fijar. Lista de escena con ojo para ocultar.
+- Navegación "Touchpad": Shift+arrastrar = recuadro.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
 
-1. v0.5: árbol de objetos a la izquierda, pestañas de espacio de trabajo, paneles plegables.
-2. v0.6: HDRI intercambiables (estudio, calle, desierto) y render con trazado de rayos (three-gpu-pathtracer).
+1. v0.6: sólidos estilo Plasticity con replicad/opencascade.js (WASM): caja/cilindro, extruir, fillet, chaflán, booleanas.
+   Ojo: el Artifact de Claude bloquea fetch de .wasm; esto solo funcionará en GitHub Pages.
+2. HDRI intercambiables (estudio, calle, desierto) y render con trazado de rayos (three-gpu-pathtracer).
 3. Superficie a partir de curvas (loft / barrido) usando las curvas dibujadas.
 4. Editor de atajos (esperando la lista de atajos de Alias del usuario).
 5. Integrar OpenCASCADE (opencascade.js, WebAssembly) para sólidos, booleanas y redondeos.

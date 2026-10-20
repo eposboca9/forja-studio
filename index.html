@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>body{margin:0}[hidden]{display:none!important}</style>
 <title>Forja Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -30,7 +30,7 @@
   .app {
     height: 100%;
     display: grid;
-    grid-template-columns: 1fr 272px;
+    grid-template-columns: 1fr 284px;
     grid-template-rows: 46px 1fr 28px;
     grid-template-areas: "top top" "view panel" "status status";
   }
@@ -105,7 +105,7 @@
   .pane .legend { right: 12px; top: 12px; }
   /* Menú radial */
   .radial { position: fixed; width: 0; height: 0; z-index: 50; pointer-events: none; }
-  .radial .ring { position: absolute; left: -118px; top: -118px; width: 236px; height: 236px; border-radius: 50%;
+  .radial .ring { position: absolute; left: -215px; top: -160px; width: 430px; height: 320px; border-radius: 50%;
     background: radial-gradient(circle, color-mix(in srgb, var(--panel) 70%, transparent) 0 34%, color-mix(in srgb, var(--panel) 35%, transparent) 35% 100%);
     border: 1px solid var(--line); backdrop-filter: blur(3px); }
   .radial .center { position: absolute; transform: translate(-50%, -50%); font-size: 11px; color: var(--muted); text-align: center; width: 76px; line-height: 1.3; }
@@ -142,34 +142,70 @@
 
   .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
 
-  @media (max-width: 760px) {
-    .app { grid-template-columns: 1fr; grid-template-rows: 46px 1fr 40% 28px; grid-template-areas: "top" "view" "panel" "status"; }
-    .panel { border-left: 0; border-top: 1px solid var(--line); }
-    .file, .tag, .hint, .status .r { display: none; }
-    .seg button { padding: 5px 8px; }
-    .tools { top: auto; bottom: 10px; transform: none; flex-direction: row; }
-    .tools hr { border-top: 0; border-left: 1px solid var(--line); margin: 4px 3px; }
-    .drawbar { left: 12px; right: 12px; transform: none; white-space: normal; flex-wrap: wrap; }
-    .drawbar span { flex: 1 1 100%; }
-  }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* v0.5: paneles que se ocultan solos, selección, lista de escena */
+  .app.auto { grid-template-columns: 1fr 0; }
+  .app.auto .panel {
+    position: fixed; top: 46px; bottom: 28px; right: 0; width: 284px; z-index: 30;
+    transform: translateX(100%); transition: transform .18s ease; box-shadow: -14px 0 32px rgba(0,0,0,.4);
+  }
+  .app.auto .panel.show { transform: none; }
+  .app.auto .tools { transform: translate(-90px, -50%); opacity: 0; transition: transform .16s ease, opacity .16s ease; }
+  .app.auto .tools.show { transform: translateY(-50%); opacity: 1; }
+  .edge-tab { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 5px; height: 72px; border-radius: 4px 0 0 4px; background: var(--muted); opacity: .45; pointer-events: none; }
+  .edge-tab.l { right: auto; left: 0; border-radius: 0 4px 4px 0; }
+  .app:not(.auto) .edge-tab { display: none; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .panel-head span { font-weight: 600; }
+  .iconbtn { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+  .iconbtn svg { width: 16px; height: 16px; }
+  .iconbtn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+  .top .seg.pick { margin-left: 8px; }
+  .top .seg.lay { margin-left: auto; }
+  .top .lbl { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .marquee { position: absolute; border: 1px dashed var(--sel); background: color-mix(in srgb, var(--sel) 12%, transparent); pointer-events: none; z-index: 5; }
+  .toast { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); color: var(--fg); padding: 8px 14px; border-radius: 8px; font-size: 12px; z-index: 6; max-width: 80%; text-align: center; }
+  .outliner { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow-y: auto; }
+  .ol-item { display: flex; align-items: center; gap: 4px; border-radius: 6px; }
+  .ol-item.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .ol-item.off .ol-name { opacity: .45; }
+  .ol-name { flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: var(--fg); font: inherit; padding: 5px 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ol-ico { color: var(--muted); display: inline-block; width: 18px; }
+  .ol-item.sel .ol-ico { color: var(--accent); }
+  .ol-eye { width: 26px; height: 26px; display: grid; place-items: center; border: 0; background: none; color: var(--muted); cursor: pointer; border-radius: 5px; }
+  .ol-eye svg { width: 15px; height: 15px; }
+  .ol-eye[aria-pressed="false"] { opacity: .35; }
+  .grid4 { display: grid; grid-template-columns: 20px 1fr 1fr 40px; gap: 6px; align-items: center; }
+  .grid4.g3 { grid-template-columns: 1fr 1fr 40px; }
+  .grid4 .gh { font-size: 11px; color: var(--muted); }
+  .grid4 .gl { color: var(--muted); font-family: var(--font-mono); }
+  .grid4 .gv { font-family: var(--font-mono); font-size: 12px; text-align: right; }
+  .grid4 select, .grid4 input { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; font: inherit; font-family: var(--font-mono); font-size: 12px; }
+  .ops { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .selorder { margin: 0; padding-left: 20px; color: var(--fg); font-size: 12px; line-height: 1.6; }
+  .tools .tl { font-size: 9px; color: var(--muted); text-align: center; letter-spacing: .05em; padding: 2px 0; }
 </style>
 </head>
 <body>
-
-<div class="app">
+<div class="app auto" id="app">
   <header class="top">
     <div class="brand">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 17c4-9 14-9 18 0" stroke="#f0a63a" stroke-width="2" stroke-linecap="round"/><circle cx="3" cy="17" r="2" fill="#57b6ff"/><circle cx="12" cy="7.5" r="2" fill="#57b6ff"/><circle cx="21" cy="17" r="2" fill="#57b6ff"/></svg>
       Forja Studio
     </div>
     <span class="file">capo_concepto.forja</span>
-    <div class="seg" role="group" aria-label="Distribución de la vista">
+    <span class="lbl">Seleccionar</span>
+    <div class="seg pick" role="group" aria-label="Qué seleccionar">
+      <button id="pick-object" data-pick="object" aria-pressed="true" title="Seleccionar objetos completos (O)">Objetos</button>
+      <button id="pick-cv" data-pick="cv" aria-pressed="false" title="Seleccionar puntos de control (P)">CVs</button>
+    </div>
+    <div class="seg lay" role="group" aria-label="Distribución de la vista">
       <button id="lay-split" data-layout="split" aria-pressed="true" title="Diagnóstico y render lado a lado (V)">Dividida</button>
       <button id="lay-diag" data-layout="diag" aria-pressed="false" title="Solo diagnóstico (V)">Diagnóstico</button>
       <button id="lay-render" data-layout="render" aria-pressed="false" title="Solo render (V)">Render</button>
     </div>
-    <span class="tag">DEMO v0.4</span>
+    <span class="tag">DEMO v0.5</span>
   </header>
 
   <main class="view" id="view">
@@ -196,102 +232,101 @@
       <div class="ring"></div>
       <div class="center" id="radial-center">Suelta sobre una opción</div>
     </div>
-    <nav class="tools" aria-label="Herramientas">
-      <button id="t-select" aria-pressed="true" title="Seleccionar y mover puntos de control (W)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 3l14 8-6 1.5L10 19z"/></svg>
-      </button>
-      <button id="t-frame" title="Encuadrar superficie (F)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg>
-      </button>
+    <nav class="tools" id="tools" aria-label="Herramientas">
+      <button id="t-select" aria-pressed="true" title="Seleccionar (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 8-6 1.5L10 19z"/></svg></button>
+      <button id="t-frame" title="Encuadrar selección (F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+      <button id="t-top" title="Vista superior (T)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></svg></button>
       <hr>
-      <button id="t-top" title="Vista superior (T)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8" stroke-linecap="round"/></svg>
-      </button>
+      <span class="tl">CREAR</span>
+      <button id="t-curve" aria-pressed="false" title="Dibujar curva NURBS (C)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18C7 4 17 20 21 6"/></svg></button>
+      <button id="t-plane" aria-pressed="false" title="Superficie plana: clic para colocarla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16l6-9h12l-6 9z"/></svg></button>
+      <button id="t-loft" title="Loft: superficie que pasa por 2 o más curvas seleccionadas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18c3-4 6-4 9-2s5 1 7-2M4 12c3-4 6-4 9-2s5 1 7-2M4 6c3-4 6-4 9-2s5 1 7-2"/></svg></button>
+      <button id="t-extrude" title="Extruir curvas seleccionadas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18c4-3 8 1 12-2M8 6c4-3 8 1 12-2M4 18l4-12M16 16l4-12"/></svg></button>
+      <button id="t-revolve" title="Revolución de una curva alrededor del eje Y"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><ellipse cx="12" cy="12" rx="8" ry="3"/><path d="M15 6c2 2 2 9 0 12"/></svg></button>
       <hr>
-      <button id="t-curve" aria-pressed="false" title="Dibujar curva NURBS (C)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 18C7 4 17 20 21 6"/></svg>
-      </button>
-      <button disabled title="Superficie por barrido (próximamente)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 16l6-9h12l-6 9z"/></svg>
-      </button>
-      <button disabled title="Extruir (próximamente)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 9l8-5 8 5v8l-8 4-8-4z M4 9l8 4 8-4 M12 13v8"/></svg>
-      </button>
-      <button disabled title="Redondeo de aristas (próximamente)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V12a8 8 0 0 1 8-8h8"/></svg>
-      </button>
-      <button disabled title="Booleanas (próximamente)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg>
-      </button>
+      <span class="tl">SÓLIDOS</span>
+      <button disabled title="Redondeo / fillet (próxima versión, con OpenCASCADE)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V12a8 8 0 0 1 8-8h8"/></svg></button>
+      <button disabled title="Chaflán (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10l6-6h10"/></svg></button>
+      <button disabled title="Booleanas (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg></button>
     </nav>
     <div class="drawbar" id="drawbar" hidden>
-      <span id="draw-msg">Toca el suelo para poner el primer punto</span>
+      <span id="draw-msg"></span>
       <button class="btn primary" id="draw-done">Terminar curva</button>
       <button class="btn" id="draw-cancel">Cancelar</button>
     </div>
-    <div class="hint" id="hint">Arrastrar: orbitar · Clic en un punto azul: seleccionar · Flechas del gizmo: moverlo · Rueda: zoom</div>
+    <div class="marquee" id="marquee" hidden></div>
+    <div class="toast" id="toast" hidden></div>
+    <div class="hint" id="hint"></div>
+    <div class="edge-tab" aria-hidden="true"></div>
+    <div class="edge-tab l" aria-hidden="true"></div>
   </main>
 
-  <aside class="panel" aria-label="Propiedades">
+  <aside class="panel" id="panel" aria-label="Propiedades">
+    <div class="panel-head">
+      <span>Propiedades</span>
+      <button class="iconbtn" id="pin" aria-pressed="false" title="Panel automático: clic para fijarlo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 5 3 3H7l3-3zM12 15v6"/></svg></button>
+    </div>
+
     <section class="sec">
-      <h2>Navegación</h2>
-      <div class="seg" role="group" aria-label="Estilo de navegación" style="margin-left:0; align-self:flex-start">
-        <button id="nav-alias" data-nav="alias" aria-pressed="true">Alias</button>
-        <button id="nav-simple" data-nav="simple" aria-pressed="false">Simple / táctil</button>
+      <h2>Escena · <span id="scene-count"></span></h2>
+      <ul class="outliner" id="outliner"></ul>
+    </section>
+
+    <section class="sec">
+      <h2>Selección</h2>
+      <div id="sel-body"></div>
+    </section>
+
+    <section class="sec">
+      <h2>Crear desde curvas</h2>
+      <div class="ops">
+        <button class="btn" id="b-loft" title="Superficie que pasa por las curvas seleccionadas, en orden">Loft</button>
+        <button class="btn" id="b-extrude" title="Extruir las curvas seleccionadas">Extruir</button>
+        <button class="btn" id="b-revolve" title="Girar la curva alrededor del eje Y">Revolución</button>
       </div>
-      <p class="muted" id="nav-help"></p>
+      <div class="row"><label for="op-dist">Distancia</label><input id="op-dist" type="range" min="0.2" max="6" step="0.1" value="1.5"><output id="op-dist-o">1.5</output></div>
+      <p class="muted">Selecciona curvas en modo Objetos y pulsa una operación. Para el loft importa el orden de selección.</p>
     </section>
 
     <section class="sec">
       <h2>Materiales</h2>
       <div class="matlib" id="matlib"></div>
       <div class="row"><label for="rough">Rugosidad</label><input id="rough" type="range" min="0" max="1" step="0.01" value="0.35"><output id="rough-o">0.35</output></div>
+      <p class="muted">Se aplica a las superficies seleccionadas; si no hay ninguna, a todas.</p>
     </section>
 
     <section class="sec">
-      <h2>Punto de control</h2>
-      <p class="muted" id="cv-name">CV [2, 3] seleccionado</p>
-      <div class="coords">
-        <div class="coord"><b class="x">X</b><span id="cx">0.00</span></div>
-        <div class="coord"><b class="y">Y</b><span id="cy">0.00</span></div>
-        <div class="coord"><b class="z">Z</b><span id="cz">0.00</span></div>
+      <h2>Dibujo</h2>
+      <div class="seg small" role="group" aria-label="Plano de dibujo" style="margin-left:0; align-self:flex-start">
+        <button id="plane-xz" data-plane="xz" aria-pressed="true">Suelo (XZ)</button>
+        <button id="plane-xy" data-plane="xy" aria-pressed="false">Frontal (XY)</button>
       </div>
-      <div class="row"><label for="weight">Peso (w)</label><input id="weight" type="range" min="0.2" max="5" step="0.05" value="1"><output id="weight-o">1.00</output></div>
-      <p class="muted">El peso es lo que hace a una superficie NURBS “racional”: un peso mayor atrae la superficie hacia el punto.</p>
+      <label class="check"><input type="checkbox" id="snap" checked> Imán a la cuadrícula</label>
     </section>
 
     <section class="sec">
-      <h2>Curvas</h2>
-      <p class="muted" id="curve-count">1 curva en la escena.</p>
+      <h2>Análisis</h2>
+      <div class="row"><label for="zfreq">Franjas cebra</label><input id="zfreq" type="range" min="4" max="40" step="1" value="14"><output id="zfreq-o">14</output></div>
       <label class="check"><input type="checkbox" id="show-comb" checked> Peine de curvatura</label>
       <div class="row"><label for="comb">Escala peine</label><input id="comb" type="range" min="0.1" max="4" step="0.1" value="0.8"><output id="comb-o">0.8</output></div>
-      <label class="check"><input type="checkbox" id="snap" checked> Imán a la cuadrícula</label>
-      <button class="btn" id="del-curve" disabled>Eliminar curva seleccionada</button>
-      <p class="muted">El peine dibuja la curvatura en cada punto. Si su borde es suave, la curva fluye bien; los saltos bruscos delatan imperfecciones.</p>
-    </section>
-
-    <section class="sec">
-      <h2>Análisis cebra</h2>
-      <div class="row"><label for="zfreq">Franjas</label><input id="zfreq" type="range" min="4" max="40" step="1" value="14"><output id="zfreq-o">14</output></div>
-      <p class="muted">Franjas continuas y suaves indican continuidad de curvatura (G2), como en Alias.</p>
-    </section>
-
-    <section class="sec">
-      <h2>Superficie</h2>
+      <label class="check"><input type="checkbox" id="show-iso" checked> Isoparamétricas</label>
       <div class="row"><label for="res">Teselado</label><input id="res" type="range" min="16" max="140" step="2" value="90"><output id="res-o">90</output></div>
-      <label class="check"><input type="checkbox" id="show-surf" checked> Mostrar superficie</label>
-      <label class="check"><input type="checkbox" id="show-cv" checked> Mostrar puntos de control</label>
-      <label class="check"><input type="checkbox" id="show-iso" checked> Mostrar isoparamétricas</label>
-      <button class="btn" id="reset">Restablecer superficie</button>
+    </section>
+
+    <section class="sec">
+      <h2>Navegación</h2>
+      <div class="seg small" role="group" aria-label="Estilo de navegación" style="margin-left:0; align-self:flex-start">
+        <button id="nav-alias" data-nav="alias" aria-pressed="true">Alias (ratón)</button>
+        <button id="nav-simple" data-nav="simple" aria-pressed="false">Touchpad</button>
+      </div>
+      <p class="muted" id="nav-help"></p>
     </section>
   </aside>
 
   <footer class="status">
     <span><span class="dot"></span>Listo</span>
-    <span>NURBS grado 3×3</span>
-    <span>6×6 CVs</span>
-    <span id="st-tris">— triángulos</span>
-    <span class="r" id="st-scene">Unidades: dm · Escena: 1 superficie</span>
+    <span id="st-sel">Nada seleccionado</span>
+    <span class="r" id="st-scene"></span>
   </footer>
 </div>
 
@@ -301,800 +336,6 @@
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 } }
 </script>
-<script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import { NURBSSurface } from 'three/addons/curves/NURBSSurface.js';
-import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { NURBSCurve } from 'three/addons/curves/NURBSCurve.js';
-import { Line2 } from 'three/addons/lines/Line2.js';
-import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
-import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
-
-const $ = (id) => document.getElementById(id);
-const view = $('view');
-
-// ---------- Renderer y escena ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.shadowMap.autoUpdate = false; // la sombra se calcula una vez por cuadro aunque haya dos vistas
-renderer.setScissorTest(true);
-view.prepend(renderer.domElement);
-$('loading').remove();
-
-const scene = new THREE.Scene();
-const diagBg = new THREE.Color('#14171b');
-const renderBg = (() => {
-  const c = document.createElement('canvas'); c.width = 16; c.height = 256;
-  const g = c.getContext('2d'), grd = g.createLinearGradient(0, 0, 0, 256);
-  grd.addColorStop(0, '#2b3038'); grd.addColorStop(0.6, '#1a1d22'); grd.addColorStop(1, '#101215');
-  g.fillStyle = grd; g.fillRect(0, 0, 16, 256);
-  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
-})();
-scene.background = diagBg;
-// Capa 1 = solo en la vista de diagnóstico (cuadrícula, isoparamétricas, peines, polígonos de control)
-const DIAG = 1;
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
-
-const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 200);
-camera.position.set(7.5, 5.2, 8.5);
-const orbit = new OrbitControls(camera, renderer.domElement);
-orbit.target.set(0, 0.6, 0);
-orbit.enableDamping = true;
-
-// Navegación estilo Alias: Shift + Alt (Option en Mac) y botón izquierdo = girar, central = desplazar, derecho = acercar.
-// Sin esas teclas el ratón queda libre para seleccionar y dibujar. La rueda siempre hace zoom.
-const NAV_ALIAS = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.DOLLY };
-const NAV_OFF = { LEFT: -1, MIDDLE: -1, RIGHT: -1 };
-const NAV_SIMPLE = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
-const NAV_HELP = {
-  alias: 'Mantén Shift + Alt (Option en Mac) y arrastra: botón izquierdo gira, central desplaza, derecho acerca o aleja.',
-  simple: 'Arrastra para girar, botón derecho para desplazar, rueda para zoom. En el celular: un dedo gira, dos dedos acercan y desplazan.',
-};
-let navStyle = matchMedia('(pointer: coarse)').matches ? 'simple' : 'alias';
-let navHeld = false;
-function applyNav() {
-  orbit.mouseButtons = navStyle === 'simple' ? NAV_SIMPLE : navHeld ? NAV_ALIAS : NAV_OFF;
-  renderer.domElement.style.cursor = navStyle === 'alias' && navHeld ? 'move' : '';
-}
-function setNavStyle(st) {
-  navStyle = st;
-  document.querySelectorAll('[data-nav]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.nav === st)));
-  $('nav-help').textContent = NAV_HELP[st];
-  if (typeof tool !== 'undefined') $('hint').textContent = hintFor(tool);
-  applyNav();
-}
-function trackMods(e) {
-  const held = e.shiftKey && e.altKey;
-  if (held !== navHeld) { navHeld = held; applyNav(); }
-}
-addEventListener('keydown', (e) => { if (e.key === 'Alt') e.preventDefault(); trackMods(e); });
-addEventListener('keyup', trackMods);
-addEventListener('pointerdown', trackMods, true);
-addEventListener('blur', () => { navHeld = false; applyNav(); });
-document.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => setNavStyle(b.dataset.nav)));
-
-const key = new THREE.DirectionalLight(0xffffff, 1.6);
-key.position.set(4, 9, 3);
-key.castShadow = true;
-key.shadow.mapSize.set(2048, 2048);
-key.shadow.camera.left = -6; key.shadow.camera.right = 6;
-key.shadow.camera.top = 6; key.shadow.camera.bottom = -6;
-key.shadow.radius = 6;
-scene.add(key);
-
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: 0.35 }));
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
-const grid = new THREE.GridHelper(30, 30, 0x3a414a, 0x23282e);
-grid.position.y = 0.001;
-grid.layers.set(DIAG);
-scene.add(grid);
-
-// ---------- Superficie NURBS ----------
-const NU = 6, NV = 6, DEG = 3;
-const knots = [0, 0, 0, 0, 1 / 3, 2 / 3, 1, 1, 1, 1];
-let cps = [];
-function initialCPs() {
-  const out = [];
-  for (let i = 0; i < NU; i++) {
-    const row = [], u = i / (NU - 1);
-    for (let j = 0; j < NV; j++) {
-      const v = j / (NV - 1);
-      const x = (u - 0.5) * 6.4;
-      const z = (v - 0.5) * 4.4;
-      const crown = Math.pow(Math.sin(Math.PI * u), 1.1) * (0.55 + 0.45 * Math.sin(Math.PI * v));
-      const y = 0.35 + 1.35 * crown + 0.45 * u;
-      row.push(new THREE.Vector4(x, y, z, 1));
-    }
-    out.push(row);
-  }
-  return out;
-}
-
-const materials = {
-  paint: new THREE.MeshPhysicalMaterial({ color: '#b0121c', metalness: 0.55, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.03, side: THREE.DoubleSide }),
-  black: new THREE.MeshPhysicalMaterial({ color: '#111216', metalness: 0.7, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.02, side: THREE.DoubleSide }),
-  pearl: new THREE.MeshPhysicalMaterial({ color: '#1d3f8c', metalness: 0.6, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03, iridescence: 0.6, iridescenceIOR: 1.4, side: THREE.DoubleSide }),
-  alu: new THREE.MeshPhysicalMaterial({ color: '#cfd3d8', metalness: 1, roughness: 0.22, side: THREE.DoubleSide }),
-  chrome: new THREE.MeshPhysicalMaterial({ color: '#ffffff', metalness: 1, roughness: 0.04, side: THREE.DoubleSide }),
-  ceram: new THREE.MeshPhysicalMaterial({ color: '#f1ede6', metalness: 0, roughness: 0.18, clearcoat: 0.8, clearcoatRoughness: 0.05, side: THREE.DoubleSide }),
-  glass: new THREE.MeshPhysicalMaterial({ color: '#e4f5ff', metalness: 0, roughness: 0.03, transmission: 1, thickness: 0.4, ior: 1.5, side: THREE.DoubleSide }),
-  plastic: new THREE.MeshPhysicalMaterial({ color: '#1c1d20', metalness: 0, roughness: 0.55, side: THREE.DoubleSide }),
-  clay: new THREE.MeshPhysicalMaterial({ color: '#b3a08c', metalness: 0, roughness: 0.85, side: THREE.DoubleSide }),
-};
-const MAT_NAMES = { paint: 'Pintura roja', black: 'Negro metalizado', pearl: 'Azul perlado', alu: 'Aluminio', chrome: 'Cromo', ceram: 'Cerámica', glass: 'Vidrio', plastic: 'Plástico negro', clay: 'Arcilla' };
-const zebraMat = new THREE.ShaderMaterial({
-  side: THREE.DoubleSide,
-  uniforms: { uFreq: { value: 14 } },
-  vertexShader: `
-    varying vec3 vN; varying vec3 vV;
-    void main() {
-      vec4 mv = modelViewMatrix * vec4(position, 1.0);
-      vN = normalize(normalMatrix * normal);
-      vV = mv.xyz;
-      gl_Position = projectionMatrix * mv;
-    }`,
-  fragmentShader: `
-    uniform float uFreq; varying vec3 vN; varying vec3 vV;
-    void main() {
-      vec3 n = normalize(vN);
-      if (!gl_FrontFacing) n = -n;
-      vec3 r = reflect(normalize(vV), n);
-      float s = (r.y * 0.5 + 0.5) * uFreq;
-      float f = fract(s);
-      float w = fwidth(s) * 1.2;
-      float stripe = smoothstep(0.5 - w, 0.5 + w, f) - smoothstep(1.0 - w, 1.0, f);
-      float shade = 0.82 + 0.18 * max(dot(n, normalize(vec3(0.3, 1.0, 0.5))), 0.0);
-      gl_FragColor = vec4(vec3(mix(0.06, 0.96, stripe) * shade), 1.0);
-    }`,
-});
-zebraMat.extensions = { derivatives: true };
-const curvMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
-const wireMat = new THREE.MeshBasicMaterial({ color: '#57b6ff', wireframe: true, transparent: true, opacity: 0.55 });
-
-let surface, mesh, isoLines, hullLines;
-let diagMode = 'zebra', layout = 'split', matKey = 'paint', res = 90;
-
-function evalSurface() {
-  surface = new NURBSSurface(DEG, DEG, knots, knots, cps);
-}
-
-function curvatureColors(geo, seg) {
-  const pos = geo.attributes.position, nor = geo.attributes.normal;
-  const n = seg + 1, count = pos.count;
-  const k = new Float32Array(count);
-  const P = (i) => new THREE.Vector3().fromBufferAttribute(pos, i);
-  const idx = (a, b) => Math.min(n - 1, Math.max(0, a)) * n + Math.min(n - 1, Math.max(0, b));
-  let maxAbs = 1e-6;
-  for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
-    const ia = Math.min(n - 2, Math.max(1, a)), ib = Math.min(n - 2, Math.max(1, b));
-    const c = idx(ia, ib), p = P(c);
-    const nb = [idx(ia - 1, ib), idx(ia + 1, ib), idx(ia, ib - 1), idx(ia, ib + 1)].map(P);
-    const avg = nb.reduce((s, q) => s.add(q), new THREE.Vector3()).multiplyScalar(0.25);
-    const e2 = nb.reduce((s, q) => s + q.distanceToSquared(p), 0) / 4;
-    const L = avg.sub(p);
-    const nn = new THREE.Vector3().fromBufferAttribute(nor, c);
-    const val = (2 * L.dot(nn)) / Math.max(e2, 1e-9);
-    k[a * n + b] = val;
-    maxAbs = Math.max(maxAbs, Math.abs(val));
-  }
-  const ramp = ['#2b6cff', '#27c2b5', '#e9e46a', '#ff6a3d', '#d81b4a'].map((h) => new THREE.Color(h));
-  const colors = new Float32Array(count * 3), tmp = new THREE.Color();
-  const scale = Math.min(maxAbs, 1.2);
-  for (let i = 0; i < count; i++) {
-    const t = THREE.MathUtils.clamp(0.5 + 0.5 * (k[i] / scale), 0, 1) * (ramp.length - 1);
-    const lo = Math.floor(t), hi = Math.min(ramp.length - 1, lo + 1);
-    tmp.copy(ramp[lo]).lerp(ramp[hi], t - lo);
-    colors.set([tmp.r, tmp.g, tmp.b], i * 3);
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-}
-
-function diagMaterial() {
-  if (diagMode === 'curv') return curvMat;
-  if (diagMode === 'wire') return wireMat;
-  return zebraMat;
-}
-
-function buildIso() {
-  const pts = [], N = 10, S = 60, t = new THREE.Vector3();
-  for (let i = 0; i <= N; i++) {
-    const c = i / N;
-    for (let s = 0; s < S; s++) {
-      surface.getPoint(c, s / S, t); pts.push(t.x, t.y, t.z);
-      surface.getPoint(c, (s + 1) / S, t); pts.push(t.x, t.y, t.z);
-      surface.getPoint(s / S, c, t); pts.push(t.x, t.y, t.z);
-      surface.getPoint((s + 1) / S, c, t); pts.push(t.x, t.y, t.z);
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  return g;
-}
-
-function buildHull() {
-  const pts = [];
-  for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) {
-    const p = cps[i][j];
-    if (i < NU - 1) { const q = cps[i + 1][j]; pts.push(p.x, p.y, p.z, q.x, q.y, q.z); }
-    if (j < NV - 1) { const q = cps[i][j + 1]; pts.push(p.x, p.y, p.z, q.x, q.y, q.z); }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  return g;
-}
-
-const isoMat = new THREE.LineBasicMaterial({ color: '#0b0d10', transparent: true, opacity: 0.35 });
-const hullMat = new THREE.LineDashedMaterial({ color: '#57b6ff', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.7 });
-
-function rebuild() {
-  evalSurface();
-  const geo = new ParametricGeometry((u, v, target) => surface.getPoint(u, v, target), res, res);
-  if (diagMode === 'curv') curvatureColors(geo, res);
-  if (!mesh) {
-    mesh = new THREE.Mesh(geo, materials[matKey]);
-    mesh.castShadow = true;
-    scene.add(mesh);
-  } else {
-    mesh.geometry.dispose();
-    mesh.geometry = geo;
-  }
-  if (isoLines) { isoLines.geometry.dispose(); isoLines.geometry = buildIso(); }
-  else { isoLines = new THREE.LineSegments(buildIso(), isoMat); isoLines.layers.set(DIAG); scene.add(isoLines); }
-  if (hullLines) { hullLines.geometry.dispose(); hullLines.geometry = buildHull(); }
-  else { hullLines = new THREE.LineSegments(buildHull(), hullMat); hullLines.layers.set(DIAG); scene.add(hullLines); }
-  hullLines.computeLineDistances();
-  isoLines.visible = $('show-iso').checked && diagMode !== 'wire';
-  hullLines.visible = $('show-cv').checked;
-  $('st-tris').textContent = (res * res * 2).toLocaleString('es') + ' triángulos';
-}
-
-// ---------- Curvas NURBS ----------
-const curveMat = new LineMaterial({ color: 0xe9edf2, linewidth: 2.5 });
-const draftMat = new LineMaterial({ color: 0xf0a63a, linewidth: 2, dashed: false });
-const combMat = new THREE.LineBasicMaterial({ color: '#f0a63a', transparent: true, opacity: 0.55 });
-const envMat = new THREE.LineBasicMaterial({ color: '#f0a63a' });
-const curves = [];
-let combScale = 0.8;
-
-function clampedKnots(n, p) {
-  const k = [];
-  for (let i = 0; i <= p; i++) k.push(0);
-  const inner = n - p - 1;
-  for (let i = 1; i <= inner; i++) k.push(i / (inner + 1));
-  for (let i = 0; i <= p; i++) k.push(1);
-  return k;
-}
-function nurbsCurve(cpsArr) {
-  const p = Math.min(3, cpsArr.length - 1);
-  return new NURBSCurve(p, clampedKnots(cpsArr.length, p), cpsArr);
-}
-
-function makeCurveObj(withHandles) {
-  const obj = {
-    cps: [],
-    line: new Line2(new LineGeometry(), withHandles ? curveMat : draftMat),
-    hull: new THREE.Line(new THREE.BufferGeometry(), hullMat),
-    comb: new THREE.LineSegments(new THREE.BufferGeometry(), combMat),
-    env: new THREE.Line(new THREE.BufferGeometry(), envMat),
-    handles: new THREE.Group(),
-  };
-  obj.line.renderOrder = 5;
-  for (const o of [obj.hull, obj.comb, obj.env]) o.layers.set(DIAG);
-  scene.add(obj.line, obj.hull, obj.comb, obj.env, obj.handles);
-  return obj;
-}
-
-function removeCurveObj(obj) {
-  for (const o of [obj.line, obj.hull, obj.comb, obj.env]) { o.geometry.dispose(); scene.remove(o); }
-  scene.remove(obj.handles);
-}
-
-function updateCurveObj(obj, index) {
-  const n = obj.cps.length;
-  const show = n >= 2;
-  obj.line.visible = show;
-  if (show) {
-    const crv = nurbsCurve(obj.cps), S = 200, pos = [];
-    for (let s = 0; s <= S; s++) { const p = crv.getPoint(s / S); pos.push(p.x, p.y, p.z); }
-    const g = new LineGeometry(); g.setPositions(pos);
-    obj.line.geometry.dispose(); obj.line.geometry = g;
-    buildComb(obj, crv);
-  }
-  obj.comb.visible = obj.env.visible = show && $('show-comb').checked;
-  const hp = obj.cps.flatMap((p) => [p.x, p.y, p.z]);
-  obj.hull.geometry.dispose();
-  obj.hull.geometry = new THREE.BufferGeometry();
-  obj.hull.geometry.setAttribute('position', new THREE.Float32BufferAttribute(hp, 3));
-  obj.hull.computeLineDistances();
-  obj.hull.visible = $('show-cv').checked;
-  obj.handles.clear();
-  obj.cps.forEach((p, k) => {
-    const h = new THREE.Mesh(handleGeo, selected && selected.userData.kind === 'curve' && selected.userData.c === index && selected.userData.k === k ? handleSelMat : handleMat);
-    h.position.set(p.x, p.y, p.z);
-    h.userData = { kind: 'curve', c: index, k };
-    h.renderOrder = 10;
-    obj.handles.add(h);
-  });
-  obj.handles.visible = $('show-cv').checked;
-}
-
-function buildComb(obj, crv) {
-  const S = 140, h = 1e-3, segs = [], env = [];
-  const at = (t) => crv.getPoint(THREE.MathUtils.clamp(t, 0, 1));
-  for (let s = 0; s <= S; s++) {
-    const t = s / S;
-    const t0 = Math.max(0, t - h), t1 = Math.min(1, t + h), dt = t1 - t0;
-    const p = at(t), a = at(t0), b = at(t1), m = at((t0 + t1) / 2);
-    const d1 = b.clone().sub(a).divideScalar(dt);
-    const d2 = b.clone().add(a).sub(m.clone().multiplyScalar(2)).divideScalar((dt / 2) ** 2);
-    const sp = d1.length();
-    if (sp < 1e-6) continue;
-    const kappa = d1.clone().cross(d2).length() / sp ** 3;
-    const nrm = d2.clone().sub(d1.clone().multiplyScalar(d1.dot(d2) / (sp * sp)));
-    if (nrm.lengthSq() < 1e-12) nrm.set(0, 0, 0); else nrm.normalize();
-    const tip = p.clone().addScaledVector(nrm, -kappa * combScale);
-    if (s % 2 === 0) segs.push(p.x, p.y, p.z, tip.x, tip.y, tip.z);
-    env.push(tip.x, tip.y, tip.z);
-  }
-  obj.comb.geometry.dispose();
-  obj.comb.geometry = new THREE.BufferGeometry();
-  obj.comb.geometry.setAttribute('position', new THREE.Float32BufferAttribute(segs, 3));
-  obj.env.geometry.dispose();
-  obj.env.geometry = new THREE.BufferGeometry();
-  obj.env.geometry.setAttribute('position', new THREE.Float32BufferAttribute(env, 3));
-}
-
-function addCurve(points) {
-  const obj = makeCurveObj(true);
-  obj.cps = points.map((p) => new THREE.Vector4(p.x, p.y, p.z, 1));
-  curves.push(obj);
-  updateCurveObj(obj, curves.length - 1);
-  updateSceneInfo();
-  return obj;
-}
-
-function refreshCurves() { curves.forEach((c, i) => updateCurveObj(c, i)); }
-
-function updateSceneInfo() {
-  const n = curves.length;
-  const txt = n === 1 ? '1 curva' : `${n} curvas`;
-  $('curve-count').textContent = n ? `${txt} en la escena.` : 'Sin curvas. Usa la herramienta de curva para dibujar una.';
-  $('st-scene').textContent = `Unidades: dm · Escena: 1 superficie · ${txt}`;
-}
-
-// ---------- Puntos de control y selección ----------
-const handleGeo = new THREE.SphereGeometry(0.075, 16, 12);
-const handleMat = new THREE.MeshBasicMaterial({ color: '#57b6ff', depthTest: false, transparent: true });
-const handleSelMat = new THREE.MeshBasicMaterial({ color: '#f0a63a', depthTest: false, transparent: true });
-const handles = new THREE.Group();
-scene.add(handles);
-
-function buildHandles() {
-  handles.clear();
-  for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) {
-    const h = new THREE.Mesh(handleGeo, handleMat);
-    h.position.set(cps[i][j].x, cps[i][j].y, cps[i][j].z);
-    h.userData = { kind: 'surf', i, j };
-    h.renderOrder = 10;
-    handles.add(h);
-  }
-}
-
-function cpOf(ud) { return ud.kind === 'surf' ? cps[ud.i][ud.j] : curves[ud.c].cps[ud.k]; }
-
-const gizmo = new TransformControls(camera, renderer.domElement);
-gizmo.setSize(0.8);
-// El gizmo calcula el puntero sobre todo el lienzo; con la vista dividida hay que medirlo dentro de la mitad que se toca.
-gizmo._getPointer = (e) => { const n = paneNDC(e, dragPane || paneAt(e.clientX)); return { x: n.x, y: n.y, button: e.button }; };
-scene.add(gizmo);
-gizmo.addEventListener('dragging-changed', (e) => { orbit.enabled = !e.value; });
-let selected = null;
-
-function select(h) {
-  if (selected) selected.material = handleMat;
-  selected = h;
-  if (h) {
-    h.material = handleSelMat;
-    gizmo.attach(h);
-    const ud = h.userData;
-    $('cv-name').textContent = ud.kind === 'surf' ? `CV [${ud.i}, ${ud.j}] de la superficie` : `Curva ${ud.c + 1} · CV ${ud.k}`;
-    $('weight').disabled = false;
-    $('weight').value = cpOf(ud).w;
-  } else {
-    gizmo.detach();
-    $('cv-name').textContent = 'Ningún punto seleccionado. Haz clic en un punto azul.';
-    $('weight').disabled = true;
-  }
-  $('del-curve').disabled = !(h && h.userData.kind === 'curve');
-  updateCVPanel();
-}
-
-function updateCVPanel() {
-  const fmt = (v) => v.toFixed(2);
-  if (!selected) { ['cx', 'cy', 'cz'].forEach((id) => ($(id).textContent = '—')); $('weight-o').textContent = '—'; return; }
-  const p = cpOf(selected.userData);
-  $('cx').textContent = fmt(p.x); $('cy').textContent = fmt(p.y); $('cz').textContent = fmt(p.z);
-  $('weight-o').textContent = fmt(p.w);
-}
-
-function afterCPChange() {
-  const ud = selected.userData;
-  if (ud.kind === 'surf') rebuild();
-  else {
-    // Las asas de la curva se regeneran: se vuelve a enganchar el gizmo a la nueva asa.
-    updateCurveObj(curves[ud.c], ud.c);
-    const h = curves[ud.c].handles.children[ud.k];
-    selected = h; gizmo.attach(h);
-  }
-}
-
-let pending = false;
-gizmo.addEventListener('objectChange', () => {
-  const p = cpOf(selected.userData);
-  p.x = selected.position.x; p.y = selected.position.y; p.z = selected.position.z;
-  updateCVPanel();
-  if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; afterCPChange(); }); }
-});
-
-// ---------- Herramientas ----------
-let tool = 'select';
-let draft = null; // { pts: Vector3[], obj }
-const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
-const drawPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.01);
-
-function setRay(e) {
-  const n = paneNDC(e, dragPane || paneAt(e.clientX));
-  mouse.set(n.x, n.y);
-  ray.setFromCamera(mouse, camera);
-}
-function planePoint(e) {
-  setRay(e);
-  const p = ray.ray.intersectPlane(drawPlane, new THREE.Vector3());
-  if (p && $('snap').checked) { p.x = Math.round(p.x * 4) / 4; p.z = Math.round(p.z * 4) / 4; }
-  return p;
-}
-
-function hintFor(t) {
-  if (t === 'curve') return HINTS.curve;
-  return navStyle === 'alias'
-    ? 'Shift+Alt + izq: girar · medio: desplazar · der: zoom · Clic en un punto: seleccionar · Espacio: menú radial'
-    : HINTS.select;
-}
-const HINTS = {
-  select: 'Arrastrar: orbitar · Clic en un punto azul: seleccionar · Flechas del gizmo: moverlo · Rueda: zoom',
-  curve: 'Clic en el suelo: añadir punto · Enter: terminar · Esc: cancelar · T: vista superior',
-};
-function setTool(t) {
-  if (tool === 'curve' && t !== 'curve') cancelDraft();
-  tool = t;
-  $('t-select').setAttribute('aria-pressed', String(t === 'select'));
-  $('t-curve').setAttribute('aria-pressed', String(t === 'curve'));
-  $('hint').textContent = hintFor(t);
-  $('drawbar').hidden = t !== 'curve';
-  if (t === 'curve') { select(null); startDraft(); }
-}
-
-function startDraft() {
-  draft = { pts: [], hover: null, obj: makeCurveObj(false) };
-  showDraft();
-}
-function showDraft() {
-  if (!draft) return;
-  const pts = draft.hover ? [...draft.pts, draft.hover] : draft.pts;
-  draft.obj.cps = pts.map((p) => new THREE.Vector4(p.x, p.y, p.z, 1));
-  updateCurveObj(draft.obj, -1);
-  draft.obj.comb.visible = draft.obj.env.visible = false;
-  draft.obj.hull.visible = draft.obj.handles.visible = true;
-  const n = draft.pts.length;
-  $('draw-msg').textContent = n === 0 ? 'Toca el suelo para poner el primer punto' : `${n} ${n === 1 ? 'punto' : 'puntos'} · sigue tocando para añadir más`;
-  $('draw-done').disabled = n < 2;
-}
-function finishDraft() {
-  if (!draft || draft.pts.length < 2) return;
-  const pts = draft.pts;
-  removeCurveObj(draft.obj); draft = null;
-  addCurve(pts);
-  startDraft();
-}
-function cancelDraft() {
-  if (!draft) return;
-  removeCurveObj(draft.obj); draft = null;
-}
-
-let downAt = null;
-renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
-renderer.domElement.addEventListener('pointermove', (e) => {
-  if (tool !== 'curve' || !draft || e.pointerType === 'touch' || e.buttons) return;
-  draft.hover = planePoint(e);
-  showDraft();
-});
-renderer.domElement.addEventListener('pointerleave', () => { if (draft) { draft.hover = null; showDraft(); } });
-renderer.domElement.addEventListener('pointerup', (e) => {
-  if (e.shiftKey && e.altKey) { downAt = null; return; } // estaba navegando
-  if (!downAt || gizmo.dragging) return;
-  const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
-  downAt = null;
-  if (moved > 4) return;
-  if (tool === 'curve') {
-    const p = planePoint(e);
-    if (p) { draft.pts.push(p); draft.hover = null; showDraft(); }
-    return;
-  }
-  setRay(e);
-  const pickables = [...(handles.visible ? handles.children : []), ...curves.flatMap((c) => (c.handles.visible ? c.handles.children : []))];
-  const hit = ray.intersectObjects(pickables)[0];
-  if (hit) select(hit.object);
-  else if (!gizmo.axis) select(null);
-});
-
-// ---------- Interfaz ----------
-function setDiag(m) {
-  diagMode = m;
-  document.querySelectorAll('[data-diag]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.diag === m)));
-  if (layout === 'render') setLayout('split');
-  updatePaneUI();
-  rebuild();
-}
-document.querySelectorAll('[data-diag]').forEach((b) => b.addEventListener('click', () => setDiag(b.dataset.diag)));
-
-const LAYOUTS = ['split', 'diag', 'render'];
-const LAYOUT_NAMES = { split: 'Dividida', diag: 'Diagnóstico', render: 'Render' };
-function setLayout(l) {
-  layout = l;
-  document.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === l)));
-  updatePaneUI();
-  resize();
-}
-function cycleLayout() { setLayout(LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length]); }
-document.querySelectorAll('[data-layout]').forEach((b) => b.addEventListener('click', () => setLayout(b.dataset.layout)));
-function updatePaneUI() {
-  $('pane-diag').hidden = layout === 'render';
-  $('pane-render').hidden = layout === 'diag';
-  $('pane-diag').className = 'pane left' + (layout === 'diag' ? ' full' : '');
-  $('pane-render').className = 'pane right' + (layout === 'render' ? ' full' : '');
-  $('legend').hidden = diagMode !== 'curv';
-}
-
-function setMaterial(k) {
-  matKey = k;
-  document.querySelectorAll('.mat').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.mat === k)));
-  $('rough').value = materials[k].roughness;
-  $('rough-o').textContent = (+materials[k].roughness).toFixed(2);
-  $('mat-name').textContent = MAT_NAMES[k];
-  if (layout === 'diag') setLayout('split');
-}
-// Miniaturas: una esfera con cada material, renderizada una sola vez en un lienzo aparte.
-function buildMaterialLibrary() {
-  const lib = $('matlib');
-  for (const k of Object.keys(materials)) {
-    const b = document.createElement('button');
-    b.className = 'mat'; b.dataset.mat = k; b.id = 'mat-' + k;
-    b.setAttribute('aria-pressed', String(k === matKey));
-    b.innerHTML = `<span class="ph"></span>${MAT_NAMES[k]}`;
-    b.addEventListener('click', () => setMaterial(k));
-    lib.append(b);
-  }
-  requestAnimationFrame(() => {
-    const tr = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    tr.setSize(128, 128); tr.toneMapping = THREE.ACESFilmicToneMapping;
-    const ts = new THREE.Scene(); ts.background = new THREE.Color('#1b1f24');
-    ts.environment = new THREE.PMREMGenerator(tr).fromScene(new RoomEnvironment(tr), 0.04).texture;
-    const l = new THREE.DirectionalLight(0xffffff, 1.4); l.position.set(2, 3, 2); ts.add(l);
-    const tc = new THREE.PerspectiveCamera(30, 1, 0.1, 10); tc.position.set(0, 0.25, 3.9); tc.lookAt(0, 0, 0);
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48)); ts.add(ball);
-    for (const k of Object.keys(materials)) {
-      ball.material = materials[k];
-      tr.render(ts, tc);
-      const img = new Image(); img.alt = ''; img.src = tr.domElement.toDataURL();
-      $('mat-' + k).querySelector('.ph').replaceWith(img);
-    }
-    tr.dispose(); tr.forceContextLoss();
-  });
-}
-$('rough').addEventListener('input', (e) => {
-  materials[matKey].roughness = +e.target.value;
-  $('rough-o').textContent = (+e.target.value).toFixed(2);
-});
-$('weight').addEventListener('input', (e) => {
-  if (!selected) return;
-  cpOf(selected.userData).w = +e.target.value;
-  updateCVPanel(); afterCPChange();
-});
-$('zfreq').addEventListener('input', (e) => {
-  zebraMat.uniforms.uFreq.value = +e.target.value;
-  $('zfreq-o').textContent = e.target.value;
-  if (diagMode !== 'zebra') setDiag('zebra');
-});
-$('res').addEventListener('input', (e) => { res = +e.target.value; $('res-o').textContent = res; rebuild(); });
-$('show-surf').addEventListener('change', (e) => {
-  mesh.visible = isoLines.visible = e.target.checked;
-  if (e.target.checked) isoLines.visible = $('show-iso').checked && diagMode !== 'wire';
-});
-$('show-cv').addEventListener('change', (e) => {
-  handles.visible = e.target.checked; hullLines.visible = e.target.checked;
-  if (!e.target.checked) select(null);
-  refreshCurves();
-});
-$('show-iso').addEventListener('change', (e) => { isoLines.visible = e.target.checked && diagMode !== 'wire'; });
-$('show-comb').addEventListener('change', refreshCurves);
-$('comb').addEventListener('input', (e) => { combScale = +e.target.value; $('comb-o').textContent = combScale.toFixed(1); refreshCurves(); });
-$('reset').addEventListener('click', () => { cps = initialCPs(); buildHandles(); select(handles.children[2 * NV + 3]); rebuild(); });
-
-function deleteSelectedCurve() {
-  if (!selected || selected.userData.kind !== 'curve') return;
-  const c = selected.userData.c;
-  select(null);
-  removeCurveObj(curves[c]);
-  curves.splice(c, 1);
-  refreshCurves();
-  updateSceneInfo();
-}
-$('del-curve').addEventListener('click', deleteSelectedCurve);
-
-function frame() {
-  orbit.target.set(0, 0.6, 0.6);
-  camera.position.set(8, 6.4, 10.5);
-}
-function topView() {
-  orbit.target.set(0, 0, 0.6);
-  camera.position.set(0, 16, 0.6001);
-}
-$('t-frame').addEventListener('click', frame);
-$('t-top').addEventListener('click', topView);
-$('t-select').addEventListener('click', () => setTool('select'));
-$('t-curve').addEventListener('click', () => setTool(tool === 'curve' ? 'select' : 'curve'));
-$('draw-done').addEventListener('click', finishDraft);
-$('draw-cancel').addEventListener('click', () => setTool('select'));
-addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT') return;
-  const k = e.key.toLowerCase();
-  if (k === 'f') frame();
-  if (k === 't') topView();
-  if (k === 'c') setTool('curve');
-  if (k === 'v') cycleLayout();
-  if (k === '1') setDiag('zebra');
-  if (k === '2') setDiag('curv');
-  if (k === '3') setDiag('wire');
-  if (k === 'enter' && tool === 'curve') finishDraft();
-  if (k === 'escape') { if (tool === 'curve') setTool('select'); else select(null); }
-  if ((k === 'delete' || k === 'backspace') && selected?.userData.kind === 'curve') deleteSelectedCurve();
-});
-
-// ---------- Menú radial (mantener Espacio) ----------
-const RADIAL = [
-  { label: 'Curva', key: 'C', run: () => setTool('curve') },
-  { label: 'Cambiar vista', key: 'V', run: cycleLayout },
-  { label: 'Cebra', key: '1', run: () => setDiag('zebra') },
-  { label: 'Curvatura', key: '2', run: () => setDiag('curv') },
-  { label: 'Seleccionar', key: 'Esc', run: () => setTool('select') },
-  { label: 'Malla', key: '3', run: () => setDiag('wire') },
-  { label: 'Vista superior', key: 'T', run: topView },
-  { label: 'Encuadrar', key: 'F', run: frame },
-];
-const radialEl = $('radial');
-let radialOn = false, radialPick = -1, lastPtr = { x: innerWidth / 2, y: innerHeight / 2 }, radialAt = lastPtr;
-RADIAL.forEach((it, n) => {
-  const a = -Math.PI / 2 + (n / RADIAL.length) * Math.PI * 2;
-  const b = document.createElement('button');
-  b.className = 'item'; b.id = 'radial-' + n;
-  b.innerHTML = `${it.label}<kbd>${it.key}</kbd>`;
-  b.style.left = Math.cos(a) * 92 + 'px'; b.style.top = Math.sin(a) * 92 + 'px';
-  b.addEventListener('pointerenter', () => highlightRadial(n));
-  b.addEventListener('click', () => { radialPick = n; closeRadial(true); });
-  radialEl.append(b);
-});
-function highlightRadial(n) {
-  radialPick = n;
-  radialEl.querySelectorAll('.item').forEach((el, m) => el.classList.toggle('on', m === n));
-  $('radial-center').textContent = n >= 0 ? RADIAL[n].label : 'Suelta sobre una opción';
-}
-function openRadial() {
-  radialOn = true; radialAt = { ...lastPtr };
-  radialEl.style.left = radialAt.x + 'px'; radialEl.style.top = radialAt.y + 'px';
-  radialEl.hidden = false; highlightRadial(-1);
-}
-function closeRadial(run) {
-  if (!radialOn) return;
-  radialOn = false; radialEl.hidden = true;
-  if (run && radialPick >= 0) RADIAL[radialPick].run();
-}
-addEventListener('pointermove', (e) => {
-  lastPtr = { x: e.clientX, y: e.clientY };
-  if (!radialOn) return;
-  const dx = e.clientX - radialAt.x, dy = e.clientY - radialAt.y;
-  if (Math.hypot(dx, dy) < 30) return highlightRadial(-1);
-  const a = Math.atan2(dy, dx) + Math.PI / 2;
-  highlightRadial(Math.round(((a + Math.PI * 2) % (Math.PI * 2)) / (Math.PI * 2 / RADIAL.length)) % RADIAL.length);
-});
-addEventListener('keydown', (e) => {
-  if (e.code !== 'Space' || e.target.tagName === 'INPUT') return;
-  e.preventDefault();
-  if (!e.repeat && !radialOn) openRadial();
-}, true);
-addEventListener('keyup', (e) => {
-  if (e.code !== 'Space') return;
-  e.preventDefault();
-  closeRadial(true);
-}, true);
-
-// ---------- Vistas y dibujo ----------
-let dragPane = null;
-function panes() {
-  const w = view.clientWidth, h = Math.max(view.clientHeight, 1);
-  if (layout !== 'split') return [{ kind: layout, x: 0, w, h }];
-  const hw = Math.floor(w / 2);
-  return [{ kind: 'diag', x: 0, w: hw, h }, { kind: 'render', x: hw, w: w - hw, h }];
-}
-function paneAt(clientX) {
-  const x = clientX - renderer.domElement.getBoundingClientRect().left;
-  const ps = panes();
-  return ps.find((p) => x >= p.x && x < p.x + p.w) || ps[ps.length - 1];
-}
-function paneNDC(e, p) {
-  const r = renderer.domElement.getBoundingClientRect();
-  return { x: ((e.clientX - r.left - p.x) / p.w) * 2 - 1, y: -((e.clientY - r.top) / p.h) * 2 + 1 };
-}
-renderer.domElement.addEventListener('pointerdown', (e) => { dragPane = paneAt(e.clientX); }, true);
-addEventListener('pointerup', () => { requestAnimationFrame(() => { dragPane = null; }); });
-
-function renderPane(p) {
-  renderer.setViewport(p.x, 0, p.w, p.h);
-  renderer.setScissor(p.x, 0, p.w, p.h);
-  camera.aspect = p.w / p.h;
-  camera.updateProjectionMatrix();
-  const diag = p.kind === 'diag';
-  mesh.material = diag ? diagMaterial() : materials[matKey];
-  scene.background = diag ? diagBg : renderBg;
-  camera.layers.set(0);
-  if (diag) camera.layers.enable(DIAG);
-  renderer.render(scene, camera);
-}
-function renderFrame() {
-  orbit.update();
-  renderer.shadowMap.needsUpdate = true;
-  const ps = panes();
-  ps.forEach(renderPane);
-  // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
-  const p = dragPane || paneAt(lastPtr.x);
-  camera.aspect = p.w / p.h; camera.updateProjectionMatrix();
-}
-
-// ---------- Arranque ----------
-function resize() {
-  const w = view.clientWidth, h = view.clientHeight;
-  renderer.setSize(w, h, false);
-  const p = panes()[0];
-  curveMat.resolution.set(p.w, p.h);
-  draftMat.resolution.set(p.w, p.h);
-}
-new ResizeObserver(resize).observe(view);
-resize();
-buildMaterialLibrary();
-updatePaneUI();
-
-cps = initialCPs();
-buildHandles();
-rebuild();
-frame();
-// Curva de ejemplo frente a la superficie
-addCurve([[-3.25, 3.75], [-2, 2.75], [-0.5, 4.5], [1, 3], [2.25, 4.25], [3.25, 3.5]].map(([x, z]) => new THREE.Vector3(x, 0.01, z)));
-select(handles.children[2 * NV + 3]);
-
-renderer.setAnimationLoop(renderFrame);
-setNavStyle(navStyle);
-window.__cam = camera;
-window.__forja = { camera, handles, panes };
-window.__ready = true;
-</script>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>
