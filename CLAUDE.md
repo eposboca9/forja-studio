@@ -29,8 +29,19 @@ y Blender (render realista con shaders). Se empezó como app web para que cada a
 - Superficie NURBS 6×6 CVs, grado 3, nudos fijos, puntos editables con TransformControls y peso w.
 - Modos: Realista (MeshPhysicalMaterial + RoomEnvironment), Cebra (shader propio), Curvatura (Laplaciano discreto), Malla.
 
+## Hecho (v0.2)
+
+- Herramienta Curva (tecla C): clic en el plano y=0.01 añade CVs; Enter o botón "Terminar curva" la crea; Esc cancela.
+- Curvas NURBS clamped uniformes, grado min(3, n-1), dibujadas con Line2 (grosor en px).
+- Peine de curvatura con derivadas numéricas, escala ajustable; imán a cuadrícula de 0.25.
+- Selección genérica de CVs: userData.kind = 'surf' | 'curve'. Borrar curva con Supr o botón.
+- Vista superior (T), mostrar/ocultar superficie. Hay una curva de ejemplo al abrir.
+- Flujo de trabajo: la página se publica también como Artifact de Claude; index.html del repo = mismo contenido con <!doctype>/<head> añadidos.
+
 ## Siguiente paso
 
-1. Activar GitHub Pages (rama `main`, carpeta raíz) para tener un enlace público.
-2. Herramienta para dibujar curvas NURBS en el plano.
-3. Integrar OpenCASCADE (opencascade.js, WebAssembly) para sólidos, booleanas y redondeos.
+GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
+
+1. Superficie a partir de curvas (loft / barrido) usando las curvas dibujadas.
+2. Integrar OpenCASCADE (opencascade.js, WebAssembly) para sólidos, booleanas y redondeos.
+3. Guardar y abrir proyectos (archivo .json) y exportar a STEP/OBJ.

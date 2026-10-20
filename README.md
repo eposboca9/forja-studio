@@ -8,7 +8,7 @@ Aplicación de modelado 3D en el navegador que busca combinar lo mejor de tres m
 
 Todo con herramientas gratuitas y de código abierto.
 
-![Forja Studio en modo realista](docs/capturas/forja-realista.png)
+![Forja Studio v0.2 con curvas y peine de curvatura](docs/capturas/curvas-peine.png)
 
 ## Cómo probarla
 
@@ -17,9 +17,10 @@ Abre `index.html` en Chrome o Edge, o usa el enlace de GitHub Pages cuando esté
 - Arrastrar: orbitar la vista
 - Rueda: zoom
 - Clic en un punto azul: seleccionar un punto de control y moverlo con el gizmo
-- `F`: encuadrar · `Esc`: deseleccionar
+- `C`: dibujar curva · `Enter`: terminar curva · `T`: vista superior
+- `F`: encuadrar · `Esc`: cancelar o deseleccionar · `Supr`: borrar la curva seleccionada
 
-## Estado actual (demo v0.1)
+## Estado actual (demo v0.2)
 
 | Función | Estado |
 |---|---|
@@ -28,7 +29,10 @@ Abre `index.html` en Chrome o Edge, o usa el enlace de GitHub Pages cuando esté
 | Materiales realistas: pintura, aluminio, cerámica, vidrio, arcilla | ✅ |
 | Análisis cebra | ✅ |
 | Mapa de curvatura media | ✅ |
-| Curvas, barrido, extrusión, redondeo, booleanas | 🔜 |
+| Dibujar curvas NURBS (grado 3) sobre el suelo, con imán a la cuadrícula | ✅ |
+| Peine de curvatura (como Alias) | ✅ |
+| Editar y borrar curvas | ✅ |
+| Barrido, extrusión, redondeo, booleanas | 🔜 |
 
 ## Tecnología
 

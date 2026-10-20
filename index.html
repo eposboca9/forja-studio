@@ -71,6 +71,14 @@
   .tools hr { border: 0; border-top: 1px solid var(--line); margin: 3px 4px; }
   .vlabel { position: absolute; left: 12px; top: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; }
   .hint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); font-size: 11px; color: var(--muted); background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; white-space: nowrap; }
+  .drawbar {
+    position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px;
+    background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--accent); border-radius: 8px;
+    white-space: nowrap; font-size: 12px;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #1a1205; font-weight: 600; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
   .legend { position: absolute; right: 12px; top: 10px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
   .legend .bar { width: 140px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #2b6cff, #27c2b5, #e9e46a, #ff6a3d, #d81b4a); }
   .legend .ends { width: 140px; display: flex; justify-content: space-between; }
@@ -119,6 +127,8 @@
     .seg button { padding: 5px 8px; }
     .tools { top: auto; bottom: 10px; transform: none; flex-direction: row; }
     .tools hr { border-top: 0; border-left: 1px solid var(--line); margin: 4px 3px; }
+    .drawbar { left: 12px; right: 12px; transform: none; white-space: normal; flex-wrap: wrap; }
+    .drawbar span { flex: 1 1 100%; }
   }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -138,7 +148,7 @@
       <button id="m-curv" data-mode="curv" aria-pressed="false">Curvatura</button>
       <button id="m-wire" data-mode="wire" aria-pressed="false">Malla</button>
     </div>
-    <span class="tag">DEMO v0.1</span>
+    <span class="tag">DEMO v0.2</span>
   </header>
 
   <main class="view" id="view">
@@ -157,7 +167,11 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg>
       </button>
       <hr>
-      <button disabled title="Curva NURBS (próximamente)">
+      <button id="t-top" title="Vista superior (T)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8" stroke-linecap="round"/></svg>
+      </button>
+      <hr>
+      <button id="t-curve" aria-pressed="false" title="Dibujar curva NURBS (C)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 18C7 4 17 20 21 6"/></svg>
       </button>
       <button disabled title="Superficie por barrido (próximamente)">
@@ -173,7 +187,12 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg>
       </button>
     </nav>
-    <div class="hint">Arrastrar: orbitar · Clic en un punto azul: seleccionar · Flechas del gizmo: moverlo · Rueda: zoom</div>
+    <div class="drawbar" id="drawbar" hidden>
+      <span id="draw-msg">Toca el suelo para poner el primer punto</span>
+      <button class="btn primary" id="draw-done">Terminar curva</button>
+      <button class="btn" id="draw-cancel">Cancelar</button>
+    </div>
+    <div class="hint" id="hint">Arrastrar: orbitar · Clic en un punto azul: seleccionar · Flechas del gizmo: moverlo · Rueda: zoom</div>
   </main>
 
   <aside class="panel" aria-label="Propiedades">
@@ -202,6 +221,16 @@
     </section>
 
     <section class="sec">
+      <h2>Curvas</h2>
+      <p class="muted" id="curve-count">1 curva en la escena.</p>
+      <label class="check"><input type="checkbox" id="show-comb" checked> Peine de curvatura</label>
+      <div class="row"><label for="comb">Escala peine</label><input id="comb" type="range" min="0.1" max="4" step="0.1" value="0.8"><output id="comb-o">0.8</output></div>
+      <label class="check"><input type="checkbox" id="snap" checked> Imán a la cuadrícula</label>
+      <button class="btn" id="del-curve" disabled>Eliminar curva seleccionada</button>
+      <p class="muted">El peine dibuja la curvatura en cada punto. Si su borde es suave, la curva fluye bien; los saltos bruscos delatan imperfecciones.</p>
+    </section>
+
+    <section class="sec">
       <h2>Análisis cebra</h2>
       <div class="row"><label for="zfreq">Franjas</label><input id="zfreq" type="range" min="4" max="40" step="1" value="14"><output id="zfreq-o">14</output></div>
       <p class="muted">Franjas continuas y suaves indican continuidad de curvatura (G2), como en Alias.</p>
@@ -210,6 +239,7 @@
     <section class="sec">
       <h2>Superficie</h2>
       <div class="row"><label for="res">Teselado</label><input id="res" type="range" min="16" max="140" step="2" value="90"><output id="res-o">90</output></div>
+      <label class="check"><input type="checkbox" id="show-surf" checked> Mostrar superficie</label>
       <label class="check"><input type="checkbox" id="show-cv" checked> Mostrar puntos de control</label>
       <label class="check"><input type="checkbox" id="show-iso" checked> Mostrar isoparamétricas</label>
       <button class="btn" id="reset">Restablecer superficie</button>
@@ -221,7 +251,7 @@
     <span>NURBS grado 3×3</span>
     <span>6×6 CVs</span>
     <span id="st-tris">— triángulos</span>
-    <span class="r">Unidades: dm · Escena: 1 superficie</span>
+    <span class="r" id="st-scene">Unidades: dm · Escena: 1 superficie</span>
   </footer>
 </div>
 
@@ -238,6 +268,10 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { NURBSSurface } from 'three/addons/curves/NURBSSurface.js';
 import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { NURBSCurve } from 'three/addons/curves/NURBSCurve.js';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -436,7 +470,120 @@ function rebuild() {
   $('st-tris').textContent = (res * res * 2).toLocaleString('es') + ' triángulos';
 }
 
-// ---------- Puntos de control ----------
+// ---------- Curvas NURBS ----------
+const curveMat = new LineMaterial({ color: 0xe9edf2, linewidth: 2.5 });
+const draftMat = new LineMaterial({ color: 0xf0a63a, linewidth: 2, dashed: false });
+const combMat = new THREE.LineBasicMaterial({ color: '#f0a63a', transparent: true, opacity: 0.55 });
+const envMat = new THREE.LineBasicMaterial({ color: '#f0a63a' });
+const curves = [];
+let combScale = 0.8;
+
+function clampedKnots(n, p) {
+  const k = [];
+  for (let i = 0; i <= p; i++) k.push(0);
+  const inner = n - p - 1;
+  for (let i = 1; i <= inner; i++) k.push(i / (inner + 1));
+  for (let i = 0; i <= p; i++) k.push(1);
+  return k;
+}
+function nurbsCurve(cpsArr) {
+  const p = Math.min(3, cpsArr.length - 1);
+  return new NURBSCurve(p, clampedKnots(cpsArr.length, p), cpsArr);
+}
+
+function makeCurveObj(withHandles) {
+  const obj = {
+    cps: [],
+    line: new Line2(new LineGeometry(), withHandles ? curveMat : draftMat),
+    hull: new THREE.Line(new THREE.BufferGeometry(), hullMat),
+    comb: new THREE.LineSegments(new THREE.BufferGeometry(), combMat),
+    env: new THREE.Line(new THREE.BufferGeometry(), envMat),
+    handles: new THREE.Group(),
+  };
+  obj.line.renderOrder = 5;
+  scene.add(obj.line, obj.hull, obj.comb, obj.env, obj.handles);
+  return obj;
+}
+
+function removeCurveObj(obj) {
+  for (const o of [obj.line, obj.hull, obj.comb, obj.env]) { o.geometry.dispose(); scene.remove(o); }
+  scene.remove(obj.handles);
+}
+
+function updateCurveObj(obj, index) {
+  const n = obj.cps.length;
+  const show = n >= 2;
+  obj.line.visible = show;
+  if (show) {
+    const crv = nurbsCurve(obj.cps), S = 200, pos = [];
+    for (let s = 0; s <= S; s++) { const p = crv.getPoint(s / S); pos.push(p.x, p.y, p.z); }
+    const g = new LineGeometry(); g.setPositions(pos);
+    obj.line.geometry.dispose(); obj.line.geometry = g;
+    buildComb(obj, crv);
+  }
+  obj.comb.visible = obj.env.visible = show && $('show-comb').checked;
+  const hp = obj.cps.flatMap((p) => [p.x, p.y, p.z]);
+  obj.hull.geometry.dispose();
+  obj.hull.geometry = new THREE.BufferGeometry();
+  obj.hull.geometry.setAttribute('position', new THREE.Float32BufferAttribute(hp, 3));
+  obj.hull.computeLineDistances();
+  obj.hull.visible = $('show-cv').checked;
+  obj.handles.clear();
+  obj.cps.forEach((p, k) => {
+    const h = new THREE.Mesh(handleGeo, selected && selected.userData.kind === 'curve' && selected.userData.c === index && selected.userData.k === k ? handleSelMat : handleMat);
+    h.position.set(p.x, p.y, p.z);
+    h.userData = { kind: 'curve', c: index, k };
+    h.renderOrder = 10;
+    obj.handles.add(h);
+  });
+  obj.handles.visible = $('show-cv').checked;
+}
+
+function buildComb(obj, crv) {
+  const S = 140, h = 1e-3, segs = [], env = [];
+  const at = (t) => crv.getPoint(THREE.MathUtils.clamp(t, 0, 1));
+  for (let s = 0; s <= S; s++) {
+    const t = s / S;
+    const t0 = Math.max(0, t - h), t1 = Math.min(1, t + h), dt = t1 - t0;
+    const p = at(t), a = at(t0), b = at(t1), m = at((t0 + t1) / 2);
+    const d1 = b.clone().sub(a).divideScalar(dt);
+    const d2 = b.clone().add(a).sub(m.clone().multiplyScalar(2)).divideScalar((dt / 2) ** 2);
+    const sp = d1.length();
+    if (sp < 1e-6) continue;
+    const kappa = d1.clone().cross(d2).length() / sp ** 3;
+    const nrm = d2.clone().sub(d1.clone().multiplyScalar(d1.dot(d2) / (sp * sp)));
+    if (nrm.lengthSq() < 1e-12) nrm.set(0, 0, 0); else nrm.normalize();
+    const tip = p.clone().addScaledVector(nrm, -kappa * combScale);
+    if (s % 2 === 0) segs.push(p.x, p.y, p.z, tip.x, tip.y, tip.z);
+    env.push(tip.x, tip.y, tip.z);
+  }
+  obj.comb.geometry.dispose();
+  obj.comb.geometry = new THREE.BufferGeometry();
+  obj.comb.geometry.setAttribute('position', new THREE.Float32BufferAttribute(segs, 3));
+  obj.env.geometry.dispose();
+  obj.env.geometry = new THREE.BufferGeometry();
+  obj.env.geometry.setAttribute('position', new THREE.Float32BufferAttribute(env, 3));
+}
+
+function addCurve(points) {
+  const obj = makeCurveObj(true);
+  obj.cps = points.map((p) => new THREE.Vector4(p.x, p.y, p.z, 1));
+  curves.push(obj);
+  updateCurveObj(obj, curves.length - 1);
+  updateSceneInfo();
+  return obj;
+}
+
+function refreshCurves() { curves.forEach((c, i) => updateCurveObj(c, i)); }
+
+function updateSceneInfo() {
+  const n = curves.length;
+  const txt = n === 1 ? '1 curva' : `${n} curvas`;
+  $('curve-count').textContent = n ? `${txt} en la escena.` : 'Sin curvas. Usa la herramienta de curva para dibujar una.';
+  $('st-scene').textContent = `Unidades: dm · Escena: 1 superficie · ${txt}`;
+}
+
+// ---------- Puntos de control y selección ----------
 const handleGeo = new THREE.SphereGeometry(0.075, 16, 12);
 const handleMat = new THREE.MeshBasicMaterial({ color: '#57b6ff', depthTest: false, transparent: true });
 const handleSelMat = new THREE.MeshBasicMaterial({ color: '#f0a63a', depthTest: false, transparent: true });
@@ -448,11 +595,13 @@ function buildHandles() {
   for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) {
     const h = new THREE.Mesh(handleGeo, handleMat);
     h.position.set(cps[i][j].x, cps[i][j].y, cps[i][j].z);
-    h.userData = { i, j };
+    h.userData = { kind: 'surf', i, j };
     h.renderOrder = 10;
     handles.add(h);
   }
 }
+
+function cpOf(ud) { return ud.kind === 'surf' ? cps[ud.i][ud.j] : curves[ud.c].cps[ud.k]; }
 
 const gizmo = new TransformControls(camera, renderer.domElement);
 gizmo.setSize(0.8);
@@ -466,48 +615,126 @@ function select(h) {
   if (h) {
     h.material = handleSelMat;
     gizmo.attach(h);
-    $('cv-name').textContent = `CV [${h.userData.i}, ${h.userData.j}] seleccionado`;
+    const ud = h.userData;
+    $('cv-name').textContent = ud.kind === 'surf' ? `CV [${ud.i}, ${ud.j}] de la superficie` : `Curva ${ud.c + 1} · CV ${ud.k}`;
     $('weight').disabled = false;
-    $('weight').value = cps[h.userData.i][h.userData.j].w;
+    $('weight').value = cpOf(ud).w;
   } else {
     gizmo.detach();
     $('cv-name').textContent = 'Ningún punto seleccionado. Haz clic en un punto azul.';
     $('weight').disabled = true;
   }
+  $('del-curve').disabled = !(h && h.userData.kind === 'curve');
   updateCVPanel();
 }
 
 function updateCVPanel() {
   const fmt = (v) => v.toFixed(2);
   if (!selected) { ['cx', 'cy', 'cz'].forEach((id) => ($(id).textContent = '—')); $('weight-o').textContent = '—'; return; }
-  const p = cps[selected.userData.i][selected.userData.j];
+  const p = cpOf(selected.userData);
   $('cx').textContent = fmt(p.x); $('cy').textContent = fmt(p.y); $('cz').textContent = fmt(p.z);
   $('weight-o').textContent = fmt(p.w);
 }
 
+function afterCPChange() {
+  const ud = selected.userData;
+  if (ud.kind === 'surf') rebuild();
+  else {
+    // Las asas de la curva se regeneran: se vuelve a enganchar el gizmo a la nueva asa.
+    updateCurveObj(curves[ud.c], ud.c);
+    const h = curves[ud.c].handles.children[ud.k];
+    selected = h; gizmo.attach(h);
+  }
+}
+
 let pending = false;
 gizmo.addEventListener('objectChange', () => {
-  const { i, j } = selected.userData;
-  cps[i][j].x = selected.position.x;
-  cps[i][j].y = selected.position.y;
-  cps[i][j].z = selected.position.z;
+  const p = cpOf(selected.userData);
+  p.x = selected.position.x; p.y = selected.position.y; p.z = selected.position.z;
   updateCVPanel();
-  if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; rebuild(); }); }
+  if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; afterCPChange(); }); }
 });
 
+// ---------- Herramientas ----------
+let tool = 'select';
+let draft = null; // { pts: Vector3[], obj }
 const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+const drawPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.01);
+
+function setRay(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+}
+function planePoint(e) {
+  setRay(e);
+  const p = ray.ray.intersectPlane(drawPlane, new THREE.Vector3());
+  if (p && $('snap').checked) { p.x = Math.round(p.x * 4) / 4; p.z = Math.round(p.z * 4) / 4; }
+  return p;
+}
+
+const HINTS = {
+  select: 'Arrastrar: orbitar · Clic en un punto azul: seleccionar · Flechas del gizmo: moverlo · Rueda: zoom',
+  curve: 'Clic en el suelo: añadir punto · Enter: terminar · Esc: cancelar · T: vista superior',
+};
+function setTool(t) {
+  if (tool === 'curve' && t !== 'curve') cancelDraft();
+  tool = t;
+  $('t-select').setAttribute('aria-pressed', String(t === 'select'));
+  $('t-curve').setAttribute('aria-pressed', String(t === 'curve'));
+  $('hint').textContent = HINTS[t];
+  $('drawbar').hidden = t !== 'curve';
+  if (t === 'curve') { select(null); startDraft(); }
+}
+
+function startDraft() {
+  draft = { pts: [], hover: null, obj: makeCurveObj(false) };
+  showDraft();
+}
+function showDraft() {
+  if (!draft) return;
+  const pts = draft.hover ? [...draft.pts, draft.hover] : draft.pts;
+  draft.obj.cps = pts.map((p) => new THREE.Vector4(p.x, p.y, p.z, 1));
+  updateCurveObj(draft.obj, -1);
+  draft.obj.comb.visible = draft.obj.env.visible = false;
+  draft.obj.hull.visible = draft.obj.handles.visible = true;
+  const n = draft.pts.length;
+  $('draw-msg').textContent = n === 0 ? 'Toca el suelo para poner el primer punto' : `${n} ${n === 1 ? 'punto' : 'puntos'} · sigue tocando para añadir más`;
+  $('draw-done').disabled = n < 2;
+}
+function finishDraft() {
+  if (!draft || draft.pts.length < 2) return;
+  const pts = draft.pts;
+  removeCurveObj(draft.obj); draft = null;
+  addCurve(pts);
+  startDraft();
+}
+function cancelDraft() {
+  if (!draft) return;
+  removeCurveObj(draft.obj); draft = null;
+}
+
 let downAt = null;
 renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (tool !== 'curve' || !draft || e.pointerType === 'touch' || e.buttons) return;
+  draft.hover = planePoint(e);
+  showDraft();
+});
+renderer.domElement.addEventListener('pointerleave', () => { if (draft) { draft.hover = null; showDraft(); } });
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (!downAt || gizmo.dragging) return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
-  if (moved > 4 || !handles.visible) return;
-  const r = renderer.domElement.getBoundingClientRect();
-  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-  ray.setFromCamera(mouse, camera);
-  ray.params.Points = { threshold: 0.1 };
-  const hit = ray.intersectObjects(handles.children)[0];
+  if (moved > 4) return;
+  if (tool === 'curve') {
+    const p = planePoint(e);
+    if (p) { draft.pts.push(p); draft.hover = null; showDraft(); }
+    return;
+  }
+  setRay(e);
+  const pickables = [...(handles.visible ? handles.children : []), ...curves.flatMap((c) => (c.handles.visible ? c.handles.children : []))];
+  const hit = ray.intersectObjects(pickables)[0];
   if (hit) select(hit.object);
   else if (!gizmo.axis) select(null);
 });
@@ -534,8 +761,8 @@ $('rough').addEventListener('input', (e) => {
 });
 $('weight').addEventListener('input', (e) => {
   if (!selected) return;
-  cps[selected.userData.i][selected.userData.j].w = +e.target.value;
-  updateCVPanel(); rebuild();
+  cpOf(selected.userData).w = +e.target.value;
+  updateCVPanel(); afterCPChange();
 });
 $('zfreq').addEventListener('input', (e) => {
   zebraMat.uniforms.uFreq.value = +e.target.value;
@@ -543,22 +770,54 @@ $('zfreq').addEventListener('input', (e) => {
   if (mode !== 'zebra') setMode('zebra');
 });
 $('res').addEventListener('input', (e) => { res = +e.target.value; $('res-o').textContent = res; rebuild(); });
+$('show-surf').addEventListener('change', (e) => {
+  mesh.visible = isoLines.visible = e.target.checked;
+  if (e.target.checked) isoLines.visible = $('show-iso').checked && mode !== 'wire';
+});
 $('show-cv').addEventListener('change', (e) => {
   handles.visible = e.target.checked; hullLines.visible = e.target.checked;
   if (!e.target.checked) select(null);
+  refreshCurves();
 });
 $('show-iso').addEventListener('change', (e) => { isoLines.visible = e.target.checked && mode !== 'wire'; });
+$('show-comb').addEventListener('change', refreshCurves);
+$('comb').addEventListener('input', (e) => { combScale = +e.target.value; $('comb-o').textContent = combScale.toFixed(1); refreshCurves(); });
 $('reset').addEventListener('click', () => { cps = initialCPs(); buildHandles(); select(handles.children[2 * NV + 3]); rebuild(); });
 
+function deleteSelectedCurve() {
+  if (!selected || selected.userData.kind !== 'curve') return;
+  const c = selected.userData.c;
+  select(null);
+  removeCurveObj(curves[c]);
+  curves.splice(c, 1);
+  refreshCurves();
+  updateSceneInfo();
+}
+$('del-curve').addEventListener('click', deleteSelectedCurve);
+
 function frame() {
-  orbit.target.set(0, 0.8, 0);
-  camera.position.set(7.5, 5.2, 8.5);
+  orbit.target.set(0, 0.6, 0.6);
+  camera.position.set(8, 6.4, 10.5);
+}
+function topView() {
+  orbit.target.set(0, 0, 0.6);
+  camera.position.set(0, 16, 0.6001);
 }
 $('t-frame').addEventListener('click', frame);
+$('t-top').addEventListener('click', topView);
+$('t-select').addEventListener('click', () => setTool('select'));
+$('t-curve').addEventListener('click', () => setTool(tool === 'curve' ? 'select' : 'curve'));
+$('draw-done').addEventListener('click', finishDraft);
+$('draw-cancel').addEventListener('click', () => setTool('select'));
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
-  if (e.key === 'f' || e.key === 'F') frame();
-  if (e.key === 'Escape') select(null);
+  const k = e.key.toLowerCase();
+  if (k === 'f') frame();
+  if (k === 't') topView();
+  if (k === 'c') setTool('curve');
+  if (k === 'enter' && tool === 'curve') finishDraft();
+  if (k === 'escape') { if (tool === 'curve') setTool('select'); else select(null); }
+  if ((k === 'delete' || k === 'backspace') && selected?.userData.kind === 'curve') deleteSelectedCurve();
 });
 
 // ---------- Arranque ----------
@@ -567,6 +826,8 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / Math.max(h, 1);
   camera.updateProjectionMatrix();
+  curveMat.resolution.set(w, h);
+  draftMat.resolution.set(w, h);
 }
 new ResizeObserver(resize).observe(view);
 resize();
@@ -574,6 +835,9 @@ resize();
 cps = initialCPs();
 buildHandles();
 rebuild();
+frame();
+// Curva de ejemplo frente a la superficie
+addCurve([[-3.25, 3.75], [-2, 2.75], [-0.5, 4.5], [1, 3], [2.25, 4.25], [3.25, 3.5]].map(([x, z]) => new THREE.Vector3(x, 0.01, z)));
 select(handles.children[2 * NV + 3]);
 
 renderer.setAnimationLoop(() => { orbit.update(); renderer.render(scene, camera); });
