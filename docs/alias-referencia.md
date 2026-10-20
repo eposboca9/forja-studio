@@ -7,6 +7,19 @@ y de guías de Alias. Sirven para que Forja Studio se comporte como Alias.
 - `Shift + Alt` + botón izquierdo = Tumble (girar), central = Track (desplazar), derecho = Dolly (acercar).
 - El pivote de giro queda fijo en el mundo; desplazar y acercar no lo mueven.
 
+## Tumble, Pan and Zoom (página de ayuda de Alias 2027)
+- Tres formas: Shift + Alt con los botones del ratón, arrastrar el ViewCube, iconos de la barra de navegación. La rueda también hace zoom.
+- En vistas ortográficas solo hay Pan y Zoom.
+- Al mantener Shift + Alt aparecen pistas arriba de la vista con lo que hace cada botón.
+- Zoom con botón derecho: mover en diagonal es lo más efectivo.
+- Punto de interés (POI): girar y acercar se centran en él. Para moverlo: Shift + Alt y clic rápido (sin arrastrar) sobre la geometría.
+- Las "clutch keys" se cambian en Preferences > Clutch Keys Editor: Viewing Control (Shift+Alt), Grid Snap (Alt),
+  Curve Snap (Control+Alt), Point/Magnet Snap (Control), Marking Menu (Shift+Control).
+- Modos de giro: basado en cámara (por defecto, mantiene la vertical como una cámara de cine) y basado en objeto
+  (como tener el modelo en la mano: izq = azimut/elevación, cruzar la ventana gira 180°; medio = pan;
+  derecho: arrastre vertical = zoom, horizontal = twist). Se elige en Preferences > General > Navigation, en el ViewCube o con un atajo.
+- Ojo: Alias usa Z hacia arriba por defecto; Forja usa Y hacia arriba (three.js).
+
 ## Marking menus (menús radiales)
 - `Ctrl + Shift` + botón izquierdo / central / derecho abre un menú radial distinto por botón
   (en la hoja: menú de selección, herramientas de transformación y visualización).
@@ -32,6 +45,8 @@ y de guías de Alias. Sirven para que Forja Studio se comporte como Alias.
 - `Ctrl` + flechas recorre los CVs: curvas con izquierda/derecha; superficies: izq/der = U, arriba/abajo = V.
 
 ## Pendiente de implementar en Forja
+- Editor de clutch keys (cambiar Shift+Alt, Alt, Ctrl+Alt, Ctrl, Shift+Ctrl).
+- ViewCube.
 - Un menú radial distinto por botón del ratón.
 - Mover con restricción X/Y/Z según el botón (herramienta Move de Alias, sin gizmo).
 - Snap en espacio de parámetros (UV) y opciones del snap de curva (divisiones, centro).

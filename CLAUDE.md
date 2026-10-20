@@ -95,6 +95,13 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Ctrl+Shift+clic abre el menú radial. flushPending() aplica la última actualización al soltar el gizmo.
 - Pruebas automáticas en el scratchpad (t8.mjs) con Playwright; los ataques al viewport usan proyección de puntos a pantalla.
 
+## Hecho (v0.6.1) — según la página "Tumble, Pan and Zoom the view" de Alias 2027
+
+- Punto de interés: Shift+Alt + clic rápido sobre geometría (geometryPointAt). El clic simple ya NO fija el pivote por defecto (opción en el panel).
+- dolly() siempre va hacia el pivote (botón derecho y rueda) y no lo atraviesa.
+- Pistas de navegación (#navhint) arriba al mantener Shift+Alt.
+- Modo de giro: cámara (por defecto) u objeto (tumbleObject: cruzar la vista = 180°; botón derecho horizontal = twist).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

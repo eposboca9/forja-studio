@@ -64,14 +64,24 @@ scene.add(gridXY);
 // Girar orbita alrededor del pivote; desplazar y acercar mueven la cámara sin mover el pivote.
 // Estilo Alias: Shift + Alt (Option en Mac) + botón izquierdo = girar, central = desplazar, derecho = acercar.
 const NAV_HELP = {
-  alias: 'Mantén Shift + Alt (Option en Mac) y arrastra: botón izquierdo gira, central desplaza, derecho acerca o aleja. La rueda acerca hacia el cursor. El pivote no se mueve al desplazar.',
+  alias: 'Mantén Shift + Alt (Option en Mac) y arrastra: botón izquierdo gira, central desplaza, derecho acerca o aleja. Shift + Alt + clic rápido sobre un objeto: mover ahí el punto de interés (pivote). Girar y acercar se centran en él.',
   simple: 'Para touchpad. Arrastra para girar, botón derecho para desplazar, dos dedos para zoom. Shift + arrastrar: selección por recuadro.',
 };
 const pivot = new THREE.Vector3();
 let navStyle = 'alias';
+// Modos de giro de Alias: 'camera' mantiene la vertical (como una cámara de cine);
+// 'object' es como tener el modelo en la mano: cruzar la vista gira 180° y el botón derecho en horizontal hace twist.
+let tumbleMode = 'camera';
 let navHeld = false, navDrag = null, navMovedLast = false;
 const mods = { shiftKey: false, altKey: false, ctrlKey: false, metaKey: false };
-function applyNav() { renderer.domElement.style.cursor = navStyle === 'alias' && navHeld ? 'move' : ''; }
+function applyNav() {
+  const on = navStyle === 'alias' && navHeld;
+  renderer.domElement.style.cursor = on ? 'move' : '';
+  // Pistas de navegación arriba de la vista, como en Alias al mantener Shift + Alt
+  $('navhint').hidden = !on;
+  $('nh-right').textContent = tumbleMode === 'object' ? 'Zoom (vertical) · Twist (horizontal)' : 'Zoom';
+  $('nh-left').textContent = tumbleMode === 'object' ? 'Azimut / Elevación' : 'Girar';
+}
 function setNavStyle(st) {
   navStyle = st;
   document.querySelectorAll('[data-nav]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.nav === st)));
@@ -92,6 +102,7 @@ addEventListener('pointerdown', trackMods, true);
 addEventListener('pointermove', trackMods, true);
 addEventListener('blur', () => trackMods({}));
 document.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => setNavStyle(b.dataset.nav)));
+$('tumble-mode').addEventListener('change', (e) => { tumbleMode = e.target.value; applyNav(); });
 
 const viewDir = () => new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
 const camAxis = (x, y) => new THREE.Vector3(x, y, 0).applyQuaternion(camera.quaternion);
@@ -106,8 +117,30 @@ function track(dx, dy, pane) {
   const k = (2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / pane.h;
   camera.position.addScaledVector(camAxis(1, 0), -dx * k).addScaledVector(camAxis(0, 1), dy * k);
 }
-function dolly(amount, dir = viewDir()) {
-  camera.position.addScaledVector(dir, amount * Math.max(0.2, camera.position.distanceTo(pivot)));
+// Acercar se centra en el punto de interés (pivote), como en Alias; nunca lo atraviesa.
+function dolly(amount) {
+  const to = pivot.clone().sub(camera.position), dist = to.length();
+  if (dist < 1e-6) return;
+  const step = Math.min(amount * Math.max(0.2, dist), dist - 0.05);
+  camera.position.addScaledVector(to.normalize(), step);
+}
+function tumbleObject(dx, dy, pane) {
+  const q = new THREE.Quaternion().setFromAxisAngle(camAxis(0, 1), (-dx / pane.w) * Math.PI)
+    .multiply(new THREE.Quaternion().setFromAxisAngle(camAxis(1, 0), (-dy / pane.h) * Math.PI));
+  camera.position.sub(pivot).applyQuaternion(q).add(pivot);
+  camera.quaternion.premultiply(q);
+}
+function twist(dx) {
+  const q = new THREE.Quaternion().setFromAxisAngle(pivot.clone().sub(camera.position).normalize(), dx * 0.005);
+  camera.position.sub(pivot).applyQuaternion(q).add(pivot);
+  camera.quaternion.premultiply(q);
+}
+// Punto de la geometría bajo el cursor (superficies y curvas visibles)
+function geometryPointAt(e) {
+  setRay(e);
+  ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
+  const hit = ray.intersectObjects(objects.filter((o) => o.visible).map((o) => (o.kind === 'surface' ? o.parts.mesh : o.parts.pick)), false)[0];
+  return hit ? hit.point : null;
 }
 function navModeFor(e) {
   if (navStyle === 'alias') return e.shiftKey && e.altKey ? ['tumble', 'track', 'dolly'][e.button] || null : null;
@@ -126,11 +159,18 @@ addEventListener('pointermove', (e) => {
   const dx = e.clientX - navDrag.x, dy = e.clientY - navDrag.y;
   if (!navDrag.moved && Math.hypot(dx, dy) < 3) return;
   navDrag.moved = true; navDrag.x = e.clientX; navDrag.y = e.clientY;
-  if (navDrag.mode === 'tumble') tumble(dx, dy);
+  const obj = tumbleMode === 'object' && navStyle === 'alias';
+  if (navDrag.mode === 'tumble') obj ? tumbleObject(dx, dy, navDrag.pane) : tumble(dx, dy);
   else if (navDrag.mode === 'track') track(dx, dy, navDrag.pane);
-  else dolly((dx - dy) * 0.004);
+  else if (obj) { if (Math.abs(dx) > Math.abs(dy)) twist(dx); else dolly(-dy * 0.006); }
+  else dolly((dx - dy) * 0.004); // diagonal, como recomienda Alias
 });
-addEventListener('pointerup', () => {
+addEventListener('pointerup', (e) => {
+  // Shift + Alt + clic rápido (sin arrastrar) sobre la geometría: nuevo punto de interés
+  if (navDrag && !navDrag.moved && navStyle === 'alias' && e.button === 0) {
+    const p = geometryPointAt(e);
+    if (p) setPivot(p);
+  }
   navMovedLast = !!navDrag && (navDrag.moved || navStyle === 'alias');
   if (navDrag) pivotShowUntil = performance.now() + 600;
   navDrag = null;
@@ -138,9 +178,8 @@ addEventListener('pointerup', () => {
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('wheel', (e) => {
   e.preventDefault();
-  setRay(e);
   const step = Math.min(Math.abs(e.deltaY), 120) / 120;
-  dolly(-Math.sign(e.deltaY) * step * 0.18, ray.ray.direction.clone());
+  dolly(-Math.sign(e.deltaY) * step * 0.18);
   pivotShowUntil = performance.now() + 400;
 }, { passive: false });
 
@@ -738,7 +777,7 @@ function updateHint() {
   if (typeof pivotEdit !== 'undefined' && pivotEdit) { $('hint').textContent = 'Editar pivote: arrastra el gizmo · Ctrl: snap a punto · Ctrl+Alt: a curva · Alt: rejilla · D o Esc: terminar'; return; }
   const nav = navStyle === 'alias' ? 'Shift+Alt: navegar' : 'Shift+arrastrar: recuadro';
   const what = pickMode === 'cv' ? 'CVs' : 'objetos';
-  $('hint').textContent = `Clic: seleccionar ${what} y fijar pivote · Arrastrar: recuadro · ${nav} · W/E/R: mover/rotar/escalar · Alt/Ctrl/Ctrl+Alt al mover: snap · Espacio: menú`;
+  $('hint').textContent = `Clic: seleccionar ${what} · Arrastrar: recuadro · ${nav} (clic rápido: punto de interés) · W/E/R: mover/rotar/escalar · Alt/Ctrl/Ctrl+Alt: snap · Espacio: menú`;
 }
 function setTool(t) {
   if (tool === 'curve' && t !== 'curve') cancelDraft();

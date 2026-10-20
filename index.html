@@ -165,6 +165,14 @@
   .top .seg.lay { margin-left: auto; }
   .top .seg.snap { margin-left: 8px; }
   .top .lbl { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .navhint { position: absolute; left: 50%; top: 44px; transform: translateX(-50%); display: flex; gap: 14px; align-items: center;
+    background: color-mix(in srgb, var(--panel) 94%, transparent); border: 1px solid var(--sel); border-radius: 8px; padding: 6px 12px; z-index: 6; font-size: 12px; white-space: nowrap; pointer-events: none; }
+  .navhint span { display: flex; align-items: center; gap: 6px; }
+  .navhint b { font-weight: 500; }
+  .navhint .nh-tip { color: var(--muted); }
+  .mb { width: 12px; height: 17px; border: 1.5px solid var(--muted); border-radius: 6px; display: inline-block; position: relative; overflow: hidden; }
+  .mb::after { content: ""; position: absolute; top: 0; height: 7px; background: var(--sel); }
+  .mb.l::after { left: 0; width: 5px; } .mb.m::after { left: 4px; width: 3px; } .mb.r::after { right: 0; width: 5px; }
   .marquee { position: absolute; border: 1px dashed var(--sel); background: color-mix(in srgb, var(--sel) 12%, transparent); pointer-events: none; z-index: 5; }
   .toast { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); color: var(--fg); padding: 8px 14px; border-radius: 8px; font-size: 12px; z-index: 6; max-width: 80%; text-align: center; }
   .outliner { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 190px; overflow-y: auto; }
@@ -218,7 +226,7 @@
       <button id="lay-diag" data-layout="diag" aria-pressed="false" title="Solo diagnóstico (V)">Diagnóstico</button>
       <button id="lay-render" data-layout="render" aria-pressed="false" title="Solo render (V)">Render</button>
     </div>
-    <span class="tag">DEMO v0.6</span>
+    <span class="tag">DEMO v0.6.1</span>
   </header>
 
   <main class="view" id="view">
@@ -270,6 +278,12 @@
       <span id="draw-msg"></span>
       <button class="btn primary" id="draw-done">Terminar curva</button>
       <button class="btn" id="draw-cancel">Cancelar</button>
+    </div>
+    <div class="navhint" id="navhint" hidden>
+      <span><i class="mb l"></i><b id="nh-left">Girar</b></span>
+      <span><i class="mb m"></i><b>Desplazar</b></span>
+      <span><i class="mb r"></i><b id="nh-right">Zoom</b></span>
+      <span class="nh-tip">clic rápido: punto de interés</span>
     </div>
     <div class="marquee" id="marquee" hidden></div>
     <div class="toast" id="toast" hidden></div>
@@ -338,7 +352,8 @@
         <button id="nav-simple" data-nav="simple" aria-pressed="false">Touchpad</button>
       </div>
       <p class="muted" id="nav-help"></p>
-      <label class="check"><input type="checkbox" id="click-pivot" checked> Clic en un objeto fija el pivote de la cámara</label>
+      <div class="row"><label for="tumble-mode">Giro</label><select id="tumble-mode" class="sel"><option value="camera" selected>Basado en cámara</option><option value="object">Basado en objeto</option></select><span></span></div>
+      <label class="check"><input type="checkbox" id="click-pivot"> Además, clic simple en un objeto fija el pivote</label>
       <div class="row"><label for="sel-buttons">Botones</label><select id="sel-buttons" class="sel"><option value="alt" selected>Izq elige · medio añade · der quita</option><option value="default">Izq alterna · medio añade · der quita</option></select><span></span></div>
       <p class="muted">Selección con los 3 botones del ratón, como en Alias (solo en navegación Alias). Ctrl + flechas: pasar al CV vecino. Ctrl+Shift + clic: menú radial.</p>
     </section>
