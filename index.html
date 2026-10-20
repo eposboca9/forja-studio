@@ -148,7 +148,7 @@
       <button id="m-curv" data-mode="curv" aria-pressed="false">Curvatura</button>
       <button id="m-wire" data-mode="wire" aria-pressed="false">Malla</button>
     </div>
-    <span class="tag">DEMO v0.2</span>
+    <span class="tag">DEMO v0.3</span>
   </header>
 
   <main class="view" id="view">
@@ -196,6 +196,15 @@
   </main>
 
   <aside class="panel" aria-label="Propiedades">
+    <section class="sec">
+      <h2>Navegación</h2>
+      <div class="seg" role="group" aria-label="Estilo de navegación" style="margin-left:0; align-self:flex-start">
+        <button id="nav-alias" data-nav="alias" aria-pressed="true">Alias</button>
+        <button id="nav-simple" data-nav="simple" aria-pressed="false">Simple / táctil</button>
+      </div>
+      <p class="muted" id="nav-help"></p>
+    </section>
+
     <section class="sec">
       <h2>Material</h2>
       <div class="swatches" id="swatches">
@@ -296,6 +305,38 @@ camera.position.set(7.5, 5.2, 8.5);
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.target.set(0, 0.6, 0);
 orbit.enableDamping = true;
+
+// Navegación estilo Alias: Shift + Alt (Option en Mac) y botón izquierdo = girar, central = desplazar, derecho = acercar.
+// Sin esas teclas el ratón queda libre para seleccionar y dibujar. La rueda siempre hace zoom.
+const NAV_ALIAS = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.DOLLY };
+const NAV_OFF = { LEFT: -1, MIDDLE: -1, RIGHT: -1 };
+const NAV_SIMPLE = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+const NAV_HELP = {
+  alias: 'Mantén Shift + Alt (Option en Mac) y arrastra: botón izquierdo gira, central desplaza, derecho acerca o aleja.',
+  simple: 'Arrastra para girar, botón derecho para desplazar, rueda para zoom. En el celular: un dedo gira, dos dedos acercan y desplazan.',
+};
+let navStyle = matchMedia('(pointer: coarse)').matches ? 'simple' : 'alias';
+let navHeld = false;
+function applyNav() {
+  orbit.mouseButtons = navStyle === 'simple' ? NAV_SIMPLE : navHeld ? NAV_ALIAS : NAV_OFF;
+  renderer.domElement.style.cursor = navStyle === 'alias' && navHeld ? 'move' : '';
+}
+function setNavStyle(st) {
+  navStyle = st;
+  document.querySelectorAll('[data-nav]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.nav === st)));
+  $('nav-help').textContent = NAV_HELP[st];
+  if (typeof tool !== 'undefined') $('hint').textContent = hintFor(tool);
+  applyNav();
+}
+function trackMods(e) {
+  const held = e.shiftKey && e.altKey;
+  if (held !== navHeld) { navHeld = held; applyNav(); }
+}
+addEventListener('keydown', (e) => { if (e.key === 'Alt') e.preventDefault(); trackMods(e); });
+addEventListener('keyup', trackMods);
+addEventListener('pointerdown', trackMods, true);
+addEventListener('blur', () => { navHeld = false; applyNav(); });
+document.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => setNavStyle(b.dataset.nav)));
 
 const key = new THREE.DirectionalLight(0xffffff, 1.6);
 key.position.set(4, 9, 3);
@@ -673,6 +714,12 @@ function planePoint(e) {
   return p;
 }
 
+function hintFor(t) {
+  if (t === 'curve') return HINTS.curve;
+  return navStyle === 'alias'
+    ? 'Shift+Alt + izq: girar · medio: desplazar · der: zoom · Clic en un punto azul: seleccionar'
+    : HINTS.select;
+}
 const HINTS = {
   select: 'Arrastrar: orbitar · Clic en un punto azul: seleccionar · Flechas del gizmo: moverlo · Rueda: zoom',
   curve: 'Clic en el suelo: añadir punto · Enter: terminar · Esc: cancelar · T: vista superior',
@@ -682,7 +729,7 @@ function setTool(t) {
   tool = t;
   $('t-select').setAttribute('aria-pressed', String(t === 'select'));
   $('t-curve').setAttribute('aria-pressed', String(t === 'curve'));
-  $('hint').textContent = HINTS[t];
+  $('hint').textContent = hintFor(t);
   $('drawbar').hidden = t !== 'curve';
   if (t === 'curve') { select(null); startDraft(); }
 }
@@ -723,6 +770,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
 });
 renderer.domElement.addEventListener('pointerleave', () => { if (draft) { draft.hover = null; showDraft(); } });
 renderer.domElement.addEventListener('pointerup', (e) => {
+  if (e.shiftKey && e.altKey) { downAt = null; return; } // estaba navegando
   if (!downAt || gizmo.dragging) return;
   const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
   downAt = null;
@@ -841,6 +889,8 @@ addCurve([[-3.25, 3.75], [-2, 2.75], [-0.5, 4.5], [1, 3], [2.25, 4.25], [3.25, 3
 select(handles.children[2 * NV + 3]);
 
 renderer.setAnimationLoop(() => { orbit.update(); renderer.render(scene, camera); });
+setNavStyle(navStyle);
+window.__cam = camera;
 window.__ready = true;
 </script>
 </body>

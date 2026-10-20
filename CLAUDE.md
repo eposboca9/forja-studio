@@ -13,6 +13,13 @@ Este archivo es la memoria del proyecto entre sesiones. Léelo al empezar y actu
 Combinar Alias (superficies NURBS de clase A, análisis cebra/curvatura), Plasticity (modelado sólido rápido)
 y Blender (render realista con shaders). Se empezó como app web para que cada avance se pruebe con un enlace.
 
+## Concepto del usuario
+
+`docs/concepto.md` es el documento de visión que escribió el usuario ("El Triángulo Perfecto"). Consúltalo antes de decidir funciones.
+Puntos clave: continuidad G0–G3, red de curvas, modelado directo y booleanas/fillets, menús radiales,
+viewport PBR con HDRI cambiable, materiales procedurales con proyección triplanar (sin UVs),
+una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de CVs con reflejos en vivo sin lag.
+
 ## Estructura
 
 - `index.html`: toda la app por ahora (HTML + CSS + JS módulo). three.js 0.160.0 desde cdn.jsdelivr.net vía import map.
@@ -37,6 +44,12 @@ y Blender (render realista con shaders). Se empezó como app web para que cada a
 - Selección genérica de CVs: userData.kind = 'surf' | 'curve'. Borrar curva con Supr o botón.
 - Vista superior (T), mostrar/ocultar superficie. Hay una curva de ejemplo al abrir.
 - Flujo de trabajo: la página se publica también como Artifact de Claude; index.html del repo = mismo contenido con <!doctype>/<head> añadidos.
+
+## Hecho (v0.3)
+
+- Navegación Alias: Shift+Alt + izq girar / medio desplazar / der dolly (OrbitControls.mouseButtons cambia según teclas; sin teclas = -1).
+  Modo "Simple / táctil" por defecto si pointer: coarse. Selector en el panel.
+- Pendiente: el usuario quiere los mismos atajos que Alias; preguntarle cuáles usa más y hacer un editor de atajos.
 
 ## Siguiente paso
 
