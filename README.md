@@ -8,7 +8,7 @@ Aplicación de modelado 3D en el navegador que busca combinar lo mejor de tres m
 
 Todo con herramientas gratuitas y de código abierto.
 
-![Forja Studio v0.2 con curvas y peine de curvatura](docs/capturas/curvas-peine.png)
+![Forja Studio v0.4: vista dividida Diagnóstico | Render](docs/capturas/v0.4-dividida.png)
 
 ## Visión
 
@@ -19,13 +19,16 @@ El concepto completo está en [docs/concepto.md](docs/concepto.md).
 Abre `index.html` en Chrome o Edge, o usa el enlace de GitHub Pages cuando esté activado.
 
 - Navegación Alias (por defecto en computadora): `Shift+Alt` (`Shift+Option` en Mac) + botón izquierdo gira, central desplaza, derecho acerca o aleja
-- Navegación simple (por defecto en celular): arrastrar gira, dos dedos acercan y desplazan
+- Navegación simple: arrastrar gira, botón derecho desplaza
+- `Espacio` (mantener): menú radial · `V`: cambiar vista (Dividida → Diagnóstico → Render) · `1` `2` `3`: cebra, curvatura, malla
 - Rueda: zoom
 - Clic en un punto azul: seleccionar un punto de control y moverlo con el gizmo
 - `C`: dibujar curva · `Enter`: terminar curva · `T`: vista superior
 - `F`: encuadrar · `Esc`: cancelar o deseleccionar · `Supr`: borrar la curva seleccionada
 
-## Estado actual (demo v0.3)
+## Estado actual (demo v0.4)
+
+Por ahora la app se diseña y prueba solo para laptop/computadora.
 
 | Función | Estado |
 |---|---|
@@ -38,6 +41,9 @@ Abre `index.html` en Chrome o Edge, o usa el enlace de GitHub Pages cuando esté
 | Peine de curvatura (como Alias) | ✅ |
 | Editar y borrar curvas | ✅ |
 | Navegación estilo Alias (Shift+Alt + 3 botones) | ✅ |
+| Vista dividida Diagnóstico \| Render con cámara compartida | ✅ |
+| Menú radial (mantener Espacio) | ✅ |
+| Biblioteca de 9 materiales con miniaturas | ✅ |
 | Barrido, extrusión, redondeo, booleanas | 🔜 |
 
 ## Tecnología

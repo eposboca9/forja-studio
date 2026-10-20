@@ -79,7 +79,7 @@
   }
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #1a1205; font-weight: 600; }
   .btn:disabled { opacity: .4; cursor: not-allowed; }
-  .legend { position: absolute; right: 12px; top: 10px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+  .legend { position: absolute; right: 12px; top: 10px; pointer-events: none; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
   .legend .bar { width: 140px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #2b6cff, #27c2b5, #e9e46a, #ff6a3d, #d81b4a); }
   .legend .ends { width: 140px; display: flex; justify-content: space-between; }
 
@@ -87,11 +87,33 @@
   .panel { grid-area: panel; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; min-height: 0; }
   .sec { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
   .sec h2 { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
-  .swatches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
-  .sw { display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: 0; color: var(--muted); font: inherit; font-size: 10px; cursor: pointer; padding: 0; }
-  .sw i { width: 34px; height: 34px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
-  .sw[aria-pressed="true"] { color: var(--fg); }
-  .sw[aria-pressed="true"] i { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent); }
+  .matlib { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .mat { display: flex; flex-direction: column; gap: 4px; background: none; border: 0; padding: 0; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; text-align: center; }
+  .mat img, .mat .ph { width: 100%; aspect-ratio: 1; border-radius: 8px; display: block; background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line); }
+  .mat:hover { color: var(--fg); }
+  .mat[aria-pressed="true"] { color: var(--fg); }
+  .mat[aria-pressed="true"] img { box-shadow: 0 0 0 2px var(--accent); }
+  /* Paneles del viewport dividido */
+  .pane { position: absolute; top: 0; bottom: 0; pointer-events: none; }
+  .pane.left { left: 0; width: 50%; }
+  .pane.right { left: 50%; width: 50%; border-left: 1px solid var(--line); }
+  .pane.full { left: 0; width: 100%; border-left: 0; }
+  .pane-head { position: absolute; left: 12px; top: 10px; display: flex; align-items: center; gap: 10px; pointer-events: auto; }
+  .pane-title { font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .06em; }
+  .pane-title b { color: var(--fg); font-weight: 500; }
+  .seg.small button { font-size: 11px; padding: 3px 9px; }
+  .pane .legend { right: 12px; top: 12px; }
+  /* Menú radial */
+  .radial { position: fixed; width: 0; height: 0; z-index: 50; pointer-events: none; }
+  .radial .ring { position: absolute; left: -118px; top: -118px; width: 236px; height: 236px; border-radius: 50%;
+    background: radial-gradient(circle, color-mix(in srgb, var(--panel) 70%, transparent) 0 34%, color-mix(in srgb, var(--panel) 35%, transparent) 35% 100%);
+    border: 1px solid var(--line); backdrop-filter: blur(3px); }
+  .radial .center { position: absolute; transform: translate(-50%, -50%); font-size: 11px; color: var(--muted); text-align: center; width: 76px; line-height: 1.3; }
+  .radial .item { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; white-space: nowrap;
+    background: var(--panel); border: 1px solid var(--line); color: var(--fg); font: inherit; font-size: 12px; padding: 6px 11px; border-radius: 999px; cursor: pointer; }
+  .radial .item kbd { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-left: 6px; }
+  .radial .item.on { background: var(--accent); border-color: var(--accent); color: #1a1205; }
+  .radial .item.on kbd { color: #1a1205; }
   .row { display: grid; grid-template-columns: 84px 1fr 44px; align-items: center; gap: 8px; }
   .row label { color: var(--muted); }
   .row output { font-family: var(--font-mono); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -142,22 +164,37 @@
       Forja Studio
     </div>
     <span class="file">capo_concepto.forja</span>
-    <div class="seg" role="group" aria-label="Modo de visualización">
-      <button id="m-real" data-mode="real" aria-pressed="true">Realista</button>
-      <button id="m-zebra" data-mode="zebra" aria-pressed="false">Cebra</button>
-      <button id="m-curv" data-mode="curv" aria-pressed="false">Curvatura</button>
-      <button id="m-wire" data-mode="wire" aria-pressed="false">Malla</button>
+    <div class="seg" role="group" aria-label="Distribución de la vista">
+      <button id="lay-split" data-layout="split" aria-pressed="true" title="Diagnóstico y render lado a lado (V)">Dividida</button>
+      <button id="lay-diag" data-layout="diag" aria-pressed="false" title="Solo diagnóstico (V)">Diagnóstico</button>
+      <button id="lay-render" data-layout="render" aria-pressed="false" title="Solo render (V)">Render</button>
     </div>
-    <span class="tag">DEMO v0.3</span>
+    <span class="tag">DEMO v0.4</span>
   </header>
 
   <main class="view" id="view">
     <div class="loading" id="loading">Cargando motor 3D…</div>
-    <span class="vlabel">PERSPECTIVA · NURBS</span>
-    <div class="legend" id="legend" hidden>
-      <span>Curvatura media</span>
-      <div class="bar"></div>
-      <div class="ends"><span>cóncava</span><span>plana</span><span>convexa</span></div>
+    <div class="pane left" id="pane-diag">
+      <div class="pane-head">
+        <span class="pane-title"><b>DIAGNÓSTICO</b></span>
+        <div class="seg small" role="group" aria-label="Análisis">
+          <button id="d-zebra" data-diag="zebra" aria-pressed="true" title="Cebra (1)">Cebra</button>
+          <button id="d-curv" data-diag="curv" aria-pressed="false" title="Curvatura (2)">Curvatura</button>
+          <button id="d-wire" data-diag="wire" aria-pressed="false" title="Malla (3)">Malla</button>
+        </div>
+      </div>
+      <div class="legend" id="legend" hidden>
+        <span>Curvatura media</span>
+        <div class="bar"></div>
+        <div class="ends"><span>cóncava</span><span>plana</span><span>convexa</span></div>
+      </div>
+    </div>
+    <div class="pane right" id="pane-render">
+      <div class="pane-head"><span class="pane-title"><b>RENDER</b> · PBR · ESTUDIO · <span id="mat-name">Pintura roja</span></span></div>
+    </div>
+    <div class="radial" id="radial" hidden>
+      <div class="ring"></div>
+      <div class="center" id="radial-center">Suelta sobre una opción</div>
     </div>
     <nav class="tools" aria-label="Herramientas">
       <button id="t-select" aria-pressed="true" title="Seleccionar y mover puntos de control (W)">
@@ -206,14 +243,8 @@
     </section>
 
     <section class="sec">
-      <h2>Material</h2>
-      <div class="swatches" id="swatches">
-        <button class="sw" id="mat-paint" data-mat="paint" aria-pressed="true"><i style="background: radial-gradient(circle at 35% 30%, #ff6a6f, #9e0f19 60%, #3a0508)"></i>Pintura</button>
-        <button class="sw" id="mat-alu" data-mat="alu" aria-pressed="false"><i style="background: radial-gradient(circle at 35% 30%, #ffffff, #b7bcc4 50%, #50555c)"></i>Aluminio</button>
-        <button class="sw" id="mat-ceram" data-mat="ceram" aria-pressed="false"><i style="background: radial-gradient(circle at 35% 30%, #ffffff, #ece8e1 55%, #9a958d)"></i>Cerámica</button>
-        <button class="sw" id="mat-glass" data-mat="glass" aria-pressed="false"><i style="background: radial-gradient(circle at 35% 30%, #ffffff, #a9d8ee 45%, #2c5568)"></i>Vidrio</button>
-        <button class="sw" id="mat-clay" data-mat="clay" aria-pressed="false"><i style="background: radial-gradient(circle at 35% 30%, #d8cbbd, #a89683 55%, #5a4e42)"></i>Arcilla</button>
-      </div>
+      <h2>Materiales</h2>
+      <div class="matlib" id="matlib"></div>
       <div class="row"><label for="rough">Rugosidad</label><input id="rough" type="range" min="0" max="1" step="0.01" value="0.35"><output id="rough-o">0.35</output></div>
     </section>
 
@@ -292,11 +323,23 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.autoUpdate = false; // la sombra se calcula una vez por cuadro aunque haya dos vistas
+renderer.setScissorTest(true);
 view.prepend(renderer.domElement);
 $('loading').remove();
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color('#14171b');
+const diagBg = new THREE.Color('#14171b');
+const renderBg = (() => {
+  const c = document.createElement('canvas'); c.width = 16; c.height = 256;
+  const g = c.getContext('2d'), grd = g.createLinearGradient(0, 0, 0, 256);
+  grd.addColorStop(0, '#2b3038'); grd.addColorStop(0.6, '#1a1d22'); grd.addColorStop(1, '#101215');
+  g.fillStyle = grd; g.fillRect(0, 0, 16, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+scene.background = diagBg;
+// Capa 1 = solo en la vista de diagnóstico (cuadrícula, isoparamétricas, peines, polígonos de control)
+const DIAG = 1;
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
 
@@ -353,6 +396,7 @@ ground.receiveShadow = true;
 scene.add(ground);
 const grid = new THREE.GridHelper(30, 30, 0x3a414a, 0x23282e);
 grid.position.y = 0.001;
+grid.layers.set(DIAG);
 scene.add(grid);
 
 // ---------- Superficie NURBS ----------
@@ -378,11 +422,16 @@ function initialCPs() {
 
 const materials = {
   paint: new THREE.MeshPhysicalMaterial({ color: '#b0121c', metalness: 0.55, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.03, side: THREE.DoubleSide }),
+  black: new THREE.MeshPhysicalMaterial({ color: '#111216', metalness: 0.7, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.02, side: THREE.DoubleSide }),
+  pearl: new THREE.MeshPhysicalMaterial({ color: '#1d3f8c', metalness: 0.6, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03, iridescence: 0.6, iridescenceIOR: 1.4, side: THREE.DoubleSide }),
   alu: new THREE.MeshPhysicalMaterial({ color: '#cfd3d8', metalness: 1, roughness: 0.22, side: THREE.DoubleSide }),
+  chrome: new THREE.MeshPhysicalMaterial({ color: '#ffffff', metalness: 1, roughness: 0.04, side: THREE.DoubleSide }),
   ceram: new THREE.MeshPhysicalMaterial({ color: '#f1ede6', metalness: 0, roughness: 0.18, clearcoat: 0.8, clearcoatRoughness: 0.05, side: THREE.DoubleSide }),
   glass: new THREE.MeshPhysicalMaterial({ color: '#e4f5ff', metalness: 0, roughness: 0.03, transmission: 1, thickness: 0.4, ior: 1.5, side: THREE.DoubleSide }),
+  plastic: new THREE.MeshPhysicalMaterial({ color: '#1c1d20', metalness: 0, roughness: 0.55, side: THREE.DoubleSide }),
   clay: new THREE.MeshPhysicalMaterial({ color: '#b3a08c', metalness: 0, roughness: 0.85, side: THREE.DoubleSide }),
 };
+const MAT_NAMES = { paint: 'Pintura roja', black: 'Negro metalizado', pearl: 'Azul perlado', alu: 'Aluminio', chrome: 'Cromo', ceram: 'Cerámica', glass: 'Vidrio', plastic: 'Plástico negro', clay: 'Arcilla' };
 const zebraMat = new THREE.ShaderMaterial({
   side: THREE.DoubleSide,
   uniforms: { uFreq: { value: 14 } },
@@ -413,7 +462,7 @@ const curvMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 
 const wireMat = new THREE.MeshBasicMaterial({ color: '#57b6ff', wireframe: true, transparent: true, opacity: 0.55 });
 
 let surface, mesh, isoLines, hullLines;
-let mode = 'real', matKey = 'paint', res = 90;
+let diagMode = 'zebra', layout = 'split', matKey = 'paint', res = 90;
 
 function evalSurface() {
   surface = new NURBSSurface(DEG, DEG, knots, knots, cps);
@@ -450,11 +499,10 @@ function curvatureColors(geo, seg) {
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 }
 
-function currentMaterial() {
-  if (mode === 'zebra') return zebraMat;
-  if (mode === 'curv') return curvMat;
-  if (mode === 'wire') return wireMat;
-  return materials[matKey];
+function diagMaterial() {
+  if (diagMode === 'curv') return curvMat;
+  if (diagMode === 'wire') return wireMat;
+  return zebraMat;
 }
 
 function buildIso() {
@@ -491,22 +539,21 @@ const hullMat = new THREE.LineDashedMaterial({ color: '#57b6ff', dashSize: 0.12,
 function rebuild() {
   evalSurface();
   const geo = new ParametricGeometry((u, v, target) => surface.getPoint(u, v, target), res, res);
-  if (mode === 'curv') curvatureColors(geo, res);
+  if (diagMode === 'curv') curvatureColors(geo, res);
   if (!mesh) {
-    mesh = new THREE.Mesh(geo, currentMaterial());
+    mesh = new THREE.Mesh(geo, materials[matKey]);
     mesh.castShadow = true;
     scene.add(mesh);
   } else {
     mesh.geometry.dispose();
     mesh.geometry = geo;
-    mesh.material = currentMaterial();
   }
   if (isoLines) { isoLines.geometry.dispose(); isoLines.geometry = buildIso(); }
-  else { isoLines = new THREE.LineSegments(buildIso(), isoMat); scene.add(isoLines); }
+  else { isoLines = new THREE.LineSegments(buildIso(), isoMat); isoLines.layers.set(DIAG); scene.add(isoLines); }
   if (hullLines) { hullLines.geometry.dispose(); hullLines.geometry = buildHull(); }
-  else { hullLines = new THREE.LineSegments(buildHull(), hullMat); scene.add(hullLines); }
+  else { hullLines = new THREE.LineSegments(buildHull(), hullMat); hullLines.layers.set(DIAG); scene.add(hullLines); }
   hullLines.computeLineDistances();
-  isoLines.visible = $('show-iso').checked && mode !== 'wire';
+  isoLines.visible = $('show-iso').checked && diagMode !== 'wire';
   hullLines.visible = $('show-cv').checked;
   $('st-tris').textContent = (res * res * 2).toLocaleString('es') + ' triángulos';
 }
@@ -542,6 +589,7 @@ function makeCurveObj(withHandles) {
     handles: new THREE.Group(),
   };
   obj.line.renderOrder = 5;
+  for (const o of [obj.hull, obj.comb, obj.env]) o.layers.set(DIAG);
   scene.add(obj.line, obj.hull, obj.comb, obj.env, obj.handles);
   return obj;
 }
@@ -646,6 +694,8 @@ function cpOf(ud) { return ud.kind === 'surf' ? cps[ud.i][ud.j] : curves[ud.c].c
 
 const gizmo = new TransformControls(camera, renderer.domElement);
 gizmo.setSize(0.8);
+// El gizmo calcula el puntero sobre todo el lienzo; con la vista dividida hay que medirlo dentro de la mitad que se toca.
+gizmo._getPointer = (e) => { const n = paneNDC(e, dragPane || paneAt(e.clientX)); return { x: n.x, y: n.y, button: e.button }; };
 scene.add(gizmo);
 gizmo.addEventListener('dragging-changed', (e) => { orbit.enabled = !e.value; });
 let selected = null;
@@ -703,8 +753,8 @@ const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
 const drawPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.01);
 
 function setRay(e) {
-  const r = renderer.domElement.getBoundingClientRect();
-  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  const n = paneNDC(e, dragPane || paneAt(e.clientX));
+  mouse.set(n.x, n.y);
   ray.setFromCamera(mouse, camera);
 }
 function planePoint(e) {
@@ -717,7 +767,7 @@ function planePoint(e) {
 function hintFor(t) {
   if (t === 'curve') return HINTS.curve;
   return navStyle === 'alias'
-    ? 'Shift+Alt + izq: girar · medio: desplazar · der: zoom · Clic en un punto azul: seleccionar'
+    ? 'Shift+Alt + izq: girar · medio: desplazar · der: zoom · Clic en un punto: seleccionar · Espacio: menú radial'
     : HINTS.select;
 }
 const HINTS = {
@@ -788,21 +838,69 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 });
 
 // ---------- Interfaz ----------
-function setMode(m) {
-  mode = m;
-  document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
-  $('legend').hidden = m !== 'curv';
+function setDiag(m) {
+  diagMode = m;
+  document.querySelectorAll('[data-diag]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.diag === m)));
+  if (layout === 'render') setLayout('split');
+  updatePaneUI();
   rebuild();
 }
-document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+document.querySelectorAll('[data-diag]').forEach((b) => b.addEventListener('click', () => setDiag(b.dataset.diag)));
 
-document.querySelectorAll('.sw').forEach((b) => b.addEventListener('click', () => {
-  matKey = b.dataset.mat;
-  document.querySelectorAll('.sw').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-  $('rough').value = materials[matKey].roughness;
-  $('rough-o').textContent = (+materials[matKey].roughness).toFixed(2);
-  if (mode !== 'real') setMode('real'); else mesh.material = currentMaterial();
-}));
+const LAYOUTS = ['split', 'diag', 'render'];
+const LAYOUT_NAMES = { split: 'Dividida', diag: 'Diagnóstico', render: 'Render' };
+function setLayout(l) {
+  layout = l;
+  document.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === l)));
+  updatePaneUI();
+  resize();
+}
+function cycleLayout() { setLayout(LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length]); }
+document.querySelectorAll('[data-layout]').forEach((b) => b.addEventListener('click', () => setLayout(b.dataset.layout)));
+function updatePaneUI() {
+  $('pane-diag').hidden = layout === 'render';
+  $('pane-render').hidden = layout === 'diag';
+  $('pane-diag').className = 'pane left' + (layout === 'diag' ? ' full' : '');
+  $('pane-render').className = 'pane right' + (layout === 'render' ? ' full' : '');
+  $('legend').hidden = diagMode !== 'curv';
+}
+
+function setMaterial(k) {
+  matKey = k;
+  document.querySelectorAll('.mat').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.mat === k)));
+  $('rough').value = materials[k].roughness;
+  $('rough-o').textContent = (+materials[k].roughness).toFixed(2);
+  $('mat-name').textContent = MAT_NAMES[k];
+  if (layout === 'diag') setLayout('split');
+}
+// Miniaturas: una esfera con cada material, renderizada una sola vez en un lienzo aparte.
+function buildMaterialLibrary() {
+  const lib = $('matlib');
+  for (const k of Object.keys(materials)) {
+    const b = document.createElement('button');
+    b.className = 'mat'; b.dataset.mat = k; b.id = 'mat-' + k;
+    b.setAttribute('aria-pressed', String(k === matKey));
+    b.innerHTML = `<span class="ph"></span>${MAT_NAMES[k]}`;
+    b.addEventListener('click', () => setMaterial(k));
+    lib.append(b);
+  }
+  requestAnimationFrame(() => {
+    const tr = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    tr.setSize(128, 128); tr.toneMapping = THREE.ACESFilmicToneMapping;
+    const ts = new THREE.Scene(); ts.background = new THREE.Color('#1b1f24');
+    ts.environment = new THREE.PMREMGenerator(tr).fromScene(new RoomEnvironment(tr), 0.04).texture;
+    const l = new THREE.DirectionalLight(0xffffff, 1.4); l.position.set(2, 3, 2); ts.add(l);
+    const tc = new THREE.PerspectiveCamera(30, 1, 0.1, 10); tc.position.set(0, 0.25, 3.9); tc.lookAt(0, 0, 0);
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 64, 48)); ts.add(ball);
+    for (const k of Object.keys(materials)) {
+      ball.material = materials[k];
+      tr.render(ts, tc);
+      const img = new Image(); img.alt = ''; img.src = tr.domElement.toDataURL();
+      $('mat-' + k).querySelector('.ph').replaceWith(img);
+    }
+    tr.dispose(); tr.forceContextLoss();
+  });
+}
 $('rough').addEventListener('input', (e) => {
   materials[matKey].roughness = +e.target.value;
   $('rough-o').textContent = (+e.target.value).toFixed(2);
@@ -815,19 +913,19 @@ $('weight').addEventListener('input', (e) => {
 $('zfreq').addEventListener('input', (e) => {
   zebraMat.uniforms.uFreq.value = +e.target.value;
   $('zfreq-o').textContent = e.target.value;
-  if (mode !== 'zebra') setMode('zebra');
+  if (diagMode !== 'zebra') setDiag('zebra');
 });
 $('res').addEventListener('input', (e) => { res = +e.target.value; $('res-o').textContent = res; rebuild(); });
 $('show-surf').addEventListener('change', (e) => {
   mesh.visible = isoLines.visible = e.target.checked;
-  if (e.target.checked) isoLines.visible = $('show-iso').checked && mode !== 'wire';
+  if (e.target.checked) isoLines.visible = $('show-iso').checked && diagMode !== 'wire';
 });
 $('show-cv').addEventListener('change', (e) => {
   handles.visible = e.target.checked; hullLines.visible = e.target.checked;
   if (!e.target.checked) select(null);
   refreshCurves();
 });
-$('show-iso').addEventListener('change', (e) => { isoLines.visible = e.target.checked && mode !== 'wire'; });
+$('show-iso').addEventListener('change', (e) => { isoLines.visible = e.target.checked && diagMode !== 'wire'; });
 $('show-comb').addEventListener('change', refreshCurves);
 $('comb').addEventListener('input', (e) => { combScale = +e.target.value; $('comb-o').textContent = combScale.toFixed(1); refreshCurves(); });
 $('reset').addEventListener('click', () => { cps = initialCPs(); buildHandles(); select(handles.children[2 * NV + 3]); rebuild(); });
@@ -863,22 +961,126 @@ addEventListener('keydown', (e) => {
   if (k === 'f') frame();
   if (k === 't') topView();
   if (k === 'c') setTool('curve');
+  if (k === 'v') cycleLayout();
+  if (k === '1') setDiag('zebra');
+  if (k === '2') setDiag('curv');
+  if (k === '3') setDiag('wire');
   if (k === 'enter' && tool === 'curve') finishDraft();
   if (k === 'escape') { if (tool === 'curve') setTool('select'); else select(null); }
   if ((k === 'delete' || k === 'backspace') && selected?.userData.kind === 'curve') deleteSelectedCurve();
 });
 
+// ---------- Menú radial (mantener Espacio) ----------
+const RADIAL = [
+  { label: 'Curva', key: 'C', run: () => setTool('curve') },
+  { label: 'Cambiar vista', key: 'V', run: cycleLayout },
+  { label: 'Cebra', key: '1', run: () => setDiag('zebra') },
+  { label: 'Curvatura', key: '2', run: () => setDiag('curv') },
+  { label: 'Seleccionar', key: 'Esc', run: () => setTool('select') },
+  { label: 'Malla', key: '3', run: () => setDiag('wire') },
+  { label: 'Vista superior', key: 'T', run: topView },
+  { label: 'Encuadrar', key: 'F', run: frame },
+];
+const radialEl = $('radial');
+let radialOn = false, radialPick = -1, lastPtr = { x: innerWidth / 2, y: innerHeight / 2 }, radialAt = lastPtr;
+RADIAL.forEach((it, n) => {
+  const a = -Math.PI / 2 + (n / RADIAL.length) * Math.PI * 2;
+  const b = document.createElement('button');
+  b.className = 'item'; b.id = 'radial-' + n;
+  b.innerHTML = `${it.label}<kbd>${it.key}</kbd>`;
+  b.style.left = Math.cos(a) * 92 + 'px'; b.style.top = Math.sin(a) * 92 + 'px';
+  b.addEventListener('pointerenter', () => highlightRadial(n));
+  b.addEventListener('click', () => { radialPick = n; closeRadial(true); });
+  radialEl.append(b);
+});
+function highlightRadial(n) {
+  radialPick = n;
+  radialEl.querySelectorAll('.item').forEach((el, m) => el.classList.toggle('on', m === n));
+  $('radial-center').textContent = n >= 0 ? RADIAL[n].label : 'Suelta sobre una opción';
+}
+function openRadial() {
+  radialOn = true; radialAt = { ...lastPtr };
+  radialEl.style.left = radialAt.x + 'px'; radialEl.style.top = radialAt.y + 'px';
+  radialEl.hidden = false; highlightRadial(-1);
+}
+function closeRadial(run) {
+  if (!radialOn) return;
+  radialOn = false; radialEl.hidden = true;
+  if (run && radialPick >= 0) RADIAL[radialPick].run();
+}
+addEventListener('pointermove', (e) => {
+  lastPtr = { x: e.clientX, y: e.clientY };
+  if (!radialOn) return;
+  const dx = e.clientX - radialAt.x, dy = e.clientY - radialAt.y;
+  if (Math.hypot(dx, dy) < 30) return highlightRadial(-1);
+  const a = Math.atan2(dy, dx) + Math.PI / 2;
+  highlightRadial(Math.round(((a + Math.PI * 2) % (Math.PI * 2)) / (Math.PI * 2 / RADIAL.length)) % RADIAL.length);
+});
+addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || e.target.tagName === 'INPUT') return;
+  e.preventDefault();
+  if (!e.repeat && !radialOn) openRadial();
+}, true);
+addEventListener('keyup', (e) => {
+  if (e.code !== 'Space') return;
+  e.preventDefault();
+  closeRadial(true);
+}, true);
+
+// ---------- Vistas y dibujo ----------
+let dragPane = null;
+function panes() {
+  const w = view.clientWidth, h = Math.max(view.clientHeight, 1);
+  if (layout !== 'split') return [{ kind: layout, x: 0, w, h }];
+  const hw = Math.floor(w / 2);
+  return [{ kind: 'diag', x: 0, w: hw, h }, { kind: 'render', x: hw, w: w - hw, h }];
+}
+function paneAt(clientX) {
+  const x = clientX - renderer.domElement.getBoundingClientRect().left;
+  const ps = panes();
+  return ps.find((p) => x >= p.x && x < p.x + p.w) || ps[ps.length - 1];
+}
+function paneNDC(e, p) {
+  const r = renderer.domElement.getBoundingClientRect();
+  return { x: ((e.clientX - r.left - p.x) / p.w) * 2 - 1, y: -((e.clientY - r.top) / p.h) * 2 + 1 };
+}
+renderer.domElement.addEventListener('pointerdown', (e) => { dragPane = paneAt(e.clientX); }, true);
+addEventListener('pointerup', () => { requestAnimationFrame(() => { dragPane = null; }); });
+
+function renderPane(p) {
+  renderer.setViewport(p.x, 0, p.w, p.h);
+  renderer.setScissor(p.x, 0, p.w, p.h);
+  camera.aspect = p.w / p.h;
+  camera.updateProjectionMatrix();
+  const diag = p.kind === 'diag';
+  mesh.material = diag ? diagMaterial() : materials[matKey];
+  scene.background = diag ? diagBg : renderBg;
+  camera.layers.set(0);
+  if (diag) camera.layers.enable(DIAG);
+  renderer.render(scene, camera);
+}
+function renderFrame() {
+  orbit.update();
+  renderer.shadowMap.needsUpdate = true;
+  const ps = panes();
+  ps.forEach(renderPane);
+  // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
+  const p = dragPane || paneAt(lastPtr.x);
+  camera.aspect = p.w / p.h; camera.updateProjectionMatrix();
+}
+
 // ---------- Arranque ----------
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setSize(w, h, false);
-  camera.aspect = w / Math.max(h, 1);
-  camera.updateProjectionMatrix();
-  curveMat.resolution.set(w, h);
-  draftMat.resolution.set(w, h);
+  const p = panes()[0];
+  curveMat.resolution.set(p.w, p.h);
+  draftMat.resolution.set(p.w, p.h);
 }
 new ResizeObserver(resize).observe(view);
 resize();
+buildMaterialLibrary();
+updatePaneUI();
 
 cps = initialCPs();
 buildHandles();
@@ -888,9 +1090,10 @@ frame();
 addCurve([[-3.25, 3.75], [-2, 2.75], [-0.5, 4.5], [1, 3], [2.25, 4.25], [3.25, 3.5]].map(([x, z]) => new THREE.Vector3(x, 0.01, z)));
 select(handles.children[2 * NV + 3]);
 
-renderer.setAnimationLoop(() => { orbit.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(renderFrame);
 setNavStyle(navStyle);
 window.__cam = camera;
+window.__forja = { camera, handles, panes };
 window.__ready = true;
 </script>
 </body>

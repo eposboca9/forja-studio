@@ -5,7 +5,7 @@ Este archivo es la memoria del proyecto entre sesiones. Léelo al empezar y actu
 ## Usuario
 
 - Habla español; explicar las cosas de forma simple, sin jerga.
-- Prueba desde el celular (iPhone) y quizá desde computadora.
+- Prueba en laptop. Decisión del usuario: por ahora NO diseñar para celular; todo para laptop.
 - Presupuesto cero: solo herramientas gratuitas y de código abierto.
 
 ## Visión
@@ -51,10 +51,24 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Modo "Simple / táctil" por defecto si pointer: coarse. Selector en el panel.
 - Pendiente: el usuario quiere los mismos atajos que Alias; preguntarle cuáles usa más y hacer un editor de atajos.
 
+## Hecho (v0.4)
+
+- Vista dividida en un solo canvas con scissor: izquierda Diagnóstico (cebra/curvatura/malla, teclas 1-3), derecha Render PBR.
+  `layout` = split | diag | render, tecla V. Funciones clave: panes(), paneAt(), paneNDC(), renderPane().
+- Capa 1 (DIAG) = solo diagnóstico: cuadrícula, isoparamétricas, polígonos de control, peines.
+- gizmo._getPointer se sobrescribe para medir el puntero dentro de la mitad tocada (dragPane).
+- Menú radial: mantener Espacio, soltar sobre la opción (array RADIAL).
+- Biblioteca de 9 materiales con miniaturas renderizadas en un WebGLRenderer temporal.
+- La imagen de referencia de interfaz del usuario: vista dividida, menú radial, biblioteca de materiales,
+  pestañas de espacio de trabajo, árbol de objetos, línea de tiempo (convertirla en historial de versiones).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
 
-1. Superficie a partir de curvas (loft / barrido) usando las curvas dibujadas.
-2. Integrar OpenCASCADE (opencascade.js, WebAssembly) para sólidos, booleanas y redondeos.
-3. Guardar y abrir proyectos (archivo .json) y exportar a STEP/OBJ.
+1. v0.5: árbol de objetos a la izquierda, pestañas de espacio de trabajo, paneles plegables.
+2. v0.6: HDRI intercambiables (estudio, calle, desierto) y render con trazado de rayos (three-gpu-pathtracer).
+3. Superficie a partir de curvas (loft / barrido) usando las curvas dibujadas.
+4. Editor de atajos (esperando la lista de atajos de Alias del usuario).
+5. Integrar OpenCASCADE (opencascade.js, WebAssembly) para sólidos, booleanas y redondeos.
+6. Guardar y abrir proyectos (archivo .json) y exportar a STEP/OBJ.
