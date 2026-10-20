@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>body{margin:0}[hidden]{display:none!important}</style>
+<title>Forja Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: estudio de modelado — barra superior, viewport dominante con herramientas flotantes, panel de propiedades a la derecha, barra de estado. Tema oscuro deliberado, como las apps 3D profesionales. */
+  :root {
+    --bg: #0d0f12;
+    --panel: #15181c;
+    --panel-2: #1b1f24;
+    --line: #262b32;
+    --fg: #dfe3e8;
+    --muted: #818a96;
+    --accent: #f0a63a;
+    --sel: #57b6ff;
+    --font-ui: "Geist", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 13px;
+    overflow: hidden;
+  }
+  .app {
+    height: 100%;
+    display: grid;
+    grid-template-columns: 1fr 272px;
+    grid-template-rows: 46px 1fr 28px;
+    grid-template-areas: "top top" "view panel" "status status";
+  }
+  /* Barra superior */
+  .top {
+    grid-area: top; display: flex; align-items: center; gap: 16px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: .01em; white-space: nowrap; }
+  .brand svg { width: 20px; height: 20px; }
+  .file { color: var(--muted); font-family: var(--font-mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .seg { display: flex; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 2px; margin-left: auto; }
+  .seg button {
+    font: inherit; font-size: 12px; color: var(--muted); background: none; border: 0; padding: 5px 11px; border-radius: 5px; cursor: pointer;
+  }
+  .seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); }
+  .seg button:hover { color: var(--fg); }
+  .tag { font-family: var(--font-mono); font-size: 11px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+
+  /* Viewport */
+  .view { grid-area: view; position: relative; min-width: 0; min-height: 0; background: var(--bg); }
+  .view canvas { display: block; width: 100%; height: 100%; outline: none; }
+  .tools {
+    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 2px; padding: 4px;
+    background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--line); border-radius: 10px;
+    backdrop-filter: blur(6px);
+  }
+  .tools button {
+    width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 7px; background: none; color: var(--muted); cursor: pointer;
+  }
+  .tools button svg { width: 18px; height: 18px; }
+  .tools button:hover:not(:disabled) { background: var(--panel-2); color: var(--fg); }
+  .tools button[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  .tools button:disabled { opacity: .38; cursor: not-allowed; }
+  .tools hr { border: 0; border-top: 1px solid var(--line); margin: 3px 4px; }
+  .vlabel { position: absolute; left: 12px; top: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; }
+  .hint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); font-size: 11px; color: var(--muted); background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; white-space: nowrap; }
+  .legend { position: absolute; right: 12px; top: 10px; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+  .legend .bar { width: 140px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #2b6cff, #27c2b5, #e9e46a, #ff6a3d, #d81b4a); }
+  .legend .ends { width: 140px; display: flex; justify-content: space-between; }
+
+  /* Panel */
+  .panel { grid-area: panel; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; min-height: 0; }
+  .sec { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+  .sec h2 { margin: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .swatches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .sw { display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: 0; color: var(--muted); font: inherit; font-size: 10px; cursor: pointer; padding: 0; }
+  .sw i { width: 34px; height: 34px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+  .sw[aria-pressed="true"] { color: var(--fg); }
+  .sw[aria-pressed="true"] i { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3.5px var(--accent); }
+  .row { display: grid; grid-template-columns: 84px 1fr 44px; align-items: center; gap: 8px; }
+  .row label { color: var(--muted); }
+  .row output { font-family: var(--font-mono); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .check { display: flex; align-items: center; gap: 8px; color: var(--fg); cursor: pointer; }
+  .check input { accent-color: var(--accent); }
+  .coords { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .coord { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; display: flex; justify-content: space-between; gap: 4px; }
+  .coord b { font-weight: 500; }
+  .coord b.x { color: #ff6b6b; } .coord b.y { color: #7bd88f; } .coord b.z { color: #6aa8ff; }
+  .muted { color: var(--muted); font-size: 12px; line-height: 1.45; margin: 0; }
+  .btn { font: inherit; font-size: 12px; color: var(--fg); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; cursor: pointer; }
+  .btn:hover { border-color: var(--muted); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--sel); outline-offset: 2px; }
+
+  /* Barra de estado */
+  .status {
+    grid-area: status; display: flex; align-items: center; gap: 18px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    background: var(--panel); border-top: 1px solid var(--line);
+    font-family: var(--font-mono); font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden;
+  }
+  .status .dot { width: 6px; height: 6px; border-radius: 50%; background: #5fd38a; display: inline-block; margin-right: 6px; }
+  .status .r { margin-left: auto; }
+
+  .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: 46px 1fr 40% 28px; grid-template-areas: "top" "view" "panel" "status"; }
+    .panel { border-left: 0; border-top: 1px solid var(--line); }
+    .file, .tag, .hint, .status .r { display: none; }
+    .seg button { padding: 5px 8px; }
+    .tools { top: auto; bottom: 10px; transform: none; flex-direction: row; }
+    .tools hr { border-top: 0; border-left: 1px solid var(--line); margin: 4px 3px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 17c4-9 14-9 18 0" stroke="#f0a63a" stroke-width="2" stroke-linecap="round"/><circle cx="3" cy="17" r="2" fill="#57b6ff"/><circle cx="12" cy="7.5" r="2" fill="#57b6ff"/><circle cx="21" cy="17" r="2" fill="#57b6ff"/></svg>
+      Forja Studio
+    </div>
+    <span class="file">capo_concepto.forja</span>
+    <div class="seg" role="group" aria-label="Modo de visualización">
+      <button id="m-real" data-mode="real" aria-pressed="true">Realista</button>
+      <button id="m-zebra" data-mode="zebra" aria-pressed="false">Cebra</button>
+      <button id="m-curv" data-mode="curv" aria-pressed="false">Curvatura</button>
+      <button id="m-wire" data-mode="wire" aria-pressed="false">Malla</button>
+    </div>
+    <span class="tag">DEMO v0.1</span>
+  </header>
+
+  <main class="view" id="view">
+    <div class="loading" id="loading">Cargando motor 3D…</div>
+    <span class="vlabel">PERSPECTIVA · NURBS</span>
+    <div class="legend" id="legend" hidden>
+      <span>Curvatura media</span>
+      <div class="bar"></div>
+      <div class="ends"><span>cóncava</span><span>plana</span><span>convexa</span></div>
+    </div>
+    <nav class="tools" aria-label="Herramientas">
+      <button id="t-select" aria-pressed="true" title="Seleccionar y mover puntos de control (W)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M5 3l14 8-6 1.5L10 19z"/></svg>
+      </button>
+      <button id="t-frame" title="Encuadrar superficie (F)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg>
+      </button>
+      <hr>
+      <button disabled title="Curva NURBS (próximamente)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 18C7 4 17 20 21 6"/></svg>
+      </button>
+      <button disabled title="Superficie por barrido (próximamente)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 16l6-9h12l-6 9z"/></svg>
+      </button>
+      <button disabled title="Extruir (próximamente)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 9l8-5 8 5v8l-8 4-8-4z M4 9l8 4 8-4 M12 13v8"/></svg>
+      </button>
+      <button disabled title="Redondeo de aristas (próximamente)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V12a8 8 0 0 1 8-8h8"/></svg>
+      </button>
+      <button disabled title="Booleanas (próximamente)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg>
+      </button>
+    </nav>
+    <div class="hint">Arrastrar: orbitar · Clic en un punto azul: seleccionar · Flechas del gizmo: moverlo · Rueda: zoom</div>
+  </main>
+
+  <aside class="panel" aria-label="Propiedades">
+    <section class="sec">
+      <h2>Material</h2>
+      <div class="swatches" id="swatches">
+        <button class="sw" id="mat-paint" data-mat="paint" aria-pressed="true"><i style="background: radial-gradient(circle at 35% 30%, #ff6a6f, #9e0f19 60%, #3a0508)"></i>Pintura</button>
+        <button class="sw" id="mat-alu" data-mat="alu" aria-pressed="false"><i style="background: radial-gradient(circle at 35% 30%, #ffffff, #b7bcc4 50%, #50555c)"></i>Aluminio</button>
+        <button class="sw" id="mat-ceram" data-mat="ceram" aria-pressed="false"><i style="background: radial-gradient(circle at 35% 30%, #ffffff, #ece8e1 55%, #9a958d)"></i>Cerámica</button>
+        <button class="sw" id="mat-glass" data-mat="glass" aria-pressed="false"><i style="background: radial-gradient(circle at 35% 30%, #ffffff, #a9d8ee 45%, #2c5568)"></i>Vidrio</button>
+        <button class="sw" id="mat-clay" data-mat="clay" aria-pressed="false"><i style="background: radial-gradient(circle at 35% 30%, #d8cbbd, #a89683 55%, #5a4e42)"></i>Arcilla</button>
+      </div>
+      <div class="row"><label for="rough">Rugosidad</label><input id="rough" type="range" min="0" max="1" step="0.01" value="0.35"><output id="rough-o">0.35</output></div>
+    </section>
+
+    <section class="sec">
+      <h2>Punto de control</h2>
+      <p class="muted" id="cv-name">CV [2, 3] seleccionado</p>
+      <div class="coords">
+        <div class="coord"><b class="x">X</b><span id="cx">0.00</span></div>
+        <div class="coord"><b class="y">Y</b><span id="cy">0.00</span></div>
+        <div class="coord"><b class="z">Z</b><span id="cz">0.00</span></div>
+      </div>
+      <div class="row"><label for="weight">Peso (w)</label><input id="weight" type="range" min="0.2" max="5" step="0.05" value="1"><output id="weight-o">1.00</output></div>
+      <p class="muted">El peso es lo que hace a una superficie NURBS “racional”: un peso mayor atrae la superficie hacia el punto.</p>
+    </section>
+
+    <section class="sec">
+      <h2>Análisis cebra</h2>
+      <div class="row"><label for="zfreq">Franjas</label><input id="zfreq" type="range" min="4" max="40" step="1" value="14"><output id="zfreq-o">14</output></div>
+      <p class="muted">Franjas continuas y suaves indican continuidad de curvatura (G2), como en Alias.</p>
+    </section>
+
+    <section class="sec">
+      <h2>Superficie</h2>
+      <div class="row"><label for="res">Teselado</label><input id="res" type="range" min="16" max="140" step="2" value="90"><output id="res-o">90</output></div>
+      <label class="check"><input type="checkbox" id="show-cv" checked> Mostrar puntos de control</label>
+      <label class="check"><input type="checkbox" id="show-iso" checked> Mostrar isoparamétricas</label>
+      <button class="btn" id="reset">Restablecer superficie</button>
+    </section>
+  </aside>
+
+  <footer class="status">
+    <span><span class="dot"></span>Listo</span>
+    <span>NURBS grado 3×3</span>
+    <span>6×6 CVs</span>
+    <span id="st-tris">— triángulos</span>
+    <span class="r">Unidades: dm · Escena: 1 superficie</span>
+  </footer>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { NURBSSurface } from 'three/addons/curves/NURBSSurface.js';
+import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const $ = (id) => document.getElementById(id);
+const view = $('view');
+
+// ---------- Renderer y escena ----------
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+view.prepend(renderer.domElement);
+$('loading').remove();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#14171b');
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+
+const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 200);
+camera.position.set(7.5, 5.2, 8.5);
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.target.set(0, 0.6, 0);
+orbit.enableDamping = true;
+
+const key = new THREE.DirectionalLight(0xffffff, 1.6);
+key.position.set(4, 9, 3);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -6; key.shadow.camera.right = 6;
+key.shadow.camera.top = 6; key.shadow.camera.bottom = -6;
+key.shadow.radius = 6;
+scene.add(key);
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.ShadowMaterial({ opacity: 0.35 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+const grid = new THREE.GridHelper(30, 30, 0x3a414a, 0x23282e);
+grid.position.y = 0.001;
+scene.add(grid);
+
+// ---------- Superficie NURBS ----------
+const NU = 6, NV = 6, DEG = 3;
+const knots = [0, 0, 0, 0, 1 / 3, 2 / 3, 1, 1, 1, 1];
+let cps = [];
+function initialCPs() {
+  const out = [];
+  for (let i = 0; i < NU; i++) {
+    const row = [], u = i / (NU - 1);
+    for (let j = 0; j < NV; j++) {
+      const v = j / (NV - 1);
+      const x = (u - 0.5) * 6.4;
+      const z = (v - 0.5) * 4.4;
+      const crown = Math.pow(Math.sin(Math.PI * u), 1.1) * (0.55 + 0.45 * Math.sin(Math.PI * v));
+      const y = 0.35 + 1.35 * crown + 0.45 * u;
+      row.push(new THREE.Vector4(x, y, z, 1));
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+const materials = {
+  paint: new THREE.MeshPhysicalMaterial({ color: '#b0121c', metalness: 0.55, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.03, side: THREE.DoubleSide }),
+  alu: new THREE.MeshPhysicalMaterial({ color: '#cfd3d8', metalness: 1, roughness: 0.22, side: THREE.DoubleSide }),
+  ceram: new THREE.MeshPhysicalMaterial({ color: '#f1ede6', metalness: 0, roughness: 0.18, clearcoat: 0.8, clearcoatRoughness: 0.05, side: THREE.DoubleSide }),
+  glass: new THREE.MeshPhysicalMaterial({ color: '#e4f5ff', metalness: 0, roughness: 0.03, transmission: 1, thickness: 0.4, ior: 1.5, side: THREE.DoubleSide }),
+  clay: new THREE.MeshPhysicalMaterial({ color: '#b3a08c', metalness: 0, roughness: 0.85, side: THREE.DoubleSide }),
+};
+const zebraMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  uniforms: { uFreq: { value: 14 } },
+  vertexShader: `
+    varying vec3 vN; varying vec3 vV;
+    void main() {
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      vN = normalize(normalMatrix * normal);
+      vV = mv.xyz;
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: `
+    uniform float uFreq; varying vec3 vN; varying vec3 vV;
+    void main() {
+      vec3 n = normalize(vN);
+      if (!gl_FrontFacing) n = -n;
+      vec3 r = reflect(normalize(vV), n);
+      float s = (r.y * 0.5 + 0.5) * uFreq;
+      float f = fract(s);
+      float w = fwidth(s) * 1.2;
+      float stripe = smoothstep(0.5 - w, 0.5 + w, f) - smoothstep(1.0 - w, 1.0, f);
+      float shade = 0.82 + 0.18 * max(dot(n, normalize(vec3(0.3, 1.0, 0.5))), 0.0);
+      gl_FragColor = vec4(vec3(mix(0.06, 0.96, stripe) * shade), 1.0);
+    }`,
+});
+zebraMat.extensions = { derivatives: true };
+const curvMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
+const wireMat = new THREE.MeshBasicMaterial({ color: '#57b6ff', wireframe: true, transparent: true, opacity: 0.55 });
+
+let surface, mesh, isoLines, hullLines;
+let mode = 'real', matKey = 'paint', res = 90;
+
+function evalSurface() {
+  surface = new NURBSSurface(DEG, DEG, knots, knots, cps);
+}
+
+function curvatureColors(geo, seg) {
+  const pos = geo.attributes.position, nor = geo.attributes.normal;
+  const n = seg + 1, count = pos.count;
+  const k = new Float32Array(count);
+  const P = (i) => new THREE.Vector3().fromBufferAttribute(pos, i);
+  const idx = (a, b) => Math.min(n - 1, Math.max(0, a)) * n + Math.min(n - 1, Math.max(0, b));
+  let maxAbs = 1e-6;
+  for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) {
+    const ia = Math.min(n - 2, Math.max(1, a)), ib = Math.min(n - 2, Math.max(1, b));
+    const c = idx(ia, ib), p = P(c);
+    const nb = [idx(ia - 1, ib), idx(ia + 1, ib), idx(ia, ib - 1), idx(ia, ib + 1)].map(P);
+    const avg = nb.reduce((s, q) => s.add(q), new THREE.Vector3()).multiplyScalar(0.25);
+    const e2 = nb.reduce((s, q) => s + q.distanceToSquared(p), 0) / 4;
+    const L = avg.sub(p);
+    const nn = new THREE.Vector3().fromBufferAttribute(nor, c);
+    const val = (2 * L.dot(nn)) / Math.max(e2, 1e-9);
+    k[a * n + b] = val;
+    maxAbs = Math.max(maxAbs, Math.abs(val));
+  }
+  const ramp = ['#2b6cff', '#27c2b5', '#e9e46a', '#ff6a3d', '#d81b4a'].map((h) => new THREE.Color(h));
+  const colors = new Float32Array(count * 3), tmp = new THREE.Color();
+  const scale = Math.min(maxAbs, 1.2);
+  for (let i = 0; i < count; i++) {
+    const t = THREE.MathUtils.clamp(0.5 + 0.5 * (k[i] / scale), 0, 1) * (ramp.length - 1);
+    const lo = Math.floor(t), hi = Math.min(ramp.length - 1, lo + 1);
+    tmp.copy(ramp[lo]).lerp(ramp[hi], t - lo);
+    colors.set([tmp.r, tmp.g, tmp.b], i * 3);
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+
+function currentMaterial() {
+  if (mode === 'zebra') return zebraMat;
+  if (mode === 'curv') return curvMat;
+  if (mode === 'wire') return wireMat;
+  return materials[matKey];
+}
+
+function buildIso() {
+  const pts = [], N = 10, S = 60, t = new THREE.Vector3();
+  for (let i = 0; i <= N; i++) {
+    const c = i / N;
+    for (let s = 0; s < S; s++) {
+      surface.getPoint(c, s / S, t); pts.push(t.x, t.y, t.z);
+      surface.getPoint(c, (s + 1) / S, t); pts.push(t.x, t.y, t.z);
+      surface.getPoint(s / S, c, t); pts.push(t.x, t.y, t.z);
+      surface.getPoint((s + 1) / S, c, t); pts.push(t.x, t.y, t.z);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return g;
+}
+
+function buildHull() {
+  const pts = [];
+  for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) {
+    const p = cps[i][j];
+    if (i < NU - 1) { const q = cps[i + 1][j]; pts.push(p.x, p.y, p.z, q.x, q.y, q.z); }
+    if (j < NV - 1) { const q = cps[i][j + 1]; pts.push(p.x, p.y, p.z, q.x, q.y, q.z); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return g;
+}
+
+const isoMat = new THREE.LineBasicMaterial({ color: '#0b0d10', transparent: true, opacity: 0.35 });
+const hullMat = new THREE.LineDashedMaterial({ color: '#57b6ff', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.7 });
+
+function rebuild() {
+  evalSurface();
+  const geo = new ParametricGeometry((u, v, target) => surface.getPoint(u, v, target), res, res);
+  if (mode === 'curv') curvatureColors(geo, res);
+  if (!mesh) {
+    mesh = new THREE.Mesh(geo, currentMaterial());
+    mesh.castShadow = true;
+    scene.add(mesh);
+  } else {
+    mesh.geometry.dispose();
+    mesh.geometry = geo;
+    mesh.material = currentMaterial();
+  }
+  if (isoLines) { isoLines.geometry.dispose(); isoLines.geometry = buildIso(); }
+  else { isoLines = new THREE.LineSegments(buildIso(), isoMat); scene.add(isoLines); }
+  if (hullLines) { hullLines.geometry.dispose(); hullLines.geometry = buildHull(); }
+  else { hullLines = new THREE.LineSegments(buildHull(), hullMat); scene.add(hullLines); }
+  hullLines.computeLineDistances();
+  isoLines.visible = $('show-iso').checked && mode !== 'wire';
+  hullLines.visible = $('show-cv').checked;
+  $('st-tris').textContent = (res * res * 2).toLocaleString('es') + ' triángulos';
+}
+
+// ---------- Puntos de control ----------
+const handleGeo = new THREE.SphereGeometry(0.075, 16, 12);
+const handleMat = new THREE.MeshBasicMaterial({ color: '#57b6ff', depthTest: false, transparent: true });
+const handleSelMat = new THREE.MeshBasicMaterial({ color: '#f0a63a', depthTest: false, transparent: true });
+const handles = new THREE.Group();
+scene.add(handles);
+
+function buildHandles() {
+  handles.clear();
+  for (let i = 0; i < NU; i++) for (let j = 0; j < NV; j++) {
+    const h = new THREE.Mesh(handleGeo, handleMat);
+    h.position.set(cps[i][j].x, cps[i][j].y, cps[i][j].z);
+    h.userData = { i, j };
+    h.renderOrder = 10;
+    handles.add(h);
+  }
+}
+
+const gizmo = new TransformControls(camera, renderer.domElement);
+gizmo.setSize(0.8);
+scene.add(gizmo);
+gizmo.addEventListener('dragging-changed', (e) => { orbit.enabled = !e.value; });
+let selected = null;
+
+function select(h) {
+  if (selected) selected.material = handleMat;
+  selected = h;
+  if (h) {
+    h.material = handleSelMat;
+    gizmo.attach(h);
+    $('cv-name').textContent = `CV [${h.userData.i}, ${h.userData.j}] seleccionado`;
+    $('weight').disabled = false;
+    $('weight').value = cps[h.userData.i][h.userData.j].w;
+  } else {
+    gizmo.detach();
+    $('cv-name').textContent = 'Ningún punto seleccionado. Haz clic en un punto azul.';
+    $('weight').disabled = true;
+  }
+  updateCVPanel();
+}
+
+function updateCVPanel() {
+  const fmt = (v) => v.toFixed(2);
+  if (!selected) { ['cx', 'cy', 'cz'].forEach((id) => ($(id).textContent = '—')); $('weight-o').textContent = '—'; return; }
+  const p = cps[selected.userData.i][selected.userData.j];
+  $('cx').textContent = fmt(p.x); $('cy').textContent = fmt(p.y); $('cz').textContent = fmt(p.z);
+  $('weight-o').textContent = fmt(p.w);
+}
+
+let pending = false;
+gizmo.addEventListener('objectChange', () => {
+  const { i, j } = selected.userData;
+  cps[i][j].x = selected.position.x;
+  cps[i][j].y = selected.position.y;
+  cps[i][j].z = selected.position.z;
+  updateCVPanel();
+  if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; rebuild(); }); }
+});
+
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt || gizmo.dragging) return;
+  const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
+  downAt = null;
+  if (moved > 4 || !handles.visible) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(mouse, camera);
+  ray.params.Points = { threshold: 0.1 };
+  const hit = ray.intersectObjects(handles.children)[0];
+  if (hit) select(hit.object);
+  else if (!gizmo.axis) select(null);
+});
+
+// ---------- Interfaz ----------
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.mode === m)));
+  $('legend').hidden = m !== 'curv';
+  rebuild();
+}
+document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+document.querySelectorAll('.sw').forEach((b) => b.addEventListener('click', () => {
+  matKey = b.dataset.mat;
+  document.querySelectorAll('.sw').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  $('rough').value = materials[matKey].roughness;
+  $('rough-o').textContent = (+materials[matKey].roughness).toFixed(2);
+  if (mode !== 'real') setMode('real'); else mesh.material = currentMaterial();
+}));
+$('rough').addEventListener('input', (e) => {
+  materials[matKey].roughness = +e.target.value;
+  $('rough-o').textContent = (+e.target.value).toFixed(2);
+});
+$('weight').addEventListener('input', (e) => {
+  if (!selected) return;
+  cps[selected.userData.i][selected.userData.j].w = +e.target.value;
+  updateCVPanel(); rebuild();
+});
+$('zfreq').addEventListener('input', (e) => {
+  zebraMat.uniforms.uFreq.value = +e.target.value;
+  $('zfreq-o').textContent = e.target.value;
+  if (mode !== 'zebra') setMode('zebra');
+});
+$('res').addEventListener('input', (e) => { res = +e.target.value; $('res-o').textContent = res; rebuild(); });
+$('show-cv').addEventListener('change', (e) => {
+  handles.visible = e.target.checked; hullLines.visible = e.target.checked;
+  if (!e.target.checked) select(null);
+});
+$('show-iso').addEventListener('change', (e) => { isoLines.visible = e.target.checked && mode !== 'wire'; });
+$('reset').addEventListener('click', () => { cps = initialCPs(); buildHandles(); select(handles.children[2 * NV + 3]); rebuild(); });
+
+function frame() {
+  orbit.target.set(0, 0.8, 0);
+  camera.position.set(7.5, 5.2, 8.5);
+}
+$('t-frame').addEventListener('click', frame);
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'f' || e.key === 'F') frame();
+  if (e.key === 'Escape') select(null);
+});
+
+// ---------- Arranque ----------
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / Math.max(h, 1);
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(view);
+resize();
+
+cps = initialCPs();
+buildHandles();
+rebuild();
+select(handles.children[2 * NV + 3]);
+
+renderer.setAnimationLoop(() => { orbit.update(); renderer.render(scene, camera); });
+window.__ready = true;
+</script>
+</body>
+</html>
