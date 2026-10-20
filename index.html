@@ -163,6 +163,7 @@
   .iconbtn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
   .top .seg.pick { margin-left: 8px; }
   .top .seg.lay { margin-left: auto; }
+  .top .seg.snap { margin-left: 8px; }
   .top .lbl { color: var(--muted); font-size: 12px; margin-left: 8px; }
   .marquee { position: absolute; border: 1px dashed var(--sel); background: color-mix(in srgb, var(--sel) 12%, transparent); pointer-events: none; z-index: 5; }
   .toast { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); background: var(--panel-2); border: 1px solid var(--line); color: var(--fg); padding: 8px 14px; border-radius: 8px; font-size: 12px; z-index: 6; max-width: 80%; text-align: center; }
@@ -184,6 +185,12 @@
   .grid4 select, .grid4 input { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 6px; font: inherit; font-family: var(--font-mono); font-size: 12px; }
   .ops { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .selorder { margin: 0; padding-left: 20px; color: var(--fg); font-size: 12px; line-height: 1.6; }
+  .seg kbd { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-left: 4px; }
+  .seg.snap button[aria-pressed="true"] { background: color-mix(in srgb, #7cf0a0 20%, transparent); color: #7cf0a0; }
+  .seg.snap button.held { box-shadow: inset 0 0 0 1px #7cf0a0; color: #7cf0a0; }
+  .ops2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  select.sel { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12px; }
   .tools .tl { font-size: 9px; color: var(--muted); text-align: center; letter-spacing: .05em; padding: 2px 0; }
 </style>
 </head>
@@ -200,12 +207,18 @@
       <button id="pick-object" data-pick="object" aria-pressed="true" title="Seleccionar objetos completos (O)">Objetos</button>
       <button id="pick-cv" data-pick="cv" aria-pressed="false" title="Seleccionar puntos de control (P)">CVs</button>
     </div>
+    <span class="lbl">Snap</span>
+    <div class="seg snap" role="group" aria-label="Snap fijo">
+      <button id="snap-grid" data-snap="grid" aria-pressed="false" title="Snap a la rejilla. Momentáneo: mantener Alt">Rejilla <kbd>Alt</kbd></button>
+      <button id="snap-curve" data-snap="curve" aria-pressed="false" title="Snap a curvas y bordes. Momentáneo: mantener Ctrl+Alt">Curva <kbd>Ctrl+Alt</kbd></button>
+      <button id="snap-point" data-snap="point" aria-pressed="false" title="Snap a puntos: CVs, pivotes, extremos, esquinas. Momentáneo: mantener Ctrl">Punto <kbd>Ctrl</kbd></button>
+    </div>
     <div class="seg lay" role="group" aria-label="Distribución de la vista">
       <button id="lay-split" data-layout="split" aria-pressed="true" title="Diagnóstico y render lado a lado (V)">Dividida</button>
       <button id="lay-diag" data-layout="diag" aria-pressed="false" title="Solo diagnóstico (V)">Diagnóstico</button>
       <button id="lay-render" data-layout="render" aria-pressed="false" title="Solo render (V)">Render</button>
     </div>
-    <span class="tag">DEMO v0.5</span>
+    <span class="tag">DEMO v0.6</span>
   </header>
 
   <main class="view" id="view">
@@ -234,6 +247,10 @@
     </div>
     <nav class="tools" id="tools" aria-label="Herramientas">
       <button id="t-select" aria-pressed="true" title="Seleccionar (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 8-6 1.5L10 19z"/></svg></button>
+      <button id="t-move" aria-pressed="true" title="Mover (W)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></button>
+      <button id="t-rotate" aria-pressed="false" title="Rotar alrededor del pivote (E)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-3-6.2"/><path d="M20 4v5h-5"/></svg></button>
+      <button id="t-scale" aria-pressed="false" title="Escalar desde el pivote (R)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="10" height="10"/><path d="M13 4h7v7M20 4l-8 8"/></svg></button>
+      <button id="t-pivot" aria-pressed="false" title="Editar pivote del objeto (D)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>
       <button id="t-frame" title="Encuadrar selección (F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg></button>
       <button id="t-top" title="Vista superior (T)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></svg></button>
       <hr>
@@ -301,7 +318,8 @@
         <button id="plane-xz" data-plane="xz" aria-pressed="true">Suelo (XZ)</button>
         <button id="plane-xy" data-plane="xy" aria-pressed="false">Frontal (XY)</button>
       </div>
-      <label class="check"><input type="checkbox" id="snap" checked> Imán a la cuadrícula</label>
+      <div class="row"><label for="grid-step">Rejilla</label><select id="grid-step" class="sel"><option value="0.1">0.1 dm</option><option value="0.25" selected>0.25 dm</option><option value="0.5">0.5 dm</option><option value="1">1 dm</option></select><span></span></div>
+      <p class="muted">Snap al dibujar o mover: mantén Alt (rejilla), Ctrl (puntos) o Ctrl+Alt (curvas), o actívalos fijos arriba.</p>
     </section>
 
     <section class="sec">
@@ -320,12 +338,16 @@
         <button id="nav-simple" data-nav="simple" aria-pressed="false">Touchpad</button>
       </div>
       <p class="muted" id="nav-help"></p>
+      <label class="check"><input type="checkbox" id="click-pivot" checked> Clic en un objeto fija el pivote de la cámara</label>
+      <div class="row"><label for="sel-buttons">Botones</label><select id="sel-buttons" class="sel"><option value="alt" selected>Izq elige · medio añade · der quita</option><option value="default">Izq alterna · medio añade · der quita</option></select><span></span></div>
+      <p class="muted">Selección con los 3 botones del ratón, como en Alias (solo en navegación Alias). Ctrl + flechas: pasar al CV vecino. Ctrl+Shift + clic: menú radial.</p>
     </section>
   </aside>
 
   <footer class="status">
     <span><span class="dot"></span>Listo</span>
     <span id="st-sel">Nada seleccionado</span>
+    <span id="st-snap" style="color:#7cf0a0"></span>
     <span class="r" id="st-scene"></span>
   </footer>
 </div>

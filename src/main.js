@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -37,8 +36,6 @@ const DIAG = 1;
 scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture;
 
 const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 400);
-const orbit = new OrbitControls(camera, renderer.domElement);
-orbit.enableDamping = true;
 
 const key = new THREE.DirectionalLight(0xffffff, 1.6);
 key.position.set(4, 9, 3);
@@ -63,22 +60,18 @@ gridXY.visible = false;
 scene.add(gridXY);
 
 // ---------- Navegación ----------
-// Estilo Alias: Shift + Alt (Option en Mac) y botón izquierdo = girar, central = desplazar, derecho = acercar.
-// Sin esas teclas el ratón queda libre para seleccionar. La rueda siempre hace zoom.
-const NAV_ALIAS = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.DOLLY };
-const NAV_OFF = { LEFT: -1, MIDDLE: -1, RIGHT: -1 };
-const NAV_SIMPLE = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+// Cámara propia, como en Alias: el pivote de giro queda anclado en el mundo.
+// Girar orbita alrededor del pivote; desplazar y acercar mueven la cámara sin mover el pivote.
+// Estilo Alias: Shift + Alt (Option en Mac) + botón izquierdo = girar, central = desplazar, derecho = acercar.
 const NAV_HELP = {
-  alias: 'Mantén Shift + Alt (Option en Mac) y arrastra: botón izquierdo gira, central desplaza, derecho acerca o aleja. Doble clic sobre un objeto: mover ahí el pivote.',
-  simple: 'Para touchpad. Arrastra para girar, dos dedos para zoom, botón derecho para desplazar. Shift + arrastrar: selección por recuadro.',
+  alias: 'Mantén Shift + Alt (Option en Mac) y arrastra: botón izquierdo gira, central desplaza, derecho acerca o aleja. La rueda acerca hacia el cursor. El pivote no se mueve al desplazar.',
+  simple: 'Para touchpad. Arrastra para girar, botón derecho para desplazar, dos dedos para zoom. Shift + arrastrar: selección por recuadro.',
 };
+const pivot = new THREE.Vector3();
 let navStyle = 'alias';
-let navHeld = false, shiftHeld = false;
-function applyNav() {
-  if (navStyle === 'simple') orbit.mouseButtons = shiftHeld ? { ...NAV_SIMPLE, LEFT: -1 } : NAV_SIMPLE;
-  else orbit.mouseButtons = navHeld ? NAV_ALIAS : NAV_OFF;
-  renderer.domElement.style.cursor = navStyle === 'alias' && navHeld ? 'move' : '';
-}
+let navHeld = false, navDrag = null, navMovedLast = false;
+const mods = { shiftKey: false, altKey: false, ctrlKey: false, metaKey: false };
+function applyNav() { renderer.domElement.style.cursor = navStyle === 'alias' && navHeld ? 'move' : ''; }
 function setNavStyle(st) {
   navStyle = st;
   document.querySelectorAll('[data-nav]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.nav === st)));
@@ -87,34 +80,89 @@ function setNavStyle(st) {
   applyNav();
 }
 function trackMods(e) {
-  const held = e.shiftKey && e.altKey;
-  if (held !== navHeld || e.shiftKey !== shiftHeld) { navHeld = held; shiftHeld = e.shiftKey; applyNav(); }
+  if (e.clientX !== undefined) lastPtr = { x: e.clientX, y: e.clientY }; // antes que nadie: el snap lee esta posición
+  Object.assign(mods, { shiftKey: !!e.shiftKey, altKey: !!e.altKey, ctrlKey: !!e.ctrlKey, metaKey: !!e.metaKey });
+  const held = mods.shiftKey && mods.altKey;
+  if (held !== navHeld) { navHeld = held; applyNav(); }
+  updateSnapButtons();
 }
 addEventListener('keydown', (e) => { if (e.key === 'Alt') e.preventDefault(); trackMods(e); });
 addEventListener('keyup', trackMods);
 addEventListener('pointerdown', trackMods, true);
-addEventListener('blur', () => { navHeld = shiftHeld = false; applyNav(); });
+addEventListener('pointermove', trackMods, true);
+addEventListener('blur', () => trackMods({}));
 document.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', () => setNavStyle(b.dataset.nav)));
 
-// ---------- Pivote ----------
-// Doble clic sobre un objeto (o el suelo) mueve ahí el centro de giro; L lo lleva a la selección.
-const pivotMarker = (() => {
+const viewDir = () => new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+const camAxis = (x, y) => new THREE.Vector3(x, y, 0).applyQuaternion(camera.quaternion);
+function tumble(dx, dy) {
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -dx * 0.006)
+    .multiply(new THREE.Quaternion().setFromAxisAngle(camAxis(1, 0), -dy * 0.006));
+  camera.position.sub(pivot).applyQuaternion(q).add(pivot);
+  camera.quaternion.premultiply(q);
+}
+function track(dx, dy, pane) {
+  const depth = Math.max(0.05, pivot.clone().sub(camera.position).dot(viewDir()));
+  const k = (2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / pane.h;
+  camera.position.addScaledVector(camAxis(1, 0), -dx * k).addScaledVector(camAxis(0, 1), dy * k);
+}
+function dolly(amount, dir = viewDir()) {
+  camera.position.addScaledVector(dir, amount * Math.max(0.2, camera.position.distanceTo(pivot)));
+}
+function navModeFor(e) {
+  if (navStyle === 'alias') return e.shiftKey && e.altKey ? ['tumble', 'track', 'dolly'][e.button] || null : null;
+  if (e.shiftKey) return null; // Shift + arrastrar = recuadro
+  return ['tumble', 'dolly', 'track'][e.button] || null;
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  const m = navModeFor(e);
+  if (!m || (navStyle === 'simple' && gizmo.axis)) return; // en modo touchpad el gizmo tiene prioridad
+  navDrag = { mode: m, x: e.clientX, y: e.clientY, moved: false, pane: paneAt(e.clientX) };
+  renderer.domElement.setPointerCapture(e.pointerId);
+  if (navStyle === 'alias') e.stopImmediatePropagation();
+}, true);
+addEventListener('pointermove', (e) => {
+  if (!navDrag) return;
+  const dx = e.clientX - navDrag.x, dy = e.clientY - navDrag.y;
+  if (!navDrag.moved && Math.hypot(dx, dy) < 3) return;
+  navDrag.moved = true; navDrag.x = e.clientX; navDrag.y = e.clientY;
+  if (navDrag.mode === 'tumble') tumble(dx, dy);
+  else if (navDrag.mode === 'track') track(dx, dy, navDrag.pane);
+  else dolly((dx - dy) * 0.004);
+});
+addEventListener('pointerup', () => {
+  navMovedLast = !!navDrag && (navDrag.moved || navStyle === 'alias');
+  if (navDrag) pivotShowUntil = performance.now() + 600;
+  navDrag = null;
+});
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+renderer.domElement.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  setRay(e);
+  const step = Math.min(Math.abs(e.deltaY), 120) / 120;
+  dolly(-Math.sign(e.deltaY) * step * 0.18, ray.ray.direction.clone());
+  pivotShowUntil = performance.now() + 400;
+}, { passive: false });
+
+// ---------- Pivote de la cámara ----------
+// Clic o doble clic sobre un objeto lo coloca ahí; L lo lleva a la selección. Queda fijo al navegar.
+function makeCross(color, size, withBall) {
   const g = new THREE.Group();
-  const m = new THREE.LineBasicMaterial({ color: '#f0a63a', depthTest: false, transparent: true });
-  const s = 0.5, pts = [-s, 0, 0, s, 0, 0, 0, -s, 0, 0, s, 0, 0, 0, -s, 0, 0, s];
+  const m = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true });
+  const s = size, pts = [-s, 0, 0, s, 0, 0, 0, -s, 0, 0, s, 0, 0, 0, -s, 0, 0, s];
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
   g.add(new THREE.LineSegments(geo, m));
-  g.add(new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 8), new THREE.MeshBasicMaterial({ color: '#f0a63a', depthTest: false, transparent: true })));
-  g.renderOrder = 20; g.children.forEach((c) => (c.renderOrder = 20));
-  g.visible = false;
-  scene.add(g);
+  if (withBall) g.add(new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 8), new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true })));
+  else g.add(new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, wireframe: true })));
+  g.children.forEach((c) => (c.renderOrder = 20));
   return g;
-})();
-let pivotAnim = null, pivotShowUntil = 0, orbiting = false;
-orbit.addEventListener('start', () => { orbiting = true; });
-orbit.addEventListener('end', () => { orbiting = false; pivotShowUntil = performance.now() + 600; });
+}
+const pivotMarker = makeCross('#f0a63a', 0.5, true);
+pivotMarker.visible = false;
+scene.add(pivotMarker);
+let pivotShowUntil = 0;
 function setPivot(pt) {
-  pivotAnim = { from: orbit.target.clone(), to: pt.clone(), t0: performance.now() };
+  pivot.copy(pt);
   pivotShowUntil = performance.now() + 1500;
 }
 
@@ -184,7 +232,7 @@ const counters = {};
 const nameFor = (base) => { counters[base] = (counters[base] || 0) + 1; return `${base} ${counters[base]}`; };
 
 function addSurface(data, base = 'Superficie') {
-  const obj = { id: nextId++, kind: 'surface', name: nameFor(base), data, mat: matKey, visible: true, parts: {} };
+  const obj = { id: nextId++, kind: 'surface', name: nameFor(base), data, mat: matKey, visible: true, parts: {}, pivot: cvCenter(data) };
   const p = obj.parts;
   p.mesh = new THREE.Mesh(new THREE.BufferGeometry(), materials[obj.mat]);
   p.mesh.castShadow = true;
@@ -201,7 +249,7 @@ function addSurface(data, base = 'Superficie') {
 }
 
 function addCurve(data, base = 'Curva') {
-  const obj = { id: nextId++, kind: 'curve', name: nameFor(base), data, visible: true, parts: {} };
+  const obj = { id: nextId++, kind: 'curve', name: nameFor(base), data, visible: true, parts: {}, pivot: cvCenter(data) };
   const p = obj.parts;
   p.line = new Line2(new LineGeometry(), curveMat); p.line.renderOrder = 5;
   p.pick = new THREE.Line(new THREE.BufferGeometry()); // invisible, solo para seleccionar con el ratón
@@ -222,6 +270,13 @@ function removeObject(obj) {
   objects.splice(objects.indexOf(obj), 1);
   selObjs.splice(0, selObjs.length, ...selObjs.filter((o) => o !== obj));
   for (const [k, ref] of selCVs) if (ref.obj === obj) selCVs.delete(k);
+}
+
+// Pivote del objeto: centro de giro y escala al transformarlo. Empieza en el centro de sus CVs.
+function cvCenter(data) {
+  const all = data.cvs.flat(), c = new THREE.Vector3();
+  all.forEach((p) => { c.x += p.x; c.y += p.y; c.z += p.z; });
+  return c.divideScalar(all.length);
 }
 
 const setGeo = (o, g) => { o.geometry.dispose(); o.geometry = g; };
@@ -261,6 +316,9 @@ function updateSurface(obj) {
   for (let k = 1; k <= E; k++) at(1 - k / E, 1);
   for (let k = 1; k <= E; k++) at(0, 1 - k / E);
   setGeo(p.edge, line2Geo(loop));
+  obj.edgePts = [];
+  for (let k = 0; k < loop.length; k += 3) obj.edgePts.push(new THREE.Vector3(loop[k], loop[k + 1], loop[k + 2]));
+  obj.corners = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([u, v]) => { const c = new THREE.Vector3(); s.getPoint(u, v, c); return c; });
 }
 
 function updateCurve(obj) {
@@ -269,6 +327,9 @@ function updateCurve(obj) {
   for (let s = 0; s <= S; s++) { const q = crv.getPoint(s / S); pts.push(q.x, q.y, q.z); }
   setGeo(p.line, line2Geo(pts));
   setGeo(p.pick, posGeo(pts));
+  obj.samples = [];
+  for (let k = 0; k < pts.length; k += 3) obj.samples.push(new THREE.Vector3(pts[k], pts[k + 1], pts[k + 2]));
+  obj.editPts = N.uniqueKnots(d.knots).map((k) => crv.getPoint(k));
   setGeo(p.hull, posGeo(d.cvs.flatMap((q) => [q.x, q.y, q.z])));
   p.hull.computeLineDistances();
   buildComb(p, crv);
@@ -391,6 +452,7 @@ function applySelection(items, how) {
 function clearSelection() { selObjs.length = 0; selCVs.clear(); selectionChanged(); }
 
 function selectionChanged() {
+  if (pivotEdit && (pickMode !== 'object' || !selObjs.length)) { pivotEdit = false; gizmo.setMode(xform); updateXformButtons(); }
   objects.forEach((o) => {
     applyVisibility(o);
     o.parts.handles.children.forEach((h) => (h.material = selCVs.has(h.userData.key) ? handleSelMat : handleMat));
@@ -408,7 +470,6 @@ gizmo._getPointer = (e) => { const n = paneNDC(e, dragPane || paneAt(e.clientX))
 scene.add(gizmo);
 const proxy = new THREE.Object3D();
 scene.add(proxy);
-gizmo.addEventListener('dragging-changed', (e) => { orbit.enabled = !e.value; });
 
 function selectedCVRefs() {
   if (pickMode === 'cv') return [...selCVs.values()];
@@ -422,27 +483,192 @@ function centroid(refs) {
   refs.forEach((r) => { const p = cvRef(r); c.x += p.x; c.y += p.y; c.z += p.z; });
   return c.divideScalar(Math.max(refs.length, 1));
 }
+// Transformar: mover, rotar o escalar. En modo Objetos cada objeto gira y escala alrededor de su
+// propio pivote (como en Alias); en modo CVs, alrededor del centro de los CVs elegidos.
+let xform = 'translate', pivotEdit = false;
+function setXform(m) {
+  xform = m; pivotEdit = false;
+  gizmo.setMode(m);
+  updateXformButtons(); attachGizmo();
+}
+function togglePivotEdit() {
+  if (pivotEdit) { pivotEdit = false; gizmo.setMode(xform); updateXformButtons(); attachGizmo(); renderSelectionPanel(); return; }
+  if (pickMode !== 'object' || !selObjs.length) return toast('Selecciona un objeto (modo Objetos) para editar su pivote.');
+  pivotEdit = true;
+  gizmo.setMode('translate');
+  updateXformButtons(); attachGizmo(); renderSelectionPanel();
+  toast('Editar pivote: mueve el pivote. Ctrl = pegarlo a un punto, Ctrl+Alt = a una curva, Alt = a la rejilla.');
+}
+function centerPivots() {
+  selObjs.forEach((o) => (o.pivot = cvCenter(o.data)));
+  attachGizmo(); renderSelectionPanel();
+}
+function updateXformButtons() {
+  [['t-move', 'translate'], ['t-rotate', 'rotate'], ['t-scale', 'scale']].forEach(([id, m]) => $(id).setAttribute('aria-pressed', String(!pivotEdit && xform === m)));
+  $('t-pivot').setAttribute('aria-pressed', String(pivotEdit));
+  updateHint();
+}
+function gizmoAnchor() {
+  if (pickMode === 'object' && selObjs.length) return selObjs[selObjs.length - 1].pivot.clone();
+  return centroid(selectedCVRefs());
+}
 function attachGizmo() {
   const refs = selectedCVRefs();
   if (!refs.length || tool !== 'select') { gizmo.detach(); return; }
-  proxy.position.copy(centroid(refs));
+  proxy.position.copy(gizmoAnchor());
+  proxy.quaternion.identity(); proxy.scale.set(1, 1, 1);
   gizmo.attach(proxy);
 }
 let gizmoDrag = null;
 gizmo.addEventListener('mouseDown', () => {
-  const refs = selectedCVRefs();
-  gizmoDrag = { p0: proxy.position.clone(), cvs: refs.map(cvRef), orig: refs.map((r) => cvRef(r).clone()), objs: affectedObjects() };
+  const refs = pivotEdit ? [] : selectedCVRefs();
+  const objs = affectedObjects(), center = proxy.position.clone(), objMode = pickMode === 'object';
+  gizmoDrag = {
+    p0: proxy.position.clone(), q0: proxy.quaternion.clone(), s0: proxy.scale.clone(),
+    items: refs.map((r) => ({ v: cvRef(r), orig: cvRef(r).clone(), c: objMode ? r.obj.pivot.clone() : center })),
+    pivots: objMode ? objs.map((o) => ({ o, orig: o.pivot.clone() })) : [],
+    objs,
+    ex: pivotEdit
+      ? { pivots: new Set(objs) }
+      : { cvs: new Set(refs.map(cvRef)), [objMode ? 'full' : 'partial']: new Set(objs), pivots: new Set(objMode ? objs : []) },
+  };
 });
-gizmo.addEventListener('mouseUp', () => { gizmoDrag = null; renderSelectionPanel(); });
-let pendingUpdate = null;
+let pendingUpdate = null, pendingObjs = [];
+// Aplica la última actualización pendiente (si se suelta el ratón justo después de mover, no se pierde)
+function flushPending() {
+  if (pendingUpdate) cancelAnimationFrame(pendingUpdate);
+  pendingUpdate = null;
+  pendingObjs.forEach(updateObject);
+  pendingObjs = [];
+  updateCVReadout();
+}
+gizmo.addEventListener('mouseUp', () => { gizmoDrag = null; flushPending(); hideSnap(); attachGizmo(); renderSelectionPanel(); });
 gizmo.addEventListener('objectChange', () => {
-  if (!gizmoDrag) return;
-  const d = proxy.position.clone().sub(gizmoDrag.p0);
-  gizmoDrag.cvs.forEach((c, n) => { const o = gizmoDrag.orig[n]; c.x = o.x + d.x; c.y = o.y + d.y; c.z = o.z + d.z; });
-  if (!pendingUpdate) {
-    pendingUpdate = requestAnimationFrame(() => { pendingUpdate = null; gizmoDrag?.objs.forEach(updateObject); updateCVReadout(); });
+  const g = gizmoDrag;
+  if (!g) return;
+  const mode = pivotEdit ? 'translate' : xform;
+  const t = new THREE.Vector3();
+  if (mode === 'translate') {
+    applySnapToProxy(g.ex);
+    const d = proxy.position.clone().sub(g.p0);
+    g.items.forEach(({ v, orig }) => { v.x = orig.x + d.x; v.y = orig.y + d.y; v.z = orig.z + d.z; });
+    g.pivots.forEach(({ o, orig }) => o.pivot.copy(orig).add(d));
+  } else if (mode === 'rotate') {
+    const q = proxy.quaternion.clone().multiply(g.q0.clone().invert());
+    g.items.forEach(({ v, orig, c }) => { t.set(orig.x - c.x, orig.y - c.y, orig.z - c.z).applyQuaternion(q).add(c); v.x = t.x; v.y = t.y; v.z = t.z; });
+  } else {
+    const k = proxy.scale.clone().divide(g.s0);
+    g.items.forEach(({ v, orig, c }) => { v.x = c.x + (orig.x - c.x) * k.x; v.y = c.y + (orig.y - c.y) * k.y; v.z = c.z + (orig.z - c.z) * k.z; });
   }
+  if (pivotEdit) { updatePivotReadout(); return; }
+  pendingObjs = g.objs;
+  if (!pendingUpdate) pendingUpdate = requestAnimationFrame(flushPending);
 });
+
+// ---------- Snap ----------
+// Como en Alias: mantener Alt = rejilla, Ctrl = punto, Ctrl+Alt = curva (en Mac, Cmd hace de Alt).
+// Los botones de arriba los dejan activos sin mantener teclas.
+const snapToggles = { grid: false, curve: false, point: false };
+let gridStep = 0.25;
+const SNAP_PX = 22;
+function snapModes(e) {
+  const m = { ...snapToggles };
+  if (e && !(e.shiftKey && e.altKey)) {
+    const alt = e.altKey || e.metaKey;
+    if (e.ctrlKey && alt) m.curve = true; else if (e.ctrlKey) m.point = true; else if (alt) m.grid = true;
+  }
+  return m;
+}
+function updateSnapButtons() {
+  const held = snapModes(mods);
+  for (const k of ['grid', 'curve', 'point']) {
+    const b = $('snap-' + k);
+    b.setAttribute('aria-pressed', String(snapToggles[k]));
+    b.classList.toggle('held', held[k] && !snapToggles[k]);
+  }
+  gizmo.setRotationSnap(held.grid ? Math.PI / 12 : null);
+  gizmo.setScaleSnap(held.grid ? 0.25 : null);
+}
+function snapGrid(p, planeKind) {
+  const r = (v) => Math.round(v / gridStep) * gridStep;
+  p.x = r(p.x);
+  if (planeKind !== 'xz') p.y = r(p.y);
+  if (planeKind !== 'xy') p.z = r(p.z);
+  return p;
+}
+// Candidatos para el snap de punto: CVs, pivotes, puntos de edición y extremos de curvas, esquinas, origen
+function pointCandidates(ex) {
+  const out = [new THREE.Vector3()];
+  if (draft) draft.pts.forEach((p) => out.push(p));
+  for (const o of objects) {
+    if (!o.visible || ex.full?.has(o)) continue;
+    if (!ex.pivots?.has(o)) out.push(o.pivot);
+    allCVRefs(o).forEach((r) => { const v = cvRef(r); if (!ex.cvs?.has(v)) out.push(new THREE.Vector3(v.x, v.y, v.z)); });
+    if (!ex.partial?.has(o)) (o.kind === 'curve' ? o.editPts : o.corners).forEach((v) => out.push(v));
+  }
+  return out;
+}
+// Para el snap de curva: curvas y bordes de superficies, como polilíneas
+function curvePolylines(ex) {
+  return objects.filter((o) => o.visible && !ex.full?.has(o) && !ex.partial?.has(o)).map((o) => (o.kind === 'curve' ? o.samples : o.edgePts));
+}
+function findSnap(x, y, modes, ex = {}) {
+  if (!modes.point && !modes.curve) return null;
+  const p = paneAt(x);
+  useAspect(p);
+  const r = renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3();
+  const scr = (q) => { v.copy(q).project(camera); return v.z > 1 ? null : { x: r.left + p.x + ((v.x + 1) / 2) * p.w, y: r.top + ((1 - v.y) / 2) * p.h }; };
+  let best = null, bestD = SNAP_PX;
+  if (modes.point) {
+    for (const q of pointCandidates(ex)) {
+      const s = scr(q);
+      if (!s) continue;
+      const d = Math.hypot(s.x - x, s.y - y);
+      if (d < bestD) { bestD = d; best = { point: q.clone(), kind: 'punto' }; }
+    }
+  }
+  if (!best && modes.curve) {
+    for (const line of curvePolylines(ex)) {
+      let prev = null;
+      for (let i = 0; i < line.length; i++) {
+        const s = scr(line[i]);
+        if (s && prev) {
+          // punto más cercano al cursor sobre el segmento en pantalla, llevado al segmento 3D
+          const ax = prev.s.x, ay = prev.s.y, bx = s.x - ax, by = s.y - ay, L = bx * bx + by * by || 1;
+          const t = Math.max(0, Math.min(1, ((x - ax) * bx + (y - ay) * by) / L));
+          const d = Math.hypot(ax + bx * t - x, ay + by * t - y);
+          if (d < bestD) { bestD = d; best = { point: line[i - 1].clone().lerp(line[i], t), kind: 'curva' }; }
+        }
+        prev = s ? { s: { ...s } } : null;
+      }
+    }
+  }
+  return best;
+}
+function applySnapToProxy(ex) {
+  const modes = snapModes(mods);
+  const s = findSnap(lastPtr.x, lastPtr.y, modes, ex);
+  if (s) { proxy.position.copy(s.point); showSnap(s); return; }
+  if (modes.grid) { snapGrid(proxy.position, null); showSnap({ point: proxy.position, kind: 'rejilla' }); return; }
+  hideSnap();
+}
+const snapRing = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.15, 28), new THREE.MeshBasicMaterial({ color: '#7cf0a0', depthTest: false, transparent: true, side: THREE.DoubleSide }));
+snapRing.renderOrder = 30; snapRing.visible = false;
+scene.add(snapRing);
+function showSnap(s) { snapRing.position.copy(s.point); snapRing.visible = true; $('st-snap').textContent = `Snap: ${s.kind}`; }
+function hideSnap() { snapRing.visible = false; $('st-snap').textContent = ''; }
+
+// Marcadores del pivote de cada objeto seleccionado
+const objPivotMarkers = new THREE.Group();
+scene.add(objPivotMarkers);
+function syncPivotMarkers() {
+  const list = pickMode === 'object' ? selObjs.filter((o) => o.visible) : [];
+  while (objPivotMarkers.children.length < list.length) objPivotMarkers.add(makeCross('#57b6ff', 0.35, false));
+  objPivotMarkers.children.forEach((m, i) => {
+    m.visible = i < list.length;
+    if (m.visible) { m.position.copy(list[i].pivot); m.scale.setScalar(camera.position.distanceTo(list[i].pivot) * 0.05); }
+  });
+}
 
 // ---------- Vistas (dividida / diagnóstico / render) ----------
 let dragPane = null;
@@ -479,7 +705,7 @@ function pickAt(e) {
     const hit = ray.intersectObjects(live.flatMap((o) => o.parts.handles.children), false)[0];
     return hit ? { cv: hit.object.userData } : null;
   }
-  ray.params.Line.threshold = camera.position.distanceTo(orbit.target) * 0.012;
+  ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
   const hit = ray.intersectObjects(live.map((o) => (o.kind === 'surface' ? o.parts.mesh : o.parts.pick)), false)[0];
   return hit ? { obj: hit.object.userData.obj, point: hit.point } : null;
 }
@@ -488,13 +714,13 @@ function pickAt(e) {
 let tool = 'select';
 let drawPlaneKind = 'xz';
 const drawPlanes = { xz: new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.01), xy: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0) };
-function planePoint(e) {
+function placePoint(e) {
+  const modes = snapModes(e);
+  const s = findSnap(e.clientX, e.clientY, modes, {});
+  if (s) { showSnap(s); return s.point; }
   setRay(e);
   const p = ray.ray.intersectPlane(drawPlanes[drawPlaneKind], new THREE.Vector3());
-  if (p && $('snap').checked) {
-    p.x = Math.round(p.x * 4) / 4;
-    if (drawPlaneKind === 'xz') p.z = Math.round(p.z * 4) / 4; else p.y = Math.round(p.y * 4) / 4;
-  }
+  if (p && modes.grid) { snapGrid(p, drawPlaneKind); showSnap({ point: p, kind: 'rejilla' }); } else hideSnap();
   return p;
 }
 function setDrawPlane(k) {
@@ -509,9 +735,10 @@ const HINTS = {
 };
 function updateHint() {
   if (HINTS[tool]) { $('hint').textContent = HINTS[tool]; return; }
-  const nav = navStyle === 'alias' ? 'Shift+Alt + izq/medio/der: girar/desplazar/zoom' : 'Shift + arrastrar: recuadro';
+  if (typeof pivotEdit !== 'undefined' && pivotEdit) { $('hint').textContent = 'Editar pivote: arrastra el gizmo · Ctrl: snap a punto · Ctrl+Alt: a curva · Alt: rejilla · D o Esc: terminar'; return; }
+  const nav = navStyle === 'alias' ? 'Shift+Alt: navegar' : 'Shift+arrastrar: recuadro';
   const what = pickMode === 'cv' ? 'CVs' : 'objetos';
-  $('hint').textContent = `Clic: seleccionar ${what} · Arrastrar: recuadro · Shift: alternar · Ctrl: quitar · ${nav} · Doble clic: pivote · Espacio: menú`;
+  $('hint').textContent = `Clic: seleccionar ${what} y fijar pivote · Arrastrar: recuadro · ${nav} · W/E/R: mover/rotar/escalar · Alt/Ctrl/Ctrl+Alt al mover: snap · Espacio: menú`;
 }
 function setTool(t) {
   if (tool === 'curve' && t !== 'curve') cancelDraft();
@@ -599,9 +826,20 @@ function deleteSelection() {
 // ---------- Ratón en el viewport ----------
 let down = null; // { x, y, marquee }
 const marquee = $('marquee');
+// Botones de selección (hoja de atajos de Alias): alternativa sugerida = izq elige, medio añade, der quita;
+// por defecto de Alias = izq alterna. Shift alterna y Ctrl quita con cualquier botón.
+function howFor(e) {
+  if (e.shiftKey) return 'toggle';
+  if (e.ctrlKey || e.metaKey) return 'remove';
+  if (navStyle !== 'alias') return 'replace';
+  if (e.button === 1) return 'add';
+  if (e.button === 2) return 'remove';
+  return $('sel-buttons').value === 'default' ? 'toggle' : 'replace';
+}
+renderer.domElement.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); }); // sin autodesplazamiento
 renderer.domElement.addEventListener('pointerdown', (e) => {
   dragPane = paneAt(e.clientX);
-  if (e.button !== 0 || navHeld) { down = null; return; }
+  if (navHeld || (e.button !== 0 && !(navStyle === 'alias' && tool === 'select'))) { down = null; return; }
   const canBox = tool === 'select' && !gizmo.axis && (navStyle === 'alias' || e.shiftKey);
   down = { x: e.clientX, y: e.clientY, box: canBox, boxing: false };
 }, true);
@@ -617,34 +855,38 @@ renderer.domElement.addEventListener('pointermove', (e) => {
       marquee.hidden = false;
     }
   }
-  if (tool === 'curve' && draft && !e.buttons) { draft.hover = planePoint(e); showDraft(); }
+  if (tool === 'curve' && draft && !e.buttons) { draft.hover = placePoint(e); showDraft(); }
 });
 renderer.domElement.addEventListener('pointerleave', () => { if (draft) { draft.hover = null; showDraft(); } });
 addEventListener('pointerup', (e) => {
   const d = down;
   down = null;
   requestAnimationFrame(() => { dragPane = null; });
+  if (navMovedLast) { navMovedLast = false; return; }
   if (!d || e.target !== renderer.domElement && !d.boxing) return;
-  const how = e.shiftKey ? 'toggle' : e.ctrlKey || e.metaKey ? 'remove' : 'replace';
+  const how = howFor(e);
   if (d.boxing) { marquee.hidden = true; boxSelect(d, e, how); return; }
   if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5 || gizmo.dragging) return;
   if (tool === 'curve') {
-    const p = planePoint(e);
+    if (e.button !== 0) return;
+    const p = placePoint(e);
     if (p) { draft.pts.push(p); draft.hover = null; showDraft(); }
     return;
   }
   if (tool === 'plane') {
-    const p = planePoint(e);
+    const p = placePoint(e);
     if (!p) return;
     const o = addSurface(N.planeData(p, drawPlaneKind), 'Plano');
     setTool('select');
     finishCreate([o], `${o.name} creado`);
     return;
   }
-  if (gizmo.axis) return;
+  if (gizmo.axis && e.button === 0) return; // el gizmo solo usa el botón izquierdo
   const hit = pickAt(e);
-  if (hit) applySelection([hit.cv || hit.obj], how);
-  else if (how === 'replace') clearSelection();
+  if (hit) {
+    applySelection([hit.cv || hit.obj], how);
+    if ($('click-pivot').checked) setPivot(hit.point || (() => { const c = cvRef(hit.cv); return new THREE.Vector3(c.x, c.y, c.z); })());
+  } else if (how === 'replace' && e.button === 0) clearSelection();
 });
 
 // Selección por recuadro: entra todo lo que el recuadro toque (como "crossing" en Alias)
@@ -679,7 +921,7 @@ renderer.domElement.addEventListener('dblclick', (e) => {
   if (tool !== 'select') return;
   setRay(e);
   const live = objects.filter((o) => o.visible);
-  ray.params.Line.threshold = camera.position.distanceTo(orbit.target) * 0.012;
+  ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
   const hit = ray.intersectObjects(live.map((o) => (o.kind === 'surface' ? o.parts.mesh : o.parts.pick)), false)[0];
   const pt = hit ? hit.point : ray.ray.intersectPlane(drawPlanes.xz, new THREE.Vector3());
   if (pt) setPivot(pt);
@@ -701,9 +943,8 @@ function frameObjects(list) {
   const p = panes()[0], vf = THREE.MathUtils.degToRad(camera.fov) / 2;
   const hf = Math.atan(Math.tan(vf) * (p.w / p.h));
   const dist = rad / Math.sin(Math.min(vf, hf)) * 1.05;
-  const dir = camera.position.clone().sub(orbit.target).normalize();
-  orbit.target.copy(c);
-  camera.position.copy(c).addScaledVector(dir, dist);
+  pivot.copy(c);
+  camera.position.copy(c).addScaledVector(viewDir(), -dist);
 }
 const frameSelection = () => frameObjects(pickMode === 'cv' ? affectedObjects() : selObjs);
 function pivotToSelection() {
@@ -712,8 +953,9 @@ function pivotToSelection() {
 }
 function topView() {
   const c = boundsOf(objects).getCenter(new THREE.Vector3());
-  orbit.target.copy(c);
-  camera.position.set(c.x, c.y + 18, c.z + 0.001);
+  pivot.copy(c);
+  camera.position.set(c.x, c.y + 18, c.z);
+  camera.quaternion.setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
 }
 
 // ---------- Paneles laterales que se ocultan solos (como Alias) ----------
@@ -764,7 +1006,8 @@ function degreeOptions(sel) {
   for (let d = 1; d <= N.MAX_DEGREE; d++) h += `<option value="${d}" ${d === sel ? 'selected' : ''}>${d}</option>`;
   return h;
 }
-function renderSelectionPanel() {
+function renderSelectionPanel() { renderSelectionBody(); pivotBlock(); }
+function renderSelectionBody() {
   const box = $('sel-body');
   const refs = [...selCVs.values()];
   if (pickMode === 'cv' && refs.length) {
@@ -830,6 +1073,28 @@ function renderSelectionPanel() {
   const ns = selObjs.filter((o) => o.kind === 'surface').length, nc = selObjs.length - ns;
   box.innerHTML = `<p class="muted">${selObjs.length} objetos: ${ns} ${ns === 1 ? 'superficie' : 'superficies'}, ${nc} ${nc === 1 ? 'curva' : 'curvas'}.</p>
     <ol class="selorder">${selObjs.map((o) => `<li>${o.name}</li>`).join('')}</ol>`;
+}
+function pivotBlock() {
+  if (pickMode !== 'object' || !selObjs.length) return;
+  const o = selObjs[selObjs.length - 1], p = o.pivot;
+  $('sel-body').insertAdjacentHTML('beforeend', `
+    <p class="muted">Pivote de <b>${o.name}</b></p>
+    <div class="coords">
+      <div class="coord"><b class="x">X</b><span id="px">${fmt(p.x)}</span></div>
+      <div class="coord"><b class="y">Y</b><span id="py">${fmt(p.y)}</span></div>
+      <div class="coord"><b class="z">Z</b><span id="pz">${fmt(p.z)}</span></div>
+    </div>
+    <div class="ops2">
+      <button class="btn" id="b-pivot-edit" aria-pressed="${pivotEdit}">${pivotEdit ? 'Terminar pivote' : 'Editar pivote (D)'}</button>
+      <button class="btn" id="b-pivot-center">Centrar pivote</button>
+    </div>`);
+  $('b-pivot-edit').addEventListener('click', togglePivotEdit);
+  $('b-pivot-center').addEventListener('click', centerPivots);
+}
+function updatePivotReadout() {
+  if (!$('px') || !selObjs.length) return;
+  const p = selObjs[selObjs.length - 1].pivot;
+  $('px').textContent = fmt(p.x); $('py').textContent = fmt(p.y); $('pz').textContent = fmt(p.z);
 }
 function updateCVReadout() {
   if (pickMode !== 'cv' || !$('cx')) return;
@@ -927,6 +1192,12 @@ $('comb').addEventListener('input', (e) => {
 $('op-dist').addEventListener('input', (e) => { $('op-dist-o').textContent = (+e.target.value).toFixed(1); });
 
 $('t-select').addEventListener('click', () => setTool('select'));
+$('t-move').addEventListener('click', () => { setTool('select'); setXform('translate'); });
+$('t-rotate').addEventListener('click', () => { setTool('select'); setXform('rotate'); });
+$('t-scale').addEventListener('click', () => { setTool('select'); setXform('scale'); });
+$('t-pivot').addEventListener('click', togglePivotEdit);
+document.querySelectorAll('[data-snap]').forEach((b) => b.addEventListener('click', () => { snapToggles[b.dataset.snap] = !snapToggles[b.dataset.snap]; updateSnapButtons(); }));
+$('grid-step').addEventListener('change', (e) => { gridStep = +e.target.value; });
 $('t-frame').addEventListener('click', frameSelection);
 $('t-top').addEventListener('click', topView);
 $('t-curve').addEventListener('click', () => setTool(tool === 'curve' ? 'select' : 'curve'));
@@ -955,6 +1226,10 @@ addEventListener('keydown', (e) => {
   if (k === 'f') frameSelection();
   else if (k === 't') topView();
   else if (k === 'l') pivotToSelection();
+  else if (k === 'w') setXform('translate');
+  else if (k === 'e') setXform('rotate');
+  else if (k === 'r') setXform('scale');
+  else if (k === 'd' || k === 'insert') togglePivotEdit();
   else if (k === 'c') setTool('curve');
   else if (k === 'v') cycleLayout();
   else if (k === 'o') setPickMode('object');
@@ -963,11 +1238,26 @@ addEventListener('keydown', (e) => {
   else if (k === '2') setDiag('curv');
   else if (k === '3') setDiag('wire');
   else if (k === 'enter' && tool === 'curve') finishDraft();
-  else if (k === 'escape') { if (tool !== 'select') setTool('select'); else clearSelection(); }
+  else if (k === 'escape') { if (tool !== 'select') setTool('select'); else if (pivotEdit) togglePivotEdit(); else clearSelection(); }
   else if (k === 'delete' || k === 'backspace') deleteSelection();
 });
 
-// ---------- Menú radial (mantener Espacio) ----------
+// Pick walk (como en Alias): Ctrl + flechas pasa al CV vecino. Curvas: izq/der. Superficies: izq/der = U, arriba/abajo = V.
+addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || !e.key.startsWith('Arrow') || pickMode !== 'cv' || selCVs.size !== 1) return;
+  e.preventDefault();
+  const r = [...selCVs.values()][0], o = r.obj, cl = THREE.MathUtils.clamp;
+  const du = { ArrowRight: 1, ArrowLeft: -1 }[e.key] || 0, dv = { ArrowUp: 1, ArrowDown: -1 }[e.key] || 0;
+  if (o.kind === 'curve') {
+    const i = cl(r.i + du, 0, o.data.cvs.length - 1);
+    applySelection([{ obj: o, i, key: cvKey(o, i) }], 'replace');
+  } else {
+    const i = cl(r.i + du, 0, o.data.cvs.length - 1), j = cl(r.j + dv, 0, o.data.cvs[0].length - 1);
+    applySelection([{ obj: o, i, j, key: cvKey(o, i, j) }], 'replace');
+  }
+});
+
+// ---------- Menú radial (mantener Espacio, o Ctrl+Shift + clic como los marking menus de Alias) ----------
 const RADIAL = [
   { label: 'Curva', key: 'C', run: () => setTool('curve') },
   { label: 'Plano', key: '', run: () => setTool('plane') },
@@ -1017,6 +1307,19 @@ addEventListener('pointermove', (e) => {
   const a = Math.atan2(dy / 120, dx / 165) - ROFF;
   highlightRadial(Math.round(((a + Math.PI * 4) % (Math.PI * 2)) / RSTEP) % RADIAL.length);
 });
+let radialByMouse = false;
+addEventListener('pointerdown', (e) => {
+  if (!(e.ctrlKey && e.shiftKey) || e.target !== renderer.domElement) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  radialByMouse = true;
+  openRadial();
+}, true);
+addEventListener('pointerup', (e) => {
+  if (!radialByMouse) return;
+  radialByMouse = false;
+  e.stopImmediatePropagation();
+  closeRadial(true);
+}, true);
 addEventListener('keydown', (e) => {
   if (e.code !== 'Space' || ['INPUT', 'SELECT'].includes(e.target.tagName)) return;
   e.preventDefault();
@@ -1043,15 +1346,12 @@ function renderPane(p) {
 }
 function diagMaterial() { return diagMode === 'curv' ? curvMat : diagMode === 'wire' ? wireMat : zebraMat; }
 function renderFrame(now) {
-  if (pivotAnim) {
-    const k = Math.min(1, (now - pivotAnim.t0) / 260), ease = 1 - (1 - k) ** 3;
-    orbit.target.lerpVectors(pivotAnim.from, pivotAnim.to, ease);
-    if (k === 1) pivotAnim = null;
-  }
-  orbit.update();
-  pivotMarker.position.copy(orbit.target);
-  pivotMarker.scale.setScalar(camera.position.distanceTo(orbit.target) * 0.06);
-  pivotMarker.visible = navHeld || orbiting || now < pivotShowUntil;
+  pivotMarker.position.copy(pivot);
+  pivotMarker.scale.setScalar(camera.position.distanceTo(pivot) * 0.06);
+  pivotMarker.visible = navHeld || !!navDrag || now < pivotShowUntil;
+  snapRing.quaternion.copy(camera.quaternion);
+  snapRing.scale.setScalar(camera.position.distanceTo(snapRing.position) * 0.06);
+  syncPivotMarkers();
   renderer.shadowMap.needsUpdate = true;
   panes().forEach(renderPane);
   // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
@@ -1085,7 +1385,8 @@ addSurface({ degU: 3, degV: 3, knotsU: N.clampedKnots(6, 3), knotsV: N.clampedKn
 refreshOutliner();
 addCurve(N.curveData([[-3.25, 3.75], [-2, 2.75], [-0.5, 4.5], [1, 3], [2.25, 4.25], [3.25, 3.5]].map(([x, z]) => new THREE.Vector3(x, 0.01, z))));
 camera.position.set(8, 6.4, 10.5);
-orbit.target.set(0, 0.6, 0.6);
+camera.lookAt(0, 0.6, 0.6);
+pivot.set(0, 0.6, 0.6);
 
 setNavStyle(navStyle);
 setLayout(layout);
@@ -1095,5 +1396,5 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { camera, objects, panes, orbit, selObjs, selCVs };
+window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy };
 window.__ready = true;
