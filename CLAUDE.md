@@ -269,6 +269,26 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Extruir, Revolución y Loft ahora tienen historial (siguen a sus curvas). Simetría con plano YZ/XZ/XY.
 - Pruebas: scratchpad aitest/hist2.mjs (todas las combinaciones), ttools.mjs (extruir, align y blend con el ratón).
 
+## Hecho (v0.15)
+
+- Ventana de herramienta: el desenfoque lleva el color del fondo (--bg al 88 %), bordes difuminados.
+- CVs solo de lo elegido (cvTargets): al pasar a CV se encienden los de los objetos elegidos; en modo CV, clic en un objeto
+  enciende solo los suyos (Shift / medio = añadir). pickAt devuelve {cvTarget}. Pruebas: window.__forja.cvAll() los enciende todos.
+- Menús por módulo: en VISU el Puck, Espacio y Ctrl+Shift+botón solo tienen visualización (dispVisu; CMD_MODS limita el
+  editor del Puck). Menús menos sensibles: solo se marca una esfera con el cursor a menos de 66 px (submenú 44 px).
+- Flechas de manipulación (relArrows, relHandles): Align/Blend = azul en la 1.ª fila (tensión) y naranja en la 2.ª (forma mu:
+  G2 geométrico S2 = lambda^2 M2 - mu M1; G3 S3 = -lambda^3 M3 + 3 lambda mu M2; la curvatura sigue igual). Blend: tensión y
+  forma por lado. Extruir y Offset: flecha verde de distancia. Tras crear Align/Blend se abre su ventana con flechas y la
+  herramienta sigue activa.
+- Del video de Alias (Transform controls): nudge con flechas del teclado (paso según zoom, Shift x10, E/R giran 1° / escalan 1 %);
+  snap combinado con la restricción de botón (solo cuenta la componente del eje); divisiones del snap de curva (prefs.snapDiv,
+  por borde) y snap al centro de curvas (prefs.snapCenter). Preferencias > Snap.
+- Del video de historial de Alias: colores (verde = tiene historial, rosa = depende de lo elegido, azul = sin historial;
+  recomputeDeps/histState); aviso al transformar un resultado con historial (askBreakHistory: quitar historial o no; en CV se
+  permite retocar la superficie de un Align); "Actualizar al momento" por relación (apagado = botón Actualizar);
+  Opciones de control: Crear historial, Comprobar continuidad; Preferencias: actualizar durante el arrastre (prefs.histLive).
+- Pruebas: tarrow.mjs, tnudge.mjs, thist3.mjs.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
