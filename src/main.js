@@ -23,6 +23,12 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+// ---------- Preferencias (se recuerdan en este navegador) ----------
+const prefs = { evalUI: 'b', xform: 'mouse', theme: null };
+try { Object.assign(prefs, JSON.parse(localStorage.getItem('forja-prefs') || '{}')); } catch { /* sin almacenamiento */ }
+function savePrefs() { try { localStorage.setItem('forja-prefs', JSON.stringify(prefs)); } catch { /* sin almacenamiento */ } }
+
+
 drawLogo(document.getElementById('logo'));
 
 // Tema claro u oscuro (se recuerda en este navegador)
@@ -243,7 +249,7 @@ function hasTransformable() {
   return selectedCVRefs().length > 0 || (pickMode === 'object' && selObjs.some((o) => o.kind === 'mesh' && o.visible));
 }
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (!mouseXform || carousel || tool !== 'select' || pivotEdit || navHeld || (e.ctrlKey && e.shiftKey) || e.button > 2) return;
+  if (!mouseXform || prefs.xform === 'gizmo' || carousel || tool !== 'select' || pivotEdit || navHeld || (e.ctrlKey && e.shiftKey) || e.button > 2) return;
   if ((gizmo.axis && e.button === 0) || !hasTransformable()) return;
   e.stopImmediatePropagation(); e.preventDefault();
   attachGizmo();
@@ -506,7 +512,9 @@ const counters = {};
 const nameFor = (base) => { counters[base] = (counters[base] || 0) + 1; return `${base} ${counters[base]}`; };
 
 function addSurface(data, base = 'Superficie') {
+  checkpoint();
   const obj = { id: nextId++, kind: 'surface', name: nameFor(base), data, mat: matKey, visible: true, parts: {}, pivot: cvCenter(data) };
+  initObj(obj);
   const p = obj.parts;
   p.mesh = new THREE.Mesh(new THREE.BufferGeometry(), materials[obj.mat]);
   p.mesh.castShadow = true;
@@ -525,7 +533,9 @@ function addSurface(data, base = 'Superficie') {
 }
 
 function addCurve(data, base = 'Curva') {
+  checkpoint();
   const obj = { id: nextId++, kind: 'curve', name: nameFor(base), data, visible: true, parts: {}, pivot: cvCenter(data) };
+  initObj(obj);
   const p = obj.parts;
   p.line = new Line2(new LineGeometry(), curveMat); p.line.renderOrder = 5;
   p.pick = new THREE.Line(new THREE.BufferGeometry()); // invisible, solo para seleccionar con el ratón
@@ -549,8 +559,10 @@ function addMesh(geometry, base = 'Malla') {
     // color blanco para el mapa de curvatura (que en las mallas no se calcula)
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(geometry.attributes.position.count * 3).fill(1), 3));
   }
+  checkpoint();
   const obj = { id: nextId++, kind: 'mesh', name: nameFor(base), data: { geometry }, mat: matKey, visible: true, parts: {},
     pivot: geometry.boundingBox.getCenter(new THREE.Vector3()) };
+  initObj(obj);
   const p = obj.parts;
   p.mesh = new THREE.Mesh(geometry, materials[obj.mat]);
   p.mesh.castShadow = true;
@@ -566,6 +578,7 @@ function addMesh(geometry, base = 'Malla') {
 const pickTarget = (o) => (o.kind === 'curve' ? o.parts.pick : o.parts.mesh);
 
 function removeObject(obj) {
+  checkpoint();
   for (const o of Object.values(obj.parts)) { o.geometry?.dispose(); scene.remove(o); }
   objects.splice(objects.indexOf(obj), 1);
   selObjs.splice(0, selObjs.length, ...selObjs.filter((o) => o !== obj));
@@ -774,6 +787,7 @@ function setPickMode(m, filter = null) {
 
 // how: 'replace' | 'toggle' | 'remove'
 function applySelection(items, how) {
+  items = expandGroups(items);
   if (how === 'replace') { selObjs.length = 0; selCVs.clear(); }
   for (const it of items) {
     if (it.key) {
@@ -858,10 +872,13 @@ function attachGizmo() {
   if ((!refs.length && !meshSel) || tool !== 'select') { gizmo.detach(); return; }
   proxy.position.copy(gizmoAnchor());
   proxy.quaternion.identity(); proxy.scale.set(1, 1, 1);
+  // como en Alias: con Mover/Rotar/Escalar activos se transforma con los botones del ratón y el manipulador no estorba
+  if (mouseXform && !pivotEdit && prefs.xform === 'mouse') { gizmo.detach(); return; }
   gizmo.attach(proxy);
 }
 let gizmoDrag = null;
 gizmo.addEventListener('mouseDown', () => {
+  checkpoint();
   const refs = pivotEdit ? [] : selectedCVRefs();
   const objs = affectedObjects(), center = proxy.position.clone(), objMode = pickMode === 'object';
   gizmoDrag = {
@@ -1372,19 +1389,48 @@ const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-w
 function refreshOutliner() {
   const ul = $('outliner');
   ul.innerHTML = '';
-  for (const o of objects) {
+  const row = (o) => {
     const li = document.createElement('li');
     li.className = 'ol-item' + (selObjs.includes(o) ? ' sel' : '') + (o.visible ? '' : ' off');
-    li.innerHTML = `<button class="ol-name" title="Seleccionar (Shift: añadir)"><span class="ol-ico">${{ surface: '◩', curve: '∿', mesh: '△' }[o.kind]}</span>${o.name}</button><button class="ol-eye" aria-pressed="${o.visible}" title="${o.visible ? 'Ocultar' : 'Mostrar'}">${EYE}</button>`;
+    li.innerHTML = `<button class="ol-name" title="Seleccionar (Shift: añadir)"><span class="ol-ico">${{ surface: '◩', curve: '∿', mesh: '△' }[o.kind]}</span>${esc(o.name)}</button><button class="ol-eye" aria-pressed="${o.ownVisible}" title="${o.ownVisible ? 'Ocultar' : 'Mostrar'}">${EYE}</button>`;
     li.querySelector('.ol-name').addEventListener('click', (e) => { setPickMode('object'); applySelection([o], e.shiftKey ? 'toggle' : 'replace'); });
     li.querySelector('.ol-eye').addEventListener('click', () => {
-      o.visible = !o.visible;
+      checkpoint();
+      o.visible = !o.ownVisible;
       if (!o.visible) { const i = selObjs.indexOf(o); if (i >= 0) selObjs.splice(i, 1); }
       selectionChanged();
     });
+    return li;
+  };
+  // los grupos se ven como carpetas plegables con sus objetos dentro
+  const done = new Set();
+  for (const o of objects) {
+    if (done.has(o)) continue;
+    if (!o.group) { ul.append(row(o)); continue; }
+    const g = groups.find((x) => x.id === o.group);
+    const kids = objects.filter((x) => x.group === o.group);
+    kids.forEach((k) => done.add(k));
+    if (!g) { kids.forEach((k) => ul.append(row(k))); continue; }
+    const li = document.createElement('li');
+    li.className = 'ol-group' + (g.open ? ' open' : '') + (kids.every((k) => selObjs.includes(k)) ? ' sel' : '');
+    li.innerHTML = `<div class="ol-gh"><button class="ol-fold" aria-expanded="${g.open}" title="Abrir / cerrar">▸</button>
+      <button class="ol-name" title="Elegir el grupo · doble clic: renombrar"><span class="ol-ico">▤</span>${esc(g.name)} <small>${kids.length}</small></button>
+      <button class="ol-eye" aria-pressed="${kids.some((k) => k.ownVisible)}" title="Ocultar / mostrar el grupo">${EYE}</button></div><ul></ul>`;
+    li.querySelector('.ol-fold').addEventListener('click', () => { g.open = !g.open; refreshOutliner(); });
+    li.querySelector('.ol-name').addEventListener('click', (e) => { setPickMode('object'); applySelection(kids, e.shiftKey ? 'toggle' : 'replace'); });
+    li.querySelector('.ol-name').addEventListener('dblclick', () => { const v = prompt('Nombre del grupo', g.name); if (v) { checkpoint(); g.name = v.trim() || g.name; refreshOutliner(); } });
+    li.querySelector('.ol-eye').addEventListener('click', () => {
+      checkpoint();
+      const show = !kids.some((k) => k.ownVisible);
+      kids.forEach((k) => (k.visible = show));
+      if (!show) kids.forEach((k) => { const i = selObjs.indexOf(k); if (i >= 0) selObjs.splice(i, 1); });
+      selectionChanged();
+    });
+    if (g.open) kids.forEach((k) => li.querySelector('ul').append(row(k)));
     ul.append(li);
   }
   $('scene-count').textContent = `${objects.length} ${objects.length === 1 ? 'objeto' : 'objetos'}`;
+  if (typeof renderLayers === 'function' && !restoring) renderLayers();
 }
 
 // ---------- Panel: selección ----------
@@ -1411,6 +1457,7 @@ function renderSelectionBody() {
       <div class="row"><label for="weight">Peso (w)</label><input id="weight" type="range" min="0.2" max="5" step="0.05" value="${single ? p.w : 1}"><output id="weight-o">${single ? fmt(p.w) : '—'}</output></div>
       <p class="muted">Un peso mayor atrae la superficie hacia el punto.</p>`;
     $('weight').addEventListener('input', (e) => {
+      checkpoint();
       refs.forEach((r) => (cvRef(r).w = +e.target.value));
       $('weight-o').textContent = fmt(+e.target.value);
       [...new Set(refs.map((r) => r.obj))].forEach(updateObject);
@@ -1442,6 +1489,7 @@ function renderSelectionBody() {
         <p class="muted">Cambiar grado o spans reconstruye la superficie conservando su forma. CVs = grado + spans.</p>`;
       const apply = () => {
         const cl = (v, a, b) => Math.max(a, Math.min(b, Math.round(+v || a)));
+        checkpoint();
         o.data = N.rebuildSurface(o.data, cl($('degU').value, 1, 7), cl($('spU').value, 1, N.MAX_SPANS), cl($('degV').value, 1, 7), cl($('spV').value, 1, N.MAX_SPANS));
         updateObject(o); selectionChanged();
         toast(`${o.name} reconstruida: ${o.data.cvs.length}×${o.data.cvs[0].length} CVs`);
@@ -1457,6 +1505,7 @@ function renderSelectionBody() {
         </div>`;
       const apply = () => {
         const deg = Math.max(1, Math.min(7, +$('degC').value)), sp = Math.max(1, Math.min(N.MAX_SPANS, Math.round(+$('spC').value || 1)));
+        checkpoint();
         o.data = N.rebuildCurve(o.data, deg, sp);
         updateObject(o); selectionChanged();
       };
@@ -1524,6 +1573,7 @@ function setDiag(m) {
   if (layout === 'render') switchLayout('diag');
   $('legend').hidden = m !== 'curv';
   objects.forEach(updateObject);
+  updateEvalUI();
 }
 document.querySelectorAll('[data-diag]').forEach((b) => b.addEventListener('click', () => setDiag(b.dataset.diag)));
 const LAYOUTS = ['split', 'diag', 'render'];
@@ -1710,6 +1760,7 @@ async function flipPanel(l) {
 }
 function setLayout(l) {
   layout = l;
+  $('app').dataset.layoutNow = l;
   document.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === l)));
   $('pane-diag').hidden = l === 'render';
   $('pane-render').hidden = l !== 'render' && l !== 'split';
@@ -1760,6 +1811,7 @@ $('shadow-int').addEventListener('input', (e) => { ground.material.opacity = +e.
 
 // El material se aplica a las superficies seleccionadas; si no hay ninguna, a todas.
 function setMaterial(k) {
+  checkpoint();
   matKey = k;
   const sel = selObjs.filter((o) => o.kind !== 'curve');
   (sel.length ? sel : objects.filter((o) => o.kind !== 'curve')).forEach((o) => (o.mat = k));
@@ -2408,11 +2460,12 @@ function duplicateSelection() {
 function hideSelection() {
   if (!selObjs.length) return toast('Ocultar: selecciona objetos.');
   const n = selObjs.length;
+  checkpoint();
   selObjs.forEach((o) => (o.visible = false));
   clearSelection();
   toast(`${n} ${n === 1 ? 'objeto oculto' : 'objetos ocultos'} · Mostrar todo en el Puck (Tab)`);
 }
-function unhideAll() { objects.forEach((o) => (o.visible = true)); selectionChanged(); toast('Todo visible'); }
+function unhideAll() { checkpoint(); objects.forEach((o) => (o.visible = true)); selectionChanged(); toast('Todo visible'); }
 let modelClean = false;
 function toggleModel() {
   modelClean = !modelClean;
@@ -2651,6 +2704,329 @@ addEventListener('pointerup', (e) => {
   else m.close(false);
 }, true);
 
+// ---------- Capas y grupos ----------
+// Cada objeto vive en una capa (se puede ocultar entera) y puede estar en un grupo (carpeta en la escena).
+// Elegir un objeto agrupado elige el grupo entero, como un nodo de grupo de Alias.
+const layers = [{ id: 1, name: 'Predeterminada', visible: true }];
+let activeLayer = 1, nextLayerId = 2;
+const groups = [];
+let nextGroupId = 1;
+const layerOn = (id) => layers.find((l) => l.id === id)?.visible !== false;
+function initObj(obj) {
+  obj.layer = activeLayer; obj.group = null;
+  let own = obj.visible !== false;
+  // visible = el objeto no está oculto Y su capa está encendida; ownVisible = solo el ojo del objeto
+  Object.defineProperty(obj, 'visible', { get: () => own && layerOn(obj.layer), set: (v) => { own = !!v; }, enumerable: true, configurable: true });
+  Object.defineProperty(obj, 'ownVisible', { get: () => own });
+}
+function expandGroups(items) {
+  if (pickMode !== 'object') return items;
+  const out = [];
+  for (const it of items) {
+    if (!it.key && it.group) objects.filter((o) => o.group === it.group && o.visible).forEach((o) => out.includes(o) || out.push(o));
+    else if (!out.includes(it)) out.push(it);
+  }
+  return out;
+}
+function groupSelection() {
+  const sel = selObjs.slice();
+  if (sel.length < 2) return toast('Agrupar: elige 2 o más objetos (modo Objetos).');
+  checkpoint();
+  const g = { id: nextGroupId++, name: `Grupo ${groups.length + 1}`, open: true };
+  groups.push(g);
+  sel.forEach((o) => (o.group = g.id));
+  pruneGroups(); refreshOutliner();
+  toast(`${g.name}: ${sel.length} objetos (Ctrl+Shift+G para desagrupar)`);
+}
+function ungroupSelection() {
+  const ids = new Set(selObjs.map((o) => o.group).filter(Boolean));
+  if (!ids.size) return toast('Desagrupar: elige un grupo.');
+  checkpoint();
+  objects.forEach((o) => { if (ids.has(o.group)) o.group = null; });
+  pruneGroups(); refreshOutliner(); toast('Desagrupado');
+}
+function pruneGroups() {
+  for (let i = groups.length - 1; i >= 0; i--) if (!objects.some((o) => o.group === groups[i].id)) groups.splice(i, 1);
+}
+function newLayer() {
+  checkpoint();
+  const l = { id: nextLayerId++, name: `Capa ${layers.length}`, visible: true };
+  layers.push(l); activeLayer = l.id;
+  renderLayers(); toast(`${l.name} creada: lo nuevo irá a esta capa`);
+}
+function assignToLayer(id = activeLayer) {
+  if (!selObjs.length) return toast('Elige objetos para pasarlos a la capa.');
+  checkpoint();
+  selObjs.forEach((o) => (o.layer = id));
+  const name = layers.find((l) => l.id === id)?.name;
+  objects.forEach(applyVisibility); renderLayers(); refreshOutliner(); toast(`Pasados a ${name}`);
+}
+function setLayerVisible(l, v) {
+  checkpoint();
+  l.visible = v;
+  for (let i = selObjs.length - 1; i >= 0; i--) if (!selObjs[i].visible) selObjs.splice(i, 1);
+  selectionChanged(); renderLayers();
+}
+function renderLayers() {
+  const ul = $('layers');
+  if (!ul) return;
+  ul.innerHTML = '';
+  for (const l of layers) {
+    const n = objects.filter((o) => o.layer === l.id).length;
+    const li = document.createElement('li');
+    li.className = 'ly-item' + (l.id === activeLayer ? ' active' : '') + (l.visible ? '' : ' off');
+    li.innerHTML = `<button class="ly-eye" aria-pressed="${l.visible}" title="${l.visible ? 'Ocultar capa' : 'Mostrar capa'}">${EYE}</button>
+      <button class="ly-name" title="Clic: capa activa (lo nuevo va aquí) · Doble clic: renombrar">${esc(l.name)}</button><span class="ly-n">${n}</span>
+      <button class="ly-to" title="Pasar la selección a esta capa">←</button>`;
+    li.querySelector('.ly-eye').addEventListener('click', () => setLayerVisible(l, !l.visible));
+    li.querySelector('.ly-name').addEventListener('click', () => { activeLayer = l.id; renderLayers(); });
+    li.querySelector('.ly-name').addEventListener('dblclick', () => { const v = prompt('Nombre de la capa', l.name); if (v) { checkpoint(); l.name = v.trim() || l.name; renderLayers(); } });
+    li.querySelector('.ly-to').addEventListener('click', () => assignToLayer(l.id));
+    ul.append(li);
+  }
+}
+
+// ---------- Deshacer / rehacer ----------
+// Antes de cada cambio se guarda una copia de la escena (como mucho una por tarea del navegador, así un
+// arrastre o una operación que crea varios objetos cuentan como un solo paso). Ctrl+Z o Ctrl+X deshacen.
+const undoStack = [], redoStack = [];
+let restoring = false, cpArmed = false;
+function cloneData(o) {
+  const d = o.data ?? o;
+  if (o.kind === 'mesh') return { geometry: d.geometry.clone() };
+  if (o.kind === 'surface') return { degU: d.degU, degV: d.degV, knotsU: d.knotsU.slice(), knotsV: d.knotsV.slice(), cvs: d.cvs.map((r) => r.map(cloneV4)) };
+  return { deg: d.deg, knots: d.knots.slice(), plane: d.plane, cvs: d.cvs.map(cloneV4) };
+}
+function snapshot() {
+  return {
+    layers: layers.map((l) => ({ ...l })), activeLayer, nextLayerId, groups: groups.map((g) => ({ ...g })), nextGroupId,
+    objects: objects.map((o) => ({ id: o.id, kind: o.kind, name: o.name, mat: o.mat, own: o.ownVisible, layer: o.layer, group: o.group, pivot: o.pivot.clone(), data: cloneData(o) })),
+  };
+}
+function checkpoint() {
+  if (restoring || cpArmed) return;
+  cpArmed = true; setTimeout(() => { cpArmed = false; }, 0);
+  undoStack.push(snapshot());
+  if (undoStack.length > 50) undoStack.shift();
+  redoStack.length = 0;
+}
+function clearHistory() { undoStack.length = 0; redoStack.length = 0; }
+function restore(st) {
+  restoring = true;
+  selObjs.length = 0; selCVs.clear();
+  objects.slice().forEach(removeObject);
+  layers.splice(0, layers.length, ...st.layers.map((l) => ({ ...l })));
+  groups.splice(0, groups.length, ...st.groups.map((g) => ({ ...g })));
+  nextLayerId = st.nextLayerId; nextGroupId = st.nextGroupId;
+  const act = st.activeLayer;
+  for (const it of st.objects) {
+    nextId = it.id; activeLayer = it.layer;
+    const d = cloneData({ kind: it.kind, data: it.data });
+    const o = it.kind === 'surface' ? addSurface(d, it.name) : it.kind === 'curve' ? addCurve(d, it.name) : addMesh(d.geometry, it.name);
+    o.name = it.name; o.mat = it.mat; o.visible = it.own; o.group = it.group; o.pivot.copy(it.pivot);
+  }
+  activeLayer = act;
+  nextId = Math.max(1, ...objects.map((o) => o.id + 1));
+  restoring = false;
+  objects.forEach(applyVisibility);
+  selectionChanged(); refreshOutliner(); renderLayers();
+}
+function undo() {
+  if (!undoStack.length) return toast('Nada que deshacer');
+  redoStack.push(snapshot()); restore(undoStack.pop()); toast('Deshacer');
+}
+function redo() {
+  if (!redoStack.length) return toast('Nada que rehacer');
+  undoStack.push(snapshot()); restore(redoStack.pop()); toast('Rehacer');
+}
+addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+  const k = e.key.toLowerCase();
+  if ((k === 'z' || k === 'x') && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+  else if (k === 'g') { e.preventDefault(); e.shiftKey ? ungroupSelection() : groupSelection(); }
+});
+
+// ---------- Modos de evaluación (antes en la barra de arriba): 3 formas de ponerlos en los menús laterales ----------
+// A = esferas en la barra izquierda · B = sección con miniaturas en el panel derecho · C = una esfera que se despliega
+const EVAL_MODES = [
+  { k: 'showroom', label: 'Showroom', key: '4' }, { k: 'diffuse', label: 'Difuso', key: '5' }, { k: 'sky', label: 'Shade-Sky', key: '6' },
+  { k: 'zebra', label: 'Cebra', key: '1' }, { k: 'curv', label: 'Curvatura', key: '2' }, { k: 'wire', label: 'Malla', key: '3' },
+];
+const evalThumbs = {};
+function buildEvalUI() {
+  const ph = (m) => `<span class="ev-ph" data-thumb="${m.k}"></span>`;
+  $('eval-a').innerHTML = EVAL_MODES.map((m) => `<button class="ev-ball" data-diag="${m.k}" title="${m.label} (${m.key})">${ph(m)}</button>`).join('');
+  $('eval-b').innerHTML = EVAL_MODES.map((m) => `<button class="ev-tile" data-diag="${m.k}">${ph(m)}<b>${m.label}</b><kbd>${m.key}</kbd></button>`).join('');
+  $('eval-c-fly').innerHTML = EVAL_MODES.map((m) => `<button class="ev-row" data-diag="${m.k}">${ph(m)}<b>${m.label}</b><kbd>${m.key}</kbd></button>`).join('');
+  $('eval-c-btn').innerHTML = `<span class="ev-ph" data-thumb="current"></span>`;
+  document.querySelectorAll('#eval-a [data-diag], #eval-b [data-diag], #eval-c-fly [data-diag]').forEach((b) => b.addEventListener('click', () => setDiag(b.dataset.diag)));
+  // miniaturas: una esfera con cada shader, renderizada una vez en un lienzo aparte
+  requestAnimationFrame(() => {
+    const tr = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
+    tr.setClearColor(0x000000, 0); tr.setSize(96, 96); tr.toneMapping = THREE.ACESFilmicToneMapping;
+    const ts = new THREE.Scene();
+    ts.environment = new THREE.PMREMGenerator(tr).fromScene(new RoomEnvironment(tr), 0.04).texture;
+    const tc = new THREE.PerspectiveCamera(30, 1, 0.1, 10); tc.position.set(0, 0.3, 3.9); tc.lookAt(0, 0, 0);
+    const geo = new THREE.SphereGeometry(1, 64, 48), col = [];
+    for (let i = 0; i < geo.attributes.position.count; i++) {
+      const y = geo.attributes.position.getY(i), c = new THREE.Color().setHSL(0.66 - 0.66 * (y * 0.5 + 0.5), 0.75, 0.5);
+      col.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    const ball = new THREE.Mesh(geo); ts.add(ball);
+    const wire = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), wireMat);
+    for (const m of EVAL_MODES) {
+      const mats = { showroom: envDiagMat, diffuse: envDiagMat, sky: envDiagMat, zebra: zebraMat, curv: curvMat };
+      ts.remove(ball, wire);
+      if (m.k === 'wire') ts.add(wire); else { ball.material = mats[m.k]; ts.add(ball); }
+      const keep = envDiagMat.uniforms.uMode.value;
+      if (ENV_MODES[m.k]) envDiagMat.uniforms.uMode.value = ENV_MODES[m.k];
+      tr.render(ts, tc);
+      envDiagMat.uniforms.uMode.value = keep;
+      evalThumbs[m.k] = tr.domElement.toDataURL();
+    }
+    tr.dispose(); tr.forceContextLoss();
+    updateEvalUI();
+  });
+}
+function updateEvalUI() {
+  const app = $('app');
+  if (!app || !$('eval-a')) return;
+  app.dataset.evalui = prefs.evalUI;
+  document.querySelectorAll('[data-thumb]').forEach((el) => {
+    const k = el.dataset.thumb === 'current' ? diagMode : el.dataset.thumb;
+    if (evalThumbs[k]) el.style.backgroundImage = `url(${evalThumbs[k]})`;
+  });
+  const cur = EVAL_MODES.find((m) => m.k === diagMode);
+  $('eval-c-btn').title = `Evaluación: ${cur?.label} (pasa el ratón para cambiar)`;
+  if ($('pane-mode')) $('pane-mode').textContent = cur ? '· ' + cur.label.toUpperCase() : '';
+}
+
+// ---------- Barra de menús (como la de Alias) ----------
+const chk = (f) => ({ check: f });
+const MENUBAR = [
+  ['Archivo', [
+    { label: 'Abrir…', key: 'Ctrl+O', run: () => $('io-file').click() }, { label: 'Guardar proyecto', key: 'Ctrl+S', run: () => doExport('forja') },
+    { sep: true }, { label: 'Importar y exportar…', key: 'Ctrl+E', run: () => toggleFilePanel() }]],
+  ['Editar', [
+    { label: 'Deshacer', key: 'Ctrl+Z · Ctrl+X', run: undo }, { label: 'Rehacer', key: 'Ctrl+Y', run: redo }, { sep: true },
+    { label: 'Duplicar', run: duplicateSelection }, { label: 'Agrupar', key: 'Ctrl+G', run: groupSelection }, { label: 'Desagrupar', key: 'Ctrl+Shift+G', run: ungroupSelection },
+    { sep: true }, { title: 'Elegir' },
+    { label: 'Objetos', key: 'O', run: () => setPickMode('object'), ...chk(() => pickMode === 'object' && !pickFilter) },
+    { label: 'Solo curvas', run: () => setPickMode('object', 'curve'), ...chk(() => pickFilter === 'curve') },
+    { label: 'Solo superficies', run: () => setPickMode('object', 'surface'), ...chk(() => pickFilter === 'surface') },
+    { label: 'CVs', key: 'P', run: () => setPickMode('cv'), ...chk(() => pickMode === 'cv') },
+    { label: 'Nada', run: pickNothing }, { sep: true }, { title: 'Snap fijo' },
+    { label: 'Rejilla', key: 'Alt', run: () => $('snap-grid').click(), ...chk(() => snapToggles.grid) },
+    { label: 'Curva', key: 'Ctrl+Alt', run: () => $('snap-curve').click(), ...chk(() => snapToggles.curve) },
+    { label: 'Punto', key: 'Ctrl', run: () => $('snap-point').click(), ...chk(() => snapToggles.point) }]],
+  ['Borrar', [
+    { label: 'Borrar selección', key: 'Supr', run: deleteSelection },
+    { label: 'Borrar todas las curvas', run: () => { selObjs.splice(0, selObjs.length, ...objects.filter((o) => o.kind === 'curve')); deleteSelection(); } },
+    { label: 'Borrar todo', run: () => { if (confirm('¿Borrar toda la escena? (se puede deshacer con Ctrl+Z)')) { setPickMode('object'); selObjs.splice(0, selObjs.length, ...objects); deleteSelection(); } } }]],
+  ['Vistas', [
+    { label: 'Encuadrar selección', key: 'F', run: frameSelection }, { label: 'Encuadrar todo', run: () => frameObjects([]) }, { label: 'Vista superior', key: 'T', run: topView },
+    { sep: true }, { label: 'Modelado', run: () => switchLayout('diag'), ...chk(() => layout === 'diag') },
+    { label: 'Visu', run: () => switchLayout('render'), ...chk(() => layout === 'render') }, { label: 'IA', run: () => switchLayout('ai'), ...chk(() => layout === 'ai') },
+    { label: 'Dividida', run: () => switchLayout('split'), ...chk(() => layout === 'split') }, { label: 'Elegir módulo', key: 'mantener V', run: () => toast('Mantén V y haz clic en un módulo') }]],
+  ['Mostrar', [
+    { label: 'Toggle Model', run: toggleModel, ...chk(() => modelClean) }, { label: 'Rejilla', run: toggleGrid, ...chk(() => grid.visible) },
+    { label: 'Líneas de parche', run: () => $('show-iso').click(), ...chk(() => $('show-iso').checked) },
+    { label: 'Peine de curvatura', run: () => $('show-comb').click(), ...chk(() => $('show-comb').checked) },
+    { sep: true }, { label: 'Ocultar selección', run: hideSelection }, { label: 'Mostrar todo', run: unhideAll }]],
+  ['Capas', [
+    { label: 'Nueva capa', run: newLayer }, { label: 'Pasar selección a la capa activa', run: () => assignToLayer() },
+    { label: 'Mostrar todas las capas', run: () => { checkpoint(); layers.forEach((l) => (l.visible = true)); selectionChanged(); renderLayers(); } },
+    { sep: true }, { label: 'Ver capas en el panel', run: () => { setPinned(true); $('sec-layers').open = true; $('sec-layers').scrollIntoView({ block: 'nearest' }); } }]],
+  ['Visualización', [
+    ...EVAL_MODES.map((m) => ({ label: m.label, key: m.key, run: () => setDiag(m.k), ...chk(() => layout !== 'render' && diagMode === m.k) })),
+    { sep: true }, { title: 'Entorno (Visu)' },
+    ...[['studio', 'Estudio'], ['sun', 'Exterior'], ['sunset', 'Atardecer'], ['overcast', 'Nublado']].map(([k, l]) => ({ label: l, run: env(k), ...chk(() => envKey === k) }))]],
+  ['Animación', [{ label: 'Plato giratorio', soon: true }, { label: 'Línea de tiempo', soon: true }]],
+  ['Ventanas', [
+    { label: 'Panel lateral fijo', run: () => setPinned(!pinned), ...chk(() => pinned) }, { label: 'Pantalla completa', run: fullscreen },
+    { label: 'Puck', key: 'Tab', run: () => puck.show(innerWidth / 2, innerHeight / 2) }]],
+  ['Preferencias', [{ label: 'Preferencias…', run: () => openPrefs() }]],
+  ['Utilidades', [
+    { label: 'Centrar pivote', run: centerPivots }, { label: 'Punto de interés a la selección', key: 'L', run: pivotToSelection },
+    { label: 'Medir distancia', soon: true }]],
+  ['Ayuda', [{ label: 'Atajos de teclado', run: () => openPrefs('help') }, { label: 'Acerca de Forja', run: () => toast('FORJA · modelador NURBS libre (Alias + Plasticity + Blender)') }]],
+];
+function buildMenubar() {
+  const bar = $('menubar');
+  let openBtn = null;
+  const drop = document.createElement('div');
+  drop.className = 'mb-drop'; drop.hidden = true;
+  document.body.append(drop);
+  const close = () => { drop.hidden = true; openBtn?.setAttribute('aria-expanded', 'false'); openBtn = null; };
+  const open = (btn, items) => {
+    openBtn?.setAttribute('aria-expanded', 'false');
+    openBtn = btn; btn.setAttribute('aria-expanded', 'true');
+    drop.innerHTML = '';
+    for (const it of items) {
+      if (it.sep) { drop.append(document.createElement('hr')); continue; }
+      if (it.title) { const t = document.createElement('div'); t.className = 'mb-title'; t.textContent = it.title; drop.append(t); continue; }
+      const b = document.createElement('button');
+      b.className = 'mb-item' + (it.soon ? ' soon' : '');
+      const on = it.check?.();
+      b.innerHTML = `<span class="mb-chk">${on ? '✓' : ''}</span><span>${esc(it.label)}</span><kbd>${it.soon ? 'pronto' : esc(it.key || '')}</kbd>`;
+      b.addEventListener('click', () => { close(); it.soon ? soon(it.label) : it.run(); });
+      drop.append(b);
+    }
+    const r = btn.getBoundingClientRect();
+    drop.style.left = Math.min(r.left, innerWidth - 260) + 'px'; drop.style.top = r.bottom + 6 + 'px';
+    drop.hidden = false;
+  };
+  for (const [name, items] of MENUBAR) {
+    const b = document.createElement('button');
+    b.className = 'mb-btn'; b.textContent = name; b.setAttribute('aria-haspopup', 'true'); b.setAttribute('aria-expanded', 'false');
+    b.addEventListener('click', () => (openBtn === b ? close() : open(b, items)));
+    b.addEventListener('pointerenter', () => { if (openBtn && openBtn !== b) open(b, items); });
+    bar.append(b);
+  }
+  addEventListener('pointerdown', (e) => { if (openBtn && !e.target.closest('.mb-drop, .mb-btn')) close(); }, true);
+  addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+}
+
+// ---------- Ventana de preferencias ----------
+function openPrefs(tab = 'ui') {
+  const d = $('prefs');
+  d.querySelectorAll('[data-ptab]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.ptab === tab)));
+  d.querySelectorAll('[data-ppage]').forEach((p) => (p.hidden = p.dataset.ppage !== tab));
+  d.querySelectorAll('[name="pref-eval"]').forEach((r) => (r.checked = r.value === prefs.evalUI));
+  $('pref-xform').value = prefs.xform;
+  if (!d.open) d.showModal();
+}
+function initPrefs() {
+  const d = $('prefs');
+  // lo que antes estaba en la cabecera o en el panel pasa aquí
+  $('pref-theme').append(document.querySelector('.seg.theme'));
+  const nav = $('nav-help')?.closest('section');
+  if (nav) { [...nav.children].filter((c) => c.tagName !== 'H2').forEach((c) => $('pref-nav').append(c)); nav.remove(); }
+  d.querySelectorAll('[data-ptab]').forEach((b) => b.addEventListener('click', () => openPrefs(b.dataset.ptab)));
+  d.querySelectorAll('[name="pref-eval"]').forEach((r) => r.addEventListener('change', () => { prefs.evalUI = r.value; savePrefs(); updateEvalUI(); }));
+  $('pref-xform').addEventListener('change', (e) => { prefs.xform = e.target.value; savePrefs(); attachGizmo(); });
+  $('prefs-close').addEventListener('click', () => d.close());
+  d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
+}
+$('ly-new').addEventListener('click', (e) => { e.preventDefault(); $('sec-layers').open = true; newLayer(); });
+// opción C: la esfera del modo actual despliega las demás al pasar el ratón
+{
+  const btn = $('eval-c-btn'), fly = $('eval-c-fly');
+  let t = 0;
+  const show = () => { clearTimeout(t); const r = btn.getBoundingClientRect(); fly.style.left = r.right + 10 + 'px'; fly.style.top = Math.min(innerHeight - 290, r.top - 100) + 'px'; fly.classList.add('show'); };
+  const hide = () => { t = setTimeout(() => fly.classList.remove('show'), 220); };
+  [btn, fly].forEach((el) => { el.addEventListener('pointerenter', show); el.addEventListener('pointerleave', hide); });
+  btn.addEventListener('click', show);
+  fly.addEventListener('click', () => fly.classList.remove('show'));
+}
+buildMenubar();
+initPrefs();
+buildEvalUI();
+renderLayers();
+updateEvalUI();
+
 // ---------- Dibujo de cada cuadro ----------
 function renderPane(p) {
   renderer.setViewport(p.x, 0, p.w, p.h);
@@ -2675,7 +3051,7 @@ const xfPrompt = document.createElement('div');
 xfPrompt.className = 'xf-prompt'; xfPrompt.hidden = true;
 document.body.append(xfPrompt);
 function updateXfPrompt() {
-  const on = mouseXform && tool === 'select' && !pivotEdit && !carousel && !MENUS.some((m) => m.open) && hasTransformable();
+  const on = mouseXform && prefs.xform !== 'gizmo' && tool === 'select' && !pivotEdit && !carousel && !MENUS.some((m) => m.open) && hasTransformable();
   xfPrompt.hidden = !on;
   if (!on) return;
   const txt = xform === 'scale' ? 'ESCALAR <i>izq</i> todo · <i>medio</i> Y · <i>der</i> X Z'
@@ -2739,6 +3115,7 @@ if (new URLSearchParams(location.search).get('demo') === 'capo') {
   for (const [name, pts] of parts) addSurface(N.revolve(P(pts)), name).name = name;
 }
 refreshOutliner();
+clearHistory();
 camera.position.set(8, 6.4, 10.5);
 camera.lookAt(0, 0.6, 0.6);
 pivot.set(0, 0.6, 0.6);

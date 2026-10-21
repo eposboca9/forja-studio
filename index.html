@@ -487,6 +487,88 @@
   .xf-prompt { position: fixed; left: 0; top: 0; z-index: 60; pointer-events: none; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
     color: #fff; background: rgba(20,26,38,.82); padding: 4px 8px; border-radius: 4px; white-space: nowrap; }
   .xf-prompt i { font-style: normal; color: #8db8ff; }
+  /* --- Barra de menús (Alias) --- */
+  .menubar { display: flex; gap: 2px; align-items: center; }
+  .mb-btn { font: inherit; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; background: none; border: 0; padding: 6px 8px; cursor: pointer; border-radius: 4px; }
+  .mb-btn[aria-expanded="true"] { box-shadow: inset 0 -2px 0 #2f7bff !important; }
+  .mb-drop { position: fixed; z-index: 90; min-width: 230px; padding: 6px; border-radius: 8px; background: color-mix(in srgb, var(--panel) 97%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent), 0 18px 40px -12px rgba(0,0,0,.6); backdrop-filter: blur(10px); }
+  .mb-drop hr { border: 0; border-top: 1px solid color-mix(in srgb, var(--fg) 12%, transparent); margin: 5px 4px; }
+  .mb-title { font-family: var(--font-mono); font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 6px 8px 2px; }
+  .mb-item { width: 100%; display: grid; grid-template-columns: 16px 1fr auto; gap: 6px; align-items: center; text-align: left; font: inherit; font-size: 12.5px;
+    color: var(--fg); background: none; border: 0; padding: 6px 8px; border-radius: 5px; cursor: pointer; }
+  .mb-item:hover { background: #2f7bff; color: #fff; }
+  .mb-item kbd { font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+  .mb-item:hover kbd { color: rgba(255,255,255,.8); }
+  .mb-item .mb-chk { color: #2f7bff; font-weight: 700; }
+  .mb-item:hover .mb-chk { color: #fff; }
+  .mb-item.soon { opacity: .45; }
+  .top .filebtn { display: none !important; }
+  .mb-btn { font-size: 10.5px; letter-spacing: .06em; padding: 6px 6px; }
+  @media (max-width: 1500px) { .top .tag, .top .file { display: none !important; } .mb-btn { letter-spacing: .03em; padding: 6px 5px; } }
+  @media (max-width: 1250px) { .mb-btn { font-size: 10px; padding: 6px 4px; } }
+  /* --- Preferencias --- */
+  .prefs { width: min(620px, 92vw); max-height: 82vh; padding: 0; border: 0; border-radius: 12px; background: var(--panel); color: var(--fg);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent), 0 30px 80px -20px rgba(0,0,0,.7); }
+  .prefs::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
+  .prefs-head { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid color-mix(in srgb, var(--fg) 10%, transparent); }
+  .prefs-head b { letter-spacing: .12em; text-transform: uppercase; font-size: 12px; font-weight: 500; }
+  .prefs-head .seg { margin-left: auto; }
+  .prefs-head .iconbtn { font-size: 20px; line-height: 1; }
+  .prefs-page { padding: 6px 18px 18px; overflow-y: auto; max-height: calc(82vh - 60px); display: flex; flex-direction: column; gap: 8px; }
+  .prefs-page h3 { margin: 12px 0 2px; font-size: 10px; font-weight: 500; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .prefs .radio { display: grid; grid-template-columns: 20px 1fr; gap: 0 6px; font-size: 12.5px; cursor: pointer; padding: 6px 8px; border-radius: 6px; }
+  .prefs .radio:hover { background: rgba(127,127,127,.1); }
+  .prefs .radio span { grid-column: 2; color: var(--muted); font-size: 11.5px; }
+  .prefs .radio b { font-weight: 500; }
+  .keys { border-collapse: collapse; font-size: 12px; width: 100%; }
+  .keys td { padding: 6px 4px; border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent); }
+  .keys td:first-child { font-family: var(--font-mono); font-size: 11px; color: var(--muted); white-space: nowrap; width: 45%; }
+  /* --- Modos de evaluación: 3 opciones --- */
+  .app:not([data-evalui="a"]) .eval-a-wrap, .app:not([data-evalui="b"]) .eval-b-wrap, .app:not([data-evalui="c"]) .eval-c-wrap,
+  .app:not([data-evalui="c"]) .eval-c-fly { display: none !important; }
+  .app[data-layout-now="render"] .eval-a-wrap, .app[data-layout-now="render"] .eval-c-wrap { display: none !important; }
+  .ev-ph { display: block; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #fff, #8d95a3 60%, #3a3f48) center / cover no-repeat; }
+  .eval-a { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 2px 0; }
+  .ev-ball { width: 34px; height: 34px; padding: 3px; border: 0; background: none; border-radius: 50%; cursor: pointer; }
+  .ev-ball .ev-ph { width: 28px; height: 28px; }
+  .ev-ball[aria-pressed="true"] { box-shadow: 0 0 0 2px #2f7bff; }
+  .eval-b { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .ev-tile { display: grid; justify-items: center; gap: 3px; padding: 6px 4px; border: 0; border-radius: 8px; background: rgba(127,127,127,.08); color: var(--fg); font: inherit; cursor: pointer; position: relative; }
+  .ev-tile .ev-ph { width: 48px; height: 48px; }
+  .ev-tile b { font-size: 11px; font-weight: 500; }
+  .ev-tile kbd { position: absolute; top: 4px; right: 6px; font-family: var(--font-mono); font-size: 9px; color: var(--muted); }
+  .ev-tile[aria-pressed="true"] { background: color-mix(in srgb, #2f7bff 22%, transparent); box-shadow: inset 0 0 0 1.5px #2f7bff; }
+  .eval-c-btn { width: 40px; height: 40px; padding: 2px; border: 0; border-radius: 50%; background: none; cursor: pointer; box-shadow: 0 0 0 2px #2f7bff; margin: 4px auto; display: block; }
+  .eval-c-btn .ev-ph { width: 36px; height: 36px; }
+  .eval-c-fly { position: fixed; z-index: 80; display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 10px; opacity: 0; pointer-events: none; transform: translateX(-6px);
+    transition: opacity .15s, transform .15s; background: color-mix(in srgb, var(--panel) 96%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent), 0 16px 36px -12px rgba(0,0,0,.6); }
+  .eval-c-fly.show { opacity: 1; pointer-events: auto; transform: none; }
+  .ev-row { display: grid; grid-template-columns: 30px 1fr auto; gap: 8px; align-items: center; padding: 4px 8px 4px 4px; border: 0; border-radius: 6px; background: none; color: var(--fg); font: inherit; font-size: 12px; cursor: pointer; text-align: left; min-width: 150px; }
+  .ev-row .ev-ph { width: 28px; height: 28px; }
+  .ev-row b { font-weight: 500; } .ev-row kbd { font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+  .ev-row:hover { background: rgba(127,127,127,.12); }
+  .ev-row[aria-pressed="true"] { background: color-mix(in srgb, #2f7bff 22%, transparent); }
+  /* --- Capas y grupos --- */
+  .layers-sec { margin-top: 8px; }
+  .layers-sec summary { cursor: pointer; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 8px; list-style: none; }
+  .layers-sec summary::before { content: "▸"; transition: transform .15s; }
+  .layers-sec[open] summary::before { transform: rotate(90deg); }
+  .layers-sec .mini { margin-left: auto; font: inherit; width: 20px; height: 20px; border-radius: 4px; border: 0; background: rgba(127,127,127,.15); color: var(--fg); cursor: pointer; }
+  .layers { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ly-item { display: grid; grid-template-columns: 24px 1fr auto 22px; align-items: center; gap: 4px; border-radius: 5px; padding: 1px 2px; }
+  .ly-item.active { background: color-mix(in srgb, #2f7bff 16%, transparent); }
+  .ly-item.off .ly-name { opacity: .45; }
+  .ly-item button { background: none; border: 0; color: var(--fg); font: inherit; cursor: pointer; padding: 3px; text-align: left; font-size: 12px; }
+  .ly-eye svg { width: 15px; height: 15px; } .ly-eye[aria-pressed="false"] { opacity: .35; }
+  .ly-n { font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+  .ly-to { opacity: .5; } .ly-to:hover { opacity: 1; color: #2f7bff; }
+  .ol-group > .ol-gh { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; }
+  .ol-group > ul { list-style: none; margin: 0; padding-left: 16px; border-left: 1px dashed color-mix(in srgb, var(--fg) 18%, transparent); margin-left: 8px; }
+  .ol-fold { background: none; border: 0; color: var(--muted); cursor: pointer; transition: transform .15s; padding: 0; }
+  .ol-group.open .ol-fold { transform: rotate(90deg); }
+  .ol-group.sel > .ol-gh .ol-name { color: #2f7bff; }
+  .ol-group small { color: var(--muted); font-family: var(--font-mono); font-size: 9px; }
   .puck { position: fixed; width: 0; height: 0; z-index: 70; pointer-events: none; }
   .puck::before { content: ""; position: absolute; left: -330px; top: -200px; width: 660px; height: 400px; border-radius: 50%;
     background: radial-gradient(closest-side, color-mix(in srgb, var(--bg) 82%, transparent) 0 58%, transparent 100%); backdrop-filter: blur(2px); }
@@ -583,21 +665,16 @@
       <button disabled title="Redondeo / fillet (próxima versión, con OpenCASCADE)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V12a8 8 0 0 1 8-8h8"/></svg></button>
       <button disabled title="Chaflán (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10l6-6h10"/></svg></button>
       <button disabled title="Booleanas (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg></button>
+      <div class="eval-a-wrap"><hr><span class="tl">EVALUAR</span><div class="eval-a" id="eval-a"></div></div>
+      <div class="eval-c-wrap"><hr><span class="tl">EVALUAR</span><button class="eval-c-btn" id="eval-c-btn" aria-haspopup="true"></button></div>
     </nav>
+    <div class="eval-c-fly" id="eval-c-fly" role="menu" aria-label="Modos de evaluación"></div>
 
   <main class="view" id="view">
     <div class="loading" id="loading">Cargando motor 3D…</div>
     <div class="pane left" id="pane-diag">
       <div class="pane-head">
-        <span class="pane-title"><b>MODELADO</b></span>
-        <div class="seg small" role="group" aria-label="Análisis">
-          <button id="d-showroom" data-diag="showroom" aria-pressed="true" title="Showroom (4)">Showroom</button>
-          <button id="d-diffuse" data-diag="diffuse" aria-pressed="false" title="Difuso (5)">Difuso</button>
-          <button id="d-sky" data-diag="sky" aria-pressed="false" title="Shade-Sky (6)">Shade-Sky</button>
-          <button id="d-zebra" data-diag="zebra" aria-pressed="false" title="Cebra (1)">Cebra</button>
-          <button id="d-curv" data-diag="curv" aria-pressed="false" title="Curvatura (2)">Curvatura</button>
-          <button id="d-wire" data-diag="wire" aria-pressed="false" title="Malla (3)">Malla</button>
-        </div>
+        <span class="pane-title"><b>MODELADO</b> <span id="pane-mode"></span></span>
 
       </div>
       <div class="legend" id="legend" hidden>
@@ -693,9 +770,19 @@
       <ol class="ai-log" id="ai-log"></ol>
     </section>
 
+    <section class="sec eval-b-wrap" data-module="diag">
+      <h2>Evaluación</h2>
+      <div class="eval-b" id="eval-b"></div>
+    </section>
+
     <section class="sec" data-module="all">
       <h2 id="sec-scene">Escena · <span id="scene-count"></span></h2>
       <ul class="outliner" id="outliner"></ul>
+      <details class="layers-sec" id="sec-layers">
+        <summary>Capas <button class="mini" id="ly-new" title="Nueva capa">+</button></summary>
+        <ul class="layers" id="layers"></ul>
+        <p class="muted">Clic: capa activa (lo nuevo va ahí) · ← pasa la selección · Ctrl+G agrupa la selección en una carpeta.</p>
+      </details>
     </section>
 
     <section class="sec" data-module="diag">
@@ -791,29 +878,67 @@
     <div class="reveal-top" id="reveal-top">
     <button class="filebtn" id="file-btn" aria-expanded="false" aria-controls="filepanel" title="Importar y exportar (Ctrl+E)">ARCHIVO</button>
     <span class="file" id="file-name">vaso_concepto.forja</span>
-    <span class="lbl">Seleccionar</span>
-    <div class="seg pick" role="group" aria-label="Qué seleccionar">
-      <button id="pick-object" data-pick="object" aria-pressed="true" title="Seleccionar objetos completos (O)">Objetos</button>
-      <button id="pick-cv" data-pick="cv" aria-pressed="false" title="Seleccionar puntos de control (P)">CVs</button>
-    </div>
-    <span class="lbl">Snap</span>
-    <div class="seg snap" role="group" aria-label="Snap fijo">
-      <button id="snap-grid" data-snap="grid" aria-pressed="false" title="Snap a la rejilla. Momentáneo: mantener Alt">Rejilla</button>
-      <button id="snap-curve" data-snap="curve" aria-pressed="false" title="Snap a curvas y bordes. Momentáneo: mantener Ctrl+Alt">Curva</button>
-      <button id="snap-point" data-snap="point" aria-pressed="false" title="Snap a puntos: CVs, pivotes, extremos, esquinas. Momentáneo: mantener Ctrl">Punto</button>
-    </div>
+    <nav class="menubar" id="menubar" aria-label="Menús"></nav>
     <div class="seg lay" role="group" aria-label="Distribución de la vista">
       <button id="lay-diag" data-layout="diag" aria-pressed="true" title="Modelado: shaders de evaluación (V)">Modelado</button>
       <button id="lay-render" data-layout="render" aria-pressed="false" title="Visu: render realista con materiales (V)">Visu</button>
       <button id="lay-ai" data-layout="ai" aria-pressed="false" title="IA: crea objetos escribiendo lo que quieres (V)">IA</button>
     </div>
+    <span class="tag">v0.11</span>
+    </div>
+  </header>
+
+  <dialog class="prefs" id="prefs" aria-label="Preferencias">
+    <div class="prefs-head"><b>Preferencias</b>
+      <div class="seg small" role="tablist"><button data-ptab="ui">Interfaz</button><button data-ptab="nav">Navegación</button><button data-ptab="help">Atajos</button></div>
+      <button class="iconbtn" id="prefs-close" title="Cerrar" aria-label="Cerrar">×</button></div>
+    <div class="prefs-page" data-ppage="ui">
+      <h3>Tema</h3><div id="pref-theme"></div>
+      <h3>Modos de evaluación (Showroom, Cebra…)</h3>
+      <label class="radio"><input type="radio" name="pref-eval" value="a"> <b>A · Esferas en la barra izquierda</b><span>seis esferas pequeñas bajo las herramientas; el nombre sale al pasar el ratón</span></label>
+      <label class="radio"><input type="radio" name="pref-eval" value="b"> <b>B · Miniaturas en el panel derecho</b><span>sección "Evaluación" con una esfera de muestra de cada modo, como la biblioteca de materiales</span></label>
+      <label class="radio"><input type="radio" name="pref-eval" value="c"> <b>C · Una sola esfera que se despliega</b><span>la barra izquierda muestra solo el modo actual; al pasar el ratón salen los demás</span></label>
+      <h3>Mover, rotar y escalar</h3>
+      <div class="row"><label for="pref-xform">Con</label><select id="pref-xform" class="sel">
+        <option value="mouse">Botones del ratón (Alias): izq X · medio Y · der Z</option>
+        <option value="both">Botones del ratón y manipulador de flechas</option>
+        <option value="gizmo">Solo manipulador de flechas</option></select><span></span></div>
+    </div>
+    <div class="prefs-page" data-ppage="nav" hidden><div id="pref-nav"></div></div>
+    <div class="prefs-page" data-ppage="help" hidden>
+      <table class="keys">
+        <tr><td>Shift+Alt + botones</td><td>Girar · desplazar · acercar</td></tr>
+        <tr><td>Tab</td><td>Puck (herramientas)</td></tr>
+        <tr><td>Ctrl+Shift + izq / medio / der</td><td>Menús de selección / transformar / visualización</td></tr>
+        <tr><td>Espacio</td><td>Menú de visualización</td></tr>
+        <tr><td>Mantener V</td><td>Ver los módulos y elegir uno con el ratón</td></tr>
+        <tr><td>W · E · R</td><td>Mover · rotar · escalar (izq X · medio Y · der Z)</td></tr>
+        <tr><td>Ctrl+Z · Ctrl+X</td><td>Deshacer</td></tr><tr><td>Ctrl+Y</td><td>Rehacer</td></tr>
+        <tr><td>Ctrl+G · Ctrl+Shift+G</td><td>Agrupar · desagrupar</td></tr>
+        <tr><td>O · P</td><td>Elegir objetos · CVs</td></tr>
+        <tr><td>1–6</td><td>Cebra, curvatura, malla, Showroom, difuso, Shade-Sky</td></tr>
+        <tr><td>F · T · L</td><td>Encuadrar · vista superior · punto de interés</td></tr>
+        <tr><td>Alt · Ctrl · Ctrl+Alt</td><td>Snap a rejilla · punto · curva</td></tr>
+        <tr><td>Ctrl+S · Ctrl+O · Ctrl+E</td><td>Guardar · abrir · importar y exportar</td></tr>
+      </table>
+    </div>
+  </dialog>
+
+  <div hidden id="held-ctrls">
+        <div class="seg pick" role="group" aria-label="Qué seleccionar">
+      <button id="pick-object" data-pick="object" aria-pressed="true" title="Seleccionar objetos completos (O)">Objetos</button>
+      <button id="pick-cv" data-pick="cv" aria-pressed="false" title="Seleccionar puntos de control (P)">CVs</button>
+    </div>
+    <div class="seg snap" role="group" aria-label="Snap fijo">
+      <button id="snap-grid" data-snap="grid" aria-pressed="false" title="Snap a la rejilla. Momentáneo: mantener Alt">Rejilla</button>
+      <button id="snap-curve" data-snap="curve" aria-pressed="false" title="Snap a curvas y bordes. Momentáneo: mantener Ctrl+Alt">Curva</button>
+      <button id="snap-point" data-snap="point" aria-pressed="false" title="Snap a puntos: CVs, pivotes, extremos, esquinas. Momentáneo: mantener Ctrl">Punto</button>
+    </div>
     <div class="seg theme" role="group" aria-label="Tema">
       <button id="theme-light" data-theme-btn="light" aria-pressed="false" title="Fondo claro">Claro</button>
       <button id="theme-dark" data-theme-btn="dark" aria-pressed="true" title="Fondo oscuro">Oscuro</button>
     </div>
-    <span class="tag">v0.7 · propuesta</span>
-    </div>
-  </header>
+  </div>
 
   <footer class="status">
     <span><span class="dot"></span>Listo</span>
