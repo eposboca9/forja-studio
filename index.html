@@ -423,6 +423,35 @@
   .fp-opts .row { grid-template-columns: 96px 1fr 0; }
   .app.dropping::after { content: "Suelta los archivos para importarlos"; position: fixed; inset: 16px; display: grid; place-items: center; z-index: 60;
     border: 2px dashed #2f7bff; color: var(--fg); letter-spacing: .2em; text-transform: uppercase; font-size: 12px; background: color-mix(in srgb, var(--bg) 70%, transparent); pointer-events: none; }
+
+  /* --- Orden sin solapes --- */
+  /* la información de la vista vive en la barra de estado */
+  .status .viewinfo { margin-left: auto; position: static; display: flex; gap: 12px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 10px; text-shadow: 0 1px 0 var(--engrave-light); }
+  .status .viewinfo span + span::before { margin-right: 12px; }
+  .status { gap: 14px; }
+  /* la leyenda de curvatura, abajo a la derecha sobre la barra de estado */
+  .pane .legend, .legend { top: auto; bottom: 46px; right: 76px; }
+  /* pestañas y botones en una sola línea */
+  .seg button, .seg.small button { white-space: nowrap; }
+  .pane-head { flex-wrap: nowrap; }
+  /* la losa de propiedades tapa lo que queda detrás, con un velo del fondo, sin marcos */
+  .panel, .app.auto .panel { background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(12px); scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 60%, transparent) transparent; }
+  .panel::-webkit-scrollbar { width: 6px; } .panel::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 55%, transparent); }
+  .panel::-webkit-scrollbar-track { background: transparent; }
+  /* en pantallas de portátil se esconden los rótulos que no son imprescindibles */
+  @media (max-width: 1360px) { .top { gap: 12px; } .top .lbl, .tag { display: none; } .seg button { padding-inline: 6px; letter-spacing: .1em; } }
+  @media (max-width: 1150px) { .file { display: none; } .status .viewinfo #vi-cvs, .status .viewinfo #st-scene { display: none; } }
+
+  /* --- Carrusel entre MODELADO y VISU: la vista gira sobre un eje detrás de la pantalla --- */
+  .app { perspective: 1600px; }
+  .view { transform-origin: 50% 50% -35vw; backface-visibility: hidden; will-change: transform; }
+
+  /* Pantallas bajas (portátiles): la fila central nunca crece por su contenido; las herramientas se compactan */
+  .app, .app.auto { grid-template-rows: 58px minmax(0, 1fr) 34px; }
+  .tools, .app.auto .tools { max-height: 100%; overflow-y: auto; scrollbar-width: none; }
+  .tools::-webkit-scrollbar { display: none; }
+  @media (max-height: 800px) { .tools button { height: 30px; } .tools button svg { width: 17px; height: 17px; } .tools hr { margin: 3px 8px; } .tools .tl { padding: 0; } }
+  @media (max-height: 660px) { .tools .tl, .tools hr { display: none; } .tools button { height: 28px; } }
 </style>
 </head>
 <body>
@@ -444,9 +473,8 @@
       <button id="snap-point" data-snap="point" aria-pressed="false" title="Snap a puntos: CVs, pivotes, extremos, esquinas. Momentáneo: mantener Ctrl">Punto</button>
     </div>
     <div class="seg lay" role="group" aria-label="Distribución de la vista">
-      <button id="lay-split" data-layout="split" aria-pressed="false" title="Diagnóstico y render lado a lado (V)">Dividida</button>
-      <button id="lay-diag" data-layout="diag" aria-pressed="true" title="Solo diagnóstico (V)">Diagnóstico</button>
-      <button id="lay-render" data-layout="render" aria-pressed="false" title="Solo render (V)">Render</button>
+      <button id="lay-diag" data-layout="diag" aria-pressed="true" title="Modelado: shaders de evaluación (V)">Modelado</button>
+      <button id="lay-render" data-layout="render" aria-pressed="false" title="Visu: render realista con materiales (V)">Visu</button>
     </div>
     <div class="seg theme" role="group" aria-label="Tema">
       <button id="theme-light" data-theme-btn="light" aria-pressed="false" title="Fondo claro">Claro</button>
@@ -482,7 +510,7 @@
     <div class="loading" id="loading">Cargando motor 3D…</div>
     <div class="pane left" id="pane-diag">
       <div class="pane-head">
-        <span class="pane-title"><b>DIAGNÓSTICO</b></span>
+        <span class="pane-title"><b>MODELADO</b></span>
         <div class="seg small" role="group" aria-label="Análisis">
           <button id="d-showroom" data-diag="showroom" aria-pressed="true" title="Showroom (4)">Showroom</button>
           <button id="d-diffuse" data-diag="diffuse" aria-pressed="false" title="Difuso (5)">Difuso</button>
@@ -491,9 +519,6 @@
           <button id="d-curv" data-diag="curv" aria-pressed="false" title="Curvatura (2)">Curvatura</button>
           <button id="d-wire" data-diag="wire" aria-pressed="false" title="Malla (3)">Malla</button>
         </div>
-        <div class="viewinfo" id="viewinfo" aria-live="polite">
-      <span>PERSPECTIVA</span><span id="vi-shader">SHOWROOM</span><span id="vi-objs">—</span><span id="vi-cvs">—</span><span id="vi-sel">SIN SELECCIÓN</span>
-    </div>
 
       </div>
       <div class="legend" id="legend" hidden>
@@ -503,7 +528,7 @@
       </div>
     </div>
     <div class="pane right" id="pane-render">
-      <div class="pane-head"><span class="pane-title"><b>RENDER</b> · PBR · ESTUDIO · <span id="mat-name">Pintura roja</span></span></div>
+      <div class="pane-head"><span class="pane-title"><b>VISU</b> · PBR · ESTUDIO · <span id="mat-name">Pintura roja</span></span></div>
     </div>
     <div class="radial" id="radial" hidden>
       <div class="ring"></div>
@@ -637,7 +662,7 @@
     <span><span class="dot"></span>Listo</span>
     <span id="st-sel">Nada seleccionado</span>
     <span id="st-snap" style="color:#7cf0a0"></span>
-    <span class="r" id="st-scene"></span>
+    <span class="r viewinfo" id="viewinfo"><span>PERSPECTIVA</span><span id="vi-shader">SHOWROOM</span><span id="vi-objs">—</span><span id="vi-cvs">—</span><span id="vi-sel">SIN SELECCIÓN</span><span id="st-scene">DM</span></span>
   </footer>
 </div>
 

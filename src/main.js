@@ -290,23 +290,22 @@ const envDiagMat = new THREE.ShaderMaterial({
       vec2 q = abs(p - c) - h;
       return 1.0 - smoothstep(0.0, soft, max(q.x, q.y));
     }
+    // Entorno de estudio suave, como el Showroom de Alias: techo claro con dos paneles largos,
+    // ventanales verticales difusos a los lados, horizonte luminoso y suelo gris con su borde marcado.
     vec3 showroom(vec3 d) {
       float y = d.y;
-      // Paredes grises claras, suelo medio, techo algo más claro
-      vec3 col = mix(vec3(0.34), vec3(0.56, 0.565, 0.57), smoothstep(-0.35, 0.05, y));
-      col = mix(col, vec3(0.66, 0.665, 0.67), smoothstep(0.1, 0.9, y));
-      col += vec3(0.35) * exp(-pow(y * 18.0, 2.0));                 // horizonte
-      if (y > 0.2) {                                                 // paneles de luz del techo
+      float sky = smoothstep(-0.05, 0.9, y), floorK = smoothstep(0.02, -0.5, y);
+      vec3 col = mix(vec3(0.56, 0.57, 0.58), vec3(0.74, 0.75, 0.76), sky);           // paredes y techo
+      col = mix(col, vec3(0.30, 0.30, 0.31), floorK);                                  // suelo
+      col += vec3(0.30) * exp(-pow(y * 9.0, 2.0));                                     // horizonte luminoso
+      col -= vec3(0.16) * exp(-pow((y + 0.07) * 24.0, 2.0));                           // borde del suelo: define la línea
+      if (y > 0.15) {                                                                  // paneles del techo, de bordes suaves
         vec2 p = vec2(d.x, d.z) / y;
-        float l = box(p, vec2(-1.0, 0.0), vec2(0.22, 1.8), 0.06) + box(p, vec2(0.0, 0.0), vec2(0.22, 1.8), 0.06) + box(p, vec2(1.0, 0.0), vec2(0.22, 1.8), 0.06);
-        col += vec3(1.1) * l * smoothstep(0.2, 0.35, y);
+        float l = box(p, vec2(-0.55, 0.0), vec2(0.18, 2.4), 0.22) + box(p, vec2(0.55, 0.0), vec2(0.18, 2.4), 0.22);
+        col += vec3(0.85) * l * smoothstep(0.15, 0.4, y);
       }
-      float a = atan(d.x, d.z);                                      // tiras verticales a los lados
-      col += vec3(1.0) * (1.0 - smoothstep(0.03, 0.06, abs(abs(a) - 1.35))) * (1.0 - smoothstep(0.45, 0.6, abs(y)));
-      // panel grande y suave detrás de la cámara (luz principal)
-      col += vec3(0.35) * smoothstep(0.55, 0.95, d.z) * smoothstep(-0.3, 0.2, y);
-      // suelo oscuro de exposición: una franja negra que marca bien el horizonte en los reflejos
-      col *= mix(0.35, 1.0, smoothstep(-0.45, -0.15, y));
+      float a = atan(d.x, d.z);                                                        // ventanales laterales difusos
+      col += vec3(0.45) * (1.0 - smoothstep(0.06, 0.2, abs(abs(a) - 1.3))) * (1.0 - smoothstep(0.35, 0.65, abs(y)));
       return col;
     }
     void main() {
@@ -315,22 +314,26 @@ const envDiagMat = new THREE.ShaderMaterial({
       vec3 v = normalize(vWP - cameraPosition);
       vec3 r = toEnv(reflect(v, n));
       vec3 ne = toEnv(n);
+      vec3 L = normalize(vec3(-0.35, 0.65, 0.68));                                     // luz ligada a la cámara: arriba a la izquierda
+      float dif = max(dot(ne, L), 0.0);
       vec3 col;
       if (uMode == 1) {
-        float fres = 0.85 + 0.15 * pow(1.0 - max(dot(-v, n), 0.0), 3.0);
-        col = vec3(0.04) + showroom(r) * fres;
+        // Ambiente 0.5 + difusa 0.5 sobre gris claro, y encima el reflejo del estudio
+        vec3 base = vec3(0.80, 0.80, 0.79) * (0.5 + 0.5 * dif);
+        float fres = 0.75 + 0.25 * pow(1.0 - max(dot(-v, n), 0.0), 3.0);
+        col = mix(base, showroom(r), 0.55 * fres);
+        col = pow(col, vec3(0.92));
       } else if (uMode == 2) {
-        vec3 L = normalize(vec3(-0.35, 0.65, 0.68));                 // luz arriba a la izquierda de la cámara
-        float dif = max(dot(ne, L), 0.0);
         float hemi = 0.5 + 0.5 * ne.y;
-        col = vec3(0.78, 0.77, 0.75) * (0.18 + 0.62 * dif + 0.22 * hemi);
+        col = vec3(0.80, 0.79, 0.77) * (0.22 + 0.58 * dif + 0.2 * hemi);
       } else {
-        float t = 0.75 * ne.y + 0.25 * r.y;                          // sobre todo la normal: cielo arriba, tierra abajo
-        vec3 sky = vec3(0.42, 0.52, 0.86), horizon = vec3(0.92, 0.91, 0.86), ground = vec3(0.86, 0.82, 0.68), deep = vec3(0.5, 0.46, 0.37);
-        col = mix(horizon, sky, smoothstep(0.2, 0.85, t));
-        col = mix(col, ground, smoothstep(0.2, -0.15, t));
-        col = mix(col, deep, smoothstep(-0.2, -0.9, t));
-        col *= 0.75 + 0.25 * max(dot(ne, normalize(vec3(0.0, 0.6, 0.8))), 0.0);
+        // Shade-Sky: azul donde la superficie mira al cielo, crema hacia los lados y tierra ocre abajo
+        float t = 0.8 * ne.y + 0.2 * r.y;
+        vec3 sky = vec3(0.40, 0.52, 0.90), horizon = vec3(0.96, 0.95, 0.88), ground = vec3(0.88, 0.84, 0.70), deep = vec3(0.52, 0.48, 0.40);
+        col = mix(horizon, sky, smoothstep(0.35, 0.92, t));
+        col = mix(col, ground, smoothstep(0.15, -0.25, t));
+        col = mix(col, deep, smoothstep(-0.3, -0.95, t));
+        col *= 0.82 + 0.18 * dif;
       }
       gl_FragColor = vec4(col, 1.0);
     }`,
@@ -1313,7 +1316,7 @@ function updateStatus() {
   const ns = objects.filter((o) => o.kind === 'surface').length;
   const nc = objects.filter((o) => o.kind === 'curve').length, nm = objects.filter((o) => o.kind === 'mesh').length;
   const plural = (n, a, b) => `${n} ${n === 1 ? a : b}`;
-  $('st-scene').textContent = `Unidades: dm · Escena: ${plural(ns, 'superficie', 'superficies')} · ${plural(nc, 'curva', 'curvas')}${nm ? ' · ' + plural(nm, 'malla', 'mallas') : ''}`;
+  $('st-scene').textContent = `DM · ${plural(nc, 'CURVA', 'CURVAS')}`;
   // Información de la vista (arriba a la derecha)
   const cvs = objects.reduce((s, o) => s + (o.data.cvs ? o.data.cvs.flat().length : 0), 0);
   const patches = objects.filter((o) => o.kind === 'surface')
@@ -1331,12 +1334,29 @@ function setDiag(m) {
   diagMode = m;
   $('vi-shader').textContent = DIAG_NAMES[m];
   document.querySelectorAll('[data-diag]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.diag === m)));
-  if (layout === 'render') setLayout('split');
+  if (layout === 'render') switchLayout('diag');
   $('legend').hidden = m !== 'curv';
   objects.forEach(updateObject);
 }
 document.querySelectorAll('[data-diag]').forEach((b) => b.addEventListener('click', () => setDiag(b.dataset.diag)));
 const LAYOUTS = ['split', 'diag', 'render'];
+// Cambio de modo con giro de carrusel: la vista sale girando, se cambia el contenido y entra la otra cara
+let spinning = false;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+async function switchLayout(l) {
+  if (l === layout || spinning) return;
+  if (reduceMotion.matches || !view.animate) { setLayout(l); return; }
+  spinning = true;
+  const dir = l === 'render' ? -1 : 1;                 // hacia VISU gira a la izquierda; de vuelta, a la derecha
+  const out = view.animate([{ transform: 'rotateY(0deg)', opacity: 1 }, { transform: `rotateY(${90 * dir}deg)`, opacity: 0.2 }],
+    { duration: 340, easing: 'cubic-bezier(.55,0,.8,.4)' });
+  await out.finished;
+  setLayout(l);
+  const inn = view.animate([{ transform: `rotateY(${-90 * dir}deg)`, opacity: 0.2 }, { transform: 'rotateY(0deg)', opacity: 1 }],
+    { duration: 420, easing: 'cubic-bezier(.2,.6,.3,1)' });
+  await inn.finished;
+  spinning = false;
+}
 function setLayout(l) {
   layout = l;
   document.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === l)));
@@ -1346,8 +1366,8 @@ function setLayout(l) {
   $('pane-render').className = 'pane right' + (l === 'render' ? ' full' : '');
   resize();
 }
-const cycleLayout = () => setLayout(LAYOUTS[(LAYOUTS.indexOf(layout) + 1) % LAYOUTS.length]);
-document.querySelectorAll('[data-layout]').forEach((b) => b.addEventListener('click', () => setLayout(b.dataset.layout)));
+const cycleLayout = () => switchLayout(layout === 'render' ? 'diag' : 'render');
+document.querySelectorAll('[data-layout]').forEach((b) => b.addEventListener('click', () => switchLayout(b.dataset.layout)));
 document.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => setPickMode(b.dataset.pick)));
 document.querySelectorAll('[data-plane]').forEach((b) => b.addEventListener('click', () => setDrawPlane(b.dataset.plane)));
 
@@ -1360,7 +1380,7 @@ function setMaterial(k) {
   $('rough').value = materials[k].roughness;
   $('rough-o').textContent = (+materials[k].roughness).toFixed(2);
   $('mat-name').textContent = MAT_NAMES[k];
-  if (layout === 'diag') setLayout('split');
+  if (layout === 'diag') switchLayout('render');
 }
 function buildMaterialLibrary() {
   const lib = $('matlib');
@@ -1760,7 +1780,8 @@ const RADIAL = [
   { label: 'Pivote', key: 'L', run: pivotToSelection },
   { label: 'Encuadrar', key: 'F', run: frameSelection },
   { label: 'Vista sup.', key: 'T', run: topView },
-  { label: 'Cambiar vista', key: 'V', run: cycleLayout },
+  { label: 'Modelado ↔ Visu', key: 'V', run: cycleLayout },
+  { label: 'Dividida', key: '', run: () => switchLayout('split') },
 ];
 const radialEl = $('radial');
 let radialOn = false, radialPick = -1, lastPtr = { x: innerWidth / 2, y: innerHeight / 2 }, radialAt = lastPtr;
