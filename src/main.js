@@ -27,6 +27,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const prefs = { evalUI: 'b', xform: 'mouse', theme: null };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem('forja-prefs') || '{}')); } catch { /* sin almacenamiento */ }
 function savePrefs() { try { localStorage.setItem('forja-prefs', JSON.stringify(prefs)); } catch { /* sin almacenamiento */ } }
+// capas y grupos de la escena (ver más abajo)
+const layers = [{ id: 1, name: 'Predeterminada', visible: true }];
+let activeLayer = 1, nextLayerId = 2;
+const groups = [];
+let nextGroupId = 1;
 
 
 drawLogo(document.getElementById('logo'));
@@ -1386,13 +1391,21 @@ addEventListener('pointermove', (e) => {
 
 // ---------- Panel: escena (lista de objetos) ----------
 const EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+// Panel de capas: cada capa es una carpeta con sus grupos y objetos dentro. Los objetos se arrastran de una capa a otra.
 function refreshOutliner() {
   const ul = $('outliner');
+  if (!ul) return;
   ul.innerHTML = '';
+  const dragIds = (objs) => (e) => {
+    const ids = objs.some((o) => selObjs.includes(o)) ? [...new Set([...selObjs, ...objs])].map((o) => o.id) : objs.map((o) => o.id);
+    e.dataTransfer.setData('text/forja-ids', JSON.stringify(ids)); e.dataTransfer.effectAllowed = 'move';
+  };
   const row = (o) => {
     const li = document.createElement('li');
     li.className = 'ol-item' + (selObjs.includes(o) ? ' sel' : '') + (o.visible ? '' : ' off');
-    li.innerHTML = `<button class="ol-name" title="Seleccionar (Shift: añadir)"><span class="ol-ico">${{ surface: '◩', curve: '∿', mesh: '△' }[o.kind]}</span>${esc(o.name)}</button><button class="ol-eye" aria-pressed="${o.ownVisible}" title="${o.ownVisible ? 'Ocultar' : 'Mostrar'}">${EYE}</button>`;
+    li.draggable = true;
+    li.innerHTML = `<button class="ol-name" title="Seleccionar (Shift: añadir) · arrastrar a otra capa"><span class="ol-ico">${{ surface: '◩', curve: '∿', mesh: '△' }[o.kind]}</span>${esc(o.name)}</button><button class="ol-eye" aria-pressed="${o.ownVisible}" title="${o.ownVisible ? 'Ocultar' : 'Mostrar'}">${EYE}</button>`;
+    li.addEventListener('dragstart', dragIds([o]));
     li.querySelector('.ol-name').addEventListener('click', (e) => { setPickMode('object'); applySelection([o], e.shiftKey ? 'toggle' : 'replace'); });
     li.querySelector('.ol-eye').addEventListener('click', () => {
       checkpoint();
@@ -1402,20 +1415,14 @@ function refreshOutliner() {
     });
     return li;
   };
-  // los grupos se ven como carpetas plegables con sus objetos dentro
-  const done = new Set();
-  for (const o of objects) {
-    if (done.has(o)) continue;
-    if (!o.group) { ul.append(row(o)); continue; }
-    const g = groups.find((x) => x.id === o.group);
-    const kids = objects.filter((x) => x.group === o.group);
-    kids.forEach((k) => done.add(k));
-    if (!g) { kids.forEach((k) => ul.append(row(k))); continue; }
+  const folder = (g, kids) => {
     const li = document.createElement('li');
     li.className = 'ol-group' + (g.open ? ' open' : '') + (kids.every((k) => selObjs.includes(k)) ? ' sel' : '');
+    li.draggable = true;
     li.innerHTML = `<div class="ol-gh"><button class="ol-fold" aria-expanded="${g.open}" title="Abrir / cerrar">▸</button>
       <button class="ol-name" title="Elegir el grupo · doble clic: renombrar"><span class="ol-ico">▤</span>${esc(g.name)} <small>${kids.length}</small></button>
       <button class="ol-eye" aria-pressed="${kids.some((k) => k.ownVisible)}" title="Ocultar / mostrar el grupo">${EYE}</button></div><ul></ul>`;
+    li.addEventListener('dragstart', dragIds(kids));
     li.querySelector('.ol-fold').addEventListener('click', () => { g.open = !g.open; refreshOutliner(); });
     li.querySelector('.ol-name').addEventListener('click', (e) => { setPickMode('object'); applySelection(kids, e.shiftKey ? 'toggle' : 'replace'); });
     li.querySelector('.ol-name').addEventListener('dblclick', () => { const v = prompt('Nombre del grupo', g.name); if (v) { checkpoint(); g.name = v.trim() || g.name; refreshOutliner(); } });
@@ -1427,10 +1434,51 @@ function refreshOutliner() {
       selectionChanged();
     });
     if (g.open) kids.forEach((k) => li.querySelector('ul').append(row(k)));
+    return li;
+  };
+  for (const l of layers) {
+    l.open ??= true;
+    const mine = objects.filter((o) => o.layer === l.id);
+    const li = document.createElement('li');
+    li.className = 'ly' + (l.open ? ' open' : '') + (l.visible ? '' : ' off') + (l.id === activeLayer ? ' active' : '');
+    li.innerHTML = `<div class="ly-head"><button class="ol-fold" title="Abrir / cerrar">▸</button>
+      <button class="ly-eye" aria-pressed="${l.visible}" title="${l.visible ? 'Ocultar capa' : 'Mostrar capa'}">${EYE}</button>
+      <button class="ly-name" title="Clic: capa activa (lo nuevo va aquí) · doble clic: renombrar · suelta aquí objetos para pasarlos">${esc(l.name)}</button>
+      <span class="ly-n">${mine.length}</span></div><ul></ul>`;
+    const head = li.querySelector('.ly-head'), inner = li.querySelector('ul');
+    li.querySelector('.ol-fold').addEventListener('click', () => { l.open = !l.open; refreshOutliner(); });
+    li.querySelector('.ly-eye').addEventListener('click', () => setLayerVisible(l, !l.visible));
+    li.querySelector('.ly-name').addEventListener('click', () => { activeLayer = l.id; refreshOutliner(); });
+    li.querySelector('.ly-name').addEventListener('dblclick', () => { const v = prompt('Nombre de la capa', l.name); if (v) { checkpoint(); l.name = v.trim() || l.name; refreshOutliner(); } });
+    // soltar objetos sobre la capa (cabecera o su lista) los pasa a esa capa
+    li.addEventListener('dragover', (e) => { if (e.dataTransfer.types.includes('text/forja-ids')) { e.preventDefault(); li.classList.add('drop'); } });
+    li.addEventListener('dragleave', (e) => { if (!li.contains(e.relatedTarget)) li.classList.remove('drop'); });
+    li.addEventListener('drop', (e) => {
+      e.preventDefault(); e.stopPropagation(); li.classList.remove('drop');
+      const ids = JSON.parse(e.dataTransfer.getData('text/forja-ids') || '[]');
+      moveToLayer(objects.filter((o) => ids.includes(o.id)), l.id);
+    });
+    const done = new Set();
+    for (const o of mine) {
+      if (done.has(o)) continue;
+      const g = o.group && groups.find((x) => x.id === o.group);
+      if (!g) { inner.append(row(o)); continue; }
+      const kids = mine.filter((x) => x.group === o.group);
+      kids.forEach((k) => done.add(k));
+      inner.append(folder(g, kids));
+    }
     ul.append(li);
   }
   $('scene-count').textContent = `${objects.length} ${objects.length === 1 ? 'objeto' : 'objetos'}`;
-  if (typeof renderLayers === 'function' && !restoring) renderLayers();
+}
+function moveToLayer(objs, id) {
+  if (!objs.length) return;
+  checkpoint();
+  objs.forEach((o) => (o.layer = id));
+  for (let i = selObjs.length - 1; i >= 0; i--) if (!selObjs[i].visible) selObjs.splice(i, 1);
+  objects.forEach(applyVisibility);
+  selectionChanged();
+  toast(`${objs.length} ${objs.length === 1 ? 'objeto pasado' : 'objetos pasados'} a ${layers.find((l) => l.id === id)?.name}`);
 }
 
 // ---------- Panel: selección ----------
@@ -2707,10 +2755,6 @@ addEventListener('pointerup', (e) => {
 // ---------- Capas y grupos ----------
 // Cada objeto vive en una capa (se puede ocultar entera) y puede estar en un grupo (carpeta en la escena).
 // Elegir un objeto agrupado elige el grupo entero, como un nodo de grupo de Alias.
-const layers = [{ id: 1, name: 'Predeterminada', visible: true }];
-let activeLayer = 1, nextLayerId = 2;
-const groups = [];
-let nextGroupId = 1;
 const layerOn = (id) => layers.find((l) => l.id === id)?.visible !== false;
 function initObj(obj) {
   obj.layer = activeLayer; obj.group = null;
@@ -2756,10 +2800,7 @@ function newLayer() {
 }
 function assignToLayer(id = activeLayer) {
   if (!selObjs.length) return toast('Elige objetos para pasarlos a la capa.');
-  checkpoint();
-  selObjs.forEach((o) => (o.layer = id));
-  const name = layers.find((l) => l.id === id)?.name;
-  objects.forEach(applyVisibility); renderLayers(); refreshOutliner(); toast(`Pasados a ${name}`);
+  moveToLayer(selObjs.slice(), id);
 }
 function setLayerVisible(l, v) {
   checkpoint();
@@ -2767,24 +2808,7 @@ function setLayerVisible(l, v) {
   for (let i = selObjs.length - 1; i >= 0; i--) if (!selObjs[i].visible) selObjs.splice(i, 1);
   selectionChanged(); renderLayers();
 }
-function renderLayers() {
-  const ul = $('layers');
-  if (!ul) return;
-  ul.innerHTML = '';
-  for (const l of layers) {
-    const n = objects.filter((o) => o.layer === l.id).length;
-    const li = document.createElement('li');
-    li.className = 'ly-item' + (l.id === activeLayer ? ' active' : '') + (l.visible ? '' : ' off');
-    li.innerHTML = `<button class="ly-eye" aria-pressed="${l.visible}" title="${l.visible ? 'Ocultar capa' : 'Mostrar capa'}">${EYE}</button>
-      <button class="ly-name" title="Clic: capa activa (lo nuevo va aquí) · Doble clic: renombrar">${esc(l.name)}</button><span class="ly-n">${n}</span>
-      <button class="ly-to" title="Pasar la selección a esta capa">←</button>`;
-    li.querySelector('.ly-eye').addEventListener('click', () => setLayerVisible(l, !l.visible));
-    li.querySelector('.ly-name').addEventListener('click', () => { activeLayer = l.id; renderLayers(); });
-    li.querySelector('.ly-name').addEventListener('dblclick', () => { const v = prompt('Nombre de la capa', l.name); if (v) { checkpoint(); l.name = v.trim() || l.name; renderLayers(); } });
-    li.querySelector('.ly-to').addEventListener('click', () => assignToLayer(l.id));
-    ul.append(li);
-  }
-}
+function renderLayers() { refreshOutliner(); }
 
 // ---------- Deshacer / rehacer ----------
 // Antes de cada cambio se guarda una copia de la escena (como mucho una por tarea del navegador, así un
@@ -2938,7 +2962,7 @@ const MENUBAR = [
   ['Capas', [
     { label: 'Nueva capa', run: newLayer }, { label: 'Pasar selección a la capa activa', run: () => assignToLayer() },
     { label: 'Mostrar todas las capas', run: () => { checkpoint(); layers.forEach((l) => (l.visible = true)); selectionChanged(); renderLayers(); } },
-    { sep: true }, { label: 'Ver capas en el panel', run: () => { setPinned(true); $('sec-layers').open = true; $('sec-layers').scrollIntoView({ block: 'nearest' }); } }]],
+    { sep: true }, { label: 'Ver capas en el panel', run: () => { setPinned(true); $('outliner').scrollIntoView({ block: 'nearest' }); } }]],
   ['Visualización', [
     ...EVAL_MODES.map((m) => ({ label: m.label, key: m.key, run: () => setDiag(m.k), ...chk(() => layout !== 'render' && diagMode === m.k) })),
     { sep: true }, { title: 'Entorno (Visu)' },
@@ -3010,7 +3034,7 @@ function initPrefs() {
   $('prefs-close').addEventListener('click', () => d.close());
   d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
 }
-$('ly-new').addEventListener('click', (e) => { e.preventDefault(); $('sec-layers').open = true; newLayer(); });
+$('ly-new').addEventListener('click', (e) => { e.preventDefault(); newLayer(); });
 // opción C: la esfera del modo actual despliega las demás al pasar el ratón
 {
   const btn = $('eval-c-btn'), fly = $('eval-c-fly');
@@ -3059,6 +3083,33 @@ function updateXfPrompt() {
   if (xfPrompt.dataset.t !== txt) { xfPrompt.innerHTML = txt; xfPrompt.dataset.t = txt; }
   xfPrompt.style.transform = `translate(${lastPtr.x + 18}px, ${lastPtr.y + 20}px)`;
 }
+// Color del texto de los menús según lo que tiene detrás: se leen los píxeles de la vista bajo cada rótulo
+// (donde no hay objeto se ve el muro) y el texto pasa entero a negro o a blanco.
+let inkT = 0;
+const INK_SEL = '.top .brand, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
+function adaptInk(now) {
+  if (now - inkT < 250) return;
+  inkT = now;
+  const cv = renderer.domElement, gl = renderer.getContext(), r = cv.getBoundingClientRect(), k = cv.width / Math.max(1, r.width);
+  const bgL = theme === 'light' ? 0.86 : 0.1;
+  for (const el of document.querySelectorAll(INK_SEL)) {
+    const b = el.getBoundingClientRect();
+    if (!b.width || !b.height) continue;
+    const x0 = Math.max(0, Math.floor((b.left - r.left) * k)), x1 = Math.min(cv.width, Math.ceil((b.right - r.left) * k));
+    let sum = 0, n = 0;
+    for (const f of [0.35, 0.65]) {
+      const y = Math.floor(cv.height - (b.top + b.height * f - r.top) * k);
+      if (x1 <= x0 || y < 0 || y >= cv.height) continue;
+      const buf = new Uint8Array((x1 - x0) * 4);
+      gl.readPixels(x0, y, x1 - x0, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      // el lienzo es transparente donde no hay objeto (color premultiplicado): ahí cuenta el muro
+      for (let i = 0; i < buf.length; i += 4) { sum += (0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2]) / 255 + (1 - buf[i + 3] / 255) * bgL; n++; }
+    }
+    const L = n ? sum / n : bgL;
+    el.classList.toggle('ink-dark', L > 0.5);
+    el.classList.toggle('ink-light', L <= 0.5);
+  }
+}
 function renderFrame(now) {
   updateXfPrompt();
   pivotMarker.position.copy(pivot);
@@ -3073,6 +3124,7 @@ function renderFrame(now) {
   scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
   // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
   useAspect(dragPane || paneAt(lastPtr.x));
+  adaptInk(now);
 }
 
 function resize() {

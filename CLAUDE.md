@@ -139,8 +139,9 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - Panel por módulo: secciones con data-module="all|diag|render"; showModule()/flipPanel() con giro de placa.
   VISU: materiales, editor de material, entornos (Estudio RoomEnvironment, Exterior y Atardecer con Sky, Nublado), fondo desenfocado,
   gestión de color AgX/ACES, exposición, sombra.
-- Contraste (v0.10): ya NO se usa mix-blend-mode: difference (fallaba con objetos grises). El texto de header/pane-head/status
-  lleva color --fg con halo de text-shadow del color --bg. El muro sigue en .app. No volver a poner
+- Contraste (v0.12): ni mix-blend difference ni halos. adaptInk() (cada 250 ms tras dibujar) lee con gl.readPixels la franja
+  de la vista bajo cada rótulo (INK_SEL: cabecera, menús desplegados, pane-head, barra de estado; el lienzo transparente = muro)
+  y pone .ink-dark (negro) o .ink-light (blanco) entero. El usuario quiere texto sólido negro/blanco, sin sombreado. El muro sigue en .app. No volver a poner
   z-index/opacity/transform en .top o .view: crean capas aisladas y rompen la mezcla. El <header> está después de <main> en el DOM.
 - Showroom estilo Alias: horizonte bajo (-0.32), paredes claras, suelo oscuro reflejado, especular y luz de relleno.
 - Idea del usuario para el futuro: carrusel configurable con más módulos, p. ej. "IA" (prompts que crean tornillos M6, mesas,
@@ -219,6 +220,13 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Escena = árbol con carpetas plegables; "Capas" plegable bajo la escena (ojo, nombre con doble clic, ← pasa la selección).
 - Pedido del usuario pendiente: render realista nivel VRED/Cycles (imagen de la moto). Plan: three-gpu-pathtracer (WebGL, gratis)
   con HDRI, materiales PBR (pintura con flakes, fibra de carbono) y botón "Render" progresivo en VISU.
+
+## Hecho (v0.12)
+
+- Menús desplegables solo texto (sin ventana de fondo), con el mismo cambio de color negro/blanco según lo que haya detrás.
+- Capas en el panel derecho, arriba y en todos los módulos (refreshOutliner): cada capa es una carpeta (ojo, nombre = capa
+  activa, doble clic renombra) con sus grupos y objetos dentro. Arrastrar objetos/grupos sobre otra capa los pasa (moveToLayer).
+  Se quitó la lista "Escena" suelta y el bloque "Capas" plegable. layers/groups se declaran arriba en main.js (antes de usarse).
 
 ## Siguiente paso
 
