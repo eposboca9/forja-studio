@@ -7,7 +7,7 @@
 <title>Forja Studio</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Crect x='5' y='0' width='2' height='12' fill='%232f7bff'/%3E%3Crect x='0' y='5' width='12' height='2' fill='%232f7bff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500&family=Outfit:wght@500&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
   /* Layout: muro de hormigón visto a pantalla completa. La vista 3D es un vano con marco de acero;
      herramientas y menús son símbolos grabados en el muro; las propiedades salen como una losa. */
@@ -400,14 +400,16 @@
   .wordmark, :root[data-theme="dark"] .wordmark { font-family: "Jost", "Futura", system-ui, sans-serif; font-weight: 300; font-size: 24px;
     letter-spacing: .14em; text-transform: lowercase; color: var(--fg); text-shadow: none; line-height: 1; }
   .brand .plus { width: 11px; height: 11px; fill: var(--brand-blue); margin-top: -1px; filter: drop-shadow(0 0 6px rgba(47,123,255,.45)); }
+
+  /* Logotipo "Nodo": FORJA en un marco de construcción fino; las líneas paran antes del + azul de la esquina */
+  .brand { color: var(--fg); }
+  .brand svg { height: 40px; width: auto; display: block; overflow: visible; }
 </style>
 </head>
 <body>
 <div class="app auto" id="app">
   <header class="top">
-    <div class="brand" aria-label="Forja">
-      <span class="wordmark">forja</span><svg class="plus" viewBox="0 0 12 12" aria-hidden="true"><rect x="5" y="0" width="2" height="12"/><rect x="0" y="5" width="12" height="2"/></svg>
-    </div>
+    <div class="brand"><svg id="logo" role="img" aria-label="FORJA"></svg></div>
     <div class="reveal-top" id="reveal-top">
     <span class="file">vaso_concepto.forja</span>
     <span class="lbl">Seleccionar</span>

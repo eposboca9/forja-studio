@@ -9,6 +9,9 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import * as N from './nurbs.js';
 import { applyBackground } from './concrete.js';
+import { drawLogo } from './logo.js';
+
+drawLogo(document.getElementById('logo'));
 
 // Tema claro u oscuro (se recuerda en este navegador)
 let theme = 'dark';

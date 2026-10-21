@@ -33,8 +33,11 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 
 ## Decisiones tomadas
 
-- Nombre provisional: Forja Studio.
-- Tema oscuro fijo, tipografía Geist / Geist Mono, acento ámbar `#f0a63a`, selección azul `#57b6ff`.
+- Nombre: FORJA. Logotipo elegido "Nodo" (src/logo.js): FORJA en Outfit 500 dentro de un marco de construcción
+  de 1 px que se pasa de largo en las esquinas; en la esquina inferior derecha las líneas paran antes de un + azul #2f7bff grueso.
+- Interfaz (rama interfaz-concreto, pendiente de pasar a main): fondo de piedra rugosa a pantalla completa (src/concrete.js),
+  tema claro/oscuro, sin marcos, menús que aparecen al acercar el ratón a cada borde, cabecera e info de vista siempre visibles y tenues.
+- Por decisión del usuario se abre solo la vista Diagnóstico (Showroom por defecto) con las líneas de parche encendidas.
 - Interfaz en español.
 
 ## Hecho (v0.1)
@@ -101,6 +104,12 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - dolly() siempre va hacia el pivote (botón derecho y rueda) y no lo atraviesa.
 - Pistas de navegación (#navhint) arriba al mantener Shift+Alt.
 - Modo de giro: cámara (por defecto) u objeto (tumbleObject: cruzar la vista = 180°; botón derecho horizontal = twist).
+
+## Hecho (v0.7, rama interfaz-concreto)
+
+- Shaders de evaluación Showroom (4), Difuso (5), Shade-Sky (6) en un ShaderMaterial (envDiagMat), con "luz ligada a la cámara".
+- Escena de ejemplo: vaso de 4 superficies de revolución (Base, Cuerpo, Labio, Fondo interior). ?demo=capo carga la escena antigua (las pruebas t8 la usan).
+- Líneas de parche con LineSegments2 (azul, 1.6 px). Línea de información de la vista junto a los modos de diagnóstico.
 
 ## Siguiente paso
 
