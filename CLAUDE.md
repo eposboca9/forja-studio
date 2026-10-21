@@ -130,6 +130,20 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - Info de la vista en la barra de estado; leyenda de curvatura abajo a la derecha; losa de propiedades con velo. Sin solapes a 1000 px.
 - Showroom y Shade-Sky rehechos más parecidos a Alias (base gris clara ambiente 0.5 + difusa 0.5 + reflejo de estudio suave).
 
+## Hecho (v0.7.2)
+
+- Carrusel 3D (renderCarousel): durante el cambio se dibujan los dos módulos a la vez con dos poses de cámara
+  (carouselPose): el que sale gira 150° sobre el pivote, se aleja y se va a un lado; el que entra hace lo contrario. 1,3 s.
+  window.__forja.carousel() permite congelarlo en pruebas (c.dur = 1e7; c.t0 = ...).
+- Panel por módulo: secciones con data-module="all|diag|render"; showModule()/flipPanel() con giro de placa.
+  VISU: materiales, editor de material, entornos (Estudio RoomEnvironment, Exterior y Atardecer con Sky, Nublado), fondo desenfocado,
+  gestión de color AgX/ACES, exposición, sombra.
+- Contraste: el muro va en .app y header/pane-head/status usan mix-blend-mode: difference (texto blanco). No volver a poner
+  z-index/opacity/transform en .top o .view: crean capas aisladas y rompen la mezcla. El <header> está después de <main> en el DOM.
+- Showroom estilo Alias: horizonte bajo (-0.32), paredes claras, suelo oscuro reflejado, especular y luz de relleno.
+- Idea del usuario para el futuro: carrusel configurable con más módulos, p. ej. "IA" (prompts que crean tornillos M6, mesas,
+  sillas, o reconstruyen mallas como NURBS).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

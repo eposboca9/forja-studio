@@ -452,37 +452,29 @@
   .tools::-webkit-scrollbar { display: none; }
   @media (max-height: 800px) { .tools button { height: 30px; } .tools button svg { width: 17px; height: 17px; } .tools hr { margin: 3px 8px; } .tools .tl { padding: 0; } }
   @media (max-height: 660px) { .tools .tl, .tools hr { display: none; } .tools button { height: 28px; } }
+
+  /* --- Una sola imagen: el muro va en .app, así los menús se mezclan con el objeto que pasa por debajo --- */
+  body { background: var(--bg); }
+  .app { background: var(--bg) var(--wall) no-repeat center / 100% 100%; background-attachment: fixed; }
+  .view { z-index: auto; will-change: auto; backface-visibility: visible; transform-origin: 50% 50%; }
+  .top, .status { z-index: auto; }
+  /* Texto en "diferencia": blanco sobre el fondo oscuro y negro donde toca el objeto claro, letra por letra */
+  .reveal-top > *, .pane-head, .status { mix-blend-mode: difference; }
+  .reveal-top > *, .reveal-top button, .pane-head, .pane-head *, .status, .status * { color: #fff !important; text-shadow: none !important; }
+  .reveal-top .seg button[aria-pressed="true"], .pane-head .seg button[aria-pressed="true"] { box-shadow: inset 0 -1.5px 0 #fff !important; }
+  .reveal-top .seg.snap button.held { box-shadow: inset 0 -1.5px 0 rgba(255,255,255,.5) !important; }
+  .reveal-top .seg button[aria-pressed="false"], .pane-head .seg button[aria-pressed="false"] { opacity: .6; }
+  .status .dot { background: #fff !important; }
+  /* --- Panel por módulo --- */
+  .panel-body { transform-origin: 50% 50%; }
+  .envs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .envs .btn[aria-pressed="true"] { border-color: transparent; background: #2f7bff; color: #fff; }
+  input[type="color"] { width: 100%; height: 26px; padding: 0; border: 0; background: none; cursor: pointer; }
+  #me-color-o { font-size: 10px; }
 </style>
 </head>
 <body>
 <div class="app auto" id="app">
-  <header class="top">
-    <div class="brand"><svg id="logo" role="img" aria-label="FORJA"></svg></div>
-    <div class="reveal-top" id="reveal-top">
-    <button class="filebtn" id="file-btn" aria-expanded="false" aria-controls="filepanel" title="Importar y exportar (Ctrl+E)">ARCHIVO</button>
-    <span class="file" id="file-name">vaso_concepto.forja</span>
-    <span class="lbl">Seleccionar</span>
-    <div class="seg pick" role="group" aria-label="Qué seleccionar">
-      <button id="pick-object" data-pick="object" aria-pressed="true" title="Seleccionar objetos completos (O)">Objetos</button>
-      <button id="pick-cv" data-pick="cv" aria-pressed="false" title="Seleccionar puntos de control (P)">CVs</button>
-    </div>
-    <span class="lbl">Snap</span>
-    <div class="seg snap" role="group" aria-label="Snap fijo">
-      <button id="snap-grid" data-snap="grid" aria-pressed="false" title="Snap a la rejilla. Momentáneo: mantener Alt">Rejilla</button>
-      <button id="snap-curve" data-snap="curve" aria-pressed="false" title="Snap a curvas y bordes. Momentáneo: mantener Ctrl+Alt">Curva</button>
-      <button id="snap-point" data-snap="point" aria-pressed="false" title="Snap a puntos: CVs, pivotes, extremos, esquinas. Momentáneo: mantener Ctrl">Punto</button>
-    </div>
-    <div class="seg lay" role="group" aria-label="Distribución de la vista">
-      <button id="lay-diag" data-layout="diag" aria-pressed="true" title="Modelado: shaders de evaluación (V)">Modelado</button>
-      <button id="lay-render" data-layout="render" aria-pressed="false" title="Visu: render realista con materiales (V)">Visu</button>
-    </div>
-    <div class="seg theme" role="group" aria-label="Tema">
-      <button id="theme-light" data-theme-btn="light" aria-pressed="false" title="Fondo claro">Claro</button>
-      <button id="theme-dark" data-theme-btn="dark" aria-pressed="true" title="Fondo oscuro">Oscuro</button>
-    </div>
-    <span class="tag">v0.7 · propuesta</span>
-    </div>
-  </header>
 
   <nav class="tools" id="tools" aria-label="Herramientas">
       <button id="t-select" aria-pressed="true" title="Seleccionar (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 8-6 1.5L10 19z"/></svg></button>
@@ -592,21 +584,22 @@
 
   <aside class="panel" id="panel" aria-label="Propiedades">
     <div class="panel-head">
-      <span>Propiedades</span>
+      <span id="panel-title">Modelado</span>
       <button class="iconbtn" id="pin" aria-pressed="false" title="Panel automático: clic para fijarlo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 5 3 3H7l3-3zM12 15v6"/></svg></button>
     </div>
 
-    <section class="sec">
+    <div class="panel-body" id="panel-body">
+    <section class="sec" data-module="all">
       <h2 id="sec-scene">Escena · <span id="scene-count"></span></h2>
       <ul class="outliner" id="outliner"></ul>
     </section>
 
-    <section class="sec">
+    <section class="sec" data-module="diag">
       <h2>Selección</h2>
       <div id="sel-body"></div>
     </section>
 
-    <section class="sec">
+    <section class="sec" data-module="diag">
       <h2>Crear desde curvas</h2>
       <div class="ops">
         <button class="btn" id="b-loft" title="Superficie que pasa por las curvas seleccionadas, en orden">Loft</button>
@@ -617,14 +610,44 @@
       <p class="muted">Selecciona curvas en modo Objetos y pulsa una operación. Para el loft importa el orden de selección.</p>
     </section>
 
-    <section class="sec">
+    <section class="sec" data-module="render">
       <h2 id="sec-mat">Materiales</h2>
       <div class="matlib" id="matlib"></div>
-      <div class="row"><label for="rough">Rugosidad</label><input id="rough" type="range" min="0" max="1" step="0.01" value="0.35"><output id="rough-o">0.35</output></div>
       <p class="muted">Se aplica a las superficies seleccionadas; si no hay ninguna, a todas.</p>
     </section>
 
-    <section class="sec">
+    <section class="sec" data-module="render">
+      <h2>Editor de material · <span id="me-name">Pintura roja</span></h2>
+      <div class="row"><label for="me-color">Color base</label><input id="me-color" type="color" value="#b0121c"><output id="me-color-o"></output></div>
+      <div class="row"><label for="me-metal">Metálico</label><input id="me-metal" type="range" min="0" max="1" step="0.01"><output id="me-metal-o"></output></div>
+      <div class="row"><label for="rough">Rugosidad</label><input id="rough" type="range" min="0" max="1" step="0.01" value="0.35"><output id="rough-o">0.35</output></div>
+      <div class="row"><label for="me-coat">Barniz</label><input id="me-coat" type="range" min="0" max="1" step="0.01"><output id="me-coat-o"></output></div>
+      <div class="row"><label for="me-coatr">Rug. barniz</label><input id="me-coatr" type="range" min="0" max="1" step="0.01"><output id="me-coatr-o"></output></div>
+      <div class="row"><label for="me-trans">Transmisión</label><input id="me-trans" type="range" min="0" max="1" step="0.01"><output id="me-trans-o"></output></div>
+    </section>
+
+    <section class="sec" data-module="render">
+      <h2>Entorno</h2>
+      <div class="envs" role="group" aria-label="Entorno de iluminación">
+        <button class="btn" data-env="studio" aria-pressed="true">Estudio</button>
+        <button class="btn" data-env="sun" aria-pressed="false">Exterior</button>
+        <button class="btn" data-env="sunset" aria-pressed="false">Atardecer</button>
+        <button class="btn" data-env="overcast" aria-pressed="false">Nublado</button>
+      </div>
+      <div class="row"><label for="env-int">Intensidad</label><input id="env-int" type="range" min="0" max="3" step="0.05" value="1"><output id="env-int-o">1.00</output></div>
+      <label class="check"><input type="checkbox" id="env-bg" checked> Ver el entorno de fondo</label>
+      <div class="row"><label for="env-blur">Desenfoque</label><input id="env-blur" type="range" min="0" max="1" step="0.01" value="0.55"><output id="env-blur-o">0.55</output></div>
+    </section>
+
+    <section class="sec" data-module="render">
+      <h2>Cámara y color</h2>
+      <div class="row"><label for="tone">Gestión de color</label><select id="tone" class="sel"><option value="agx" selected>AgX (Blender)</option><option value="aces">Filmic ACES</option><option value="none">Estándar</option></select><span></span></div>
+      <div class="row"><label for="expo">Exposición</label><input id="expo" type="range" min="-3" max="3" step="0.05" value="0"><output id="expo-o">0.0</output></div>
+      <div class="row"><label for="shadow-int">Sombra</label><input id="shadow-int" type="range" min="0" max="1" step="0.01" value="0.5"><output id="shadow-int-o">0.50</output></div>
+      <p class="muted">Vista previa en tiempo real. El render con trazado de rayos (como Cycles) es el siguiente paso de este módulo.</p>
+    </section>
+
+    <section class="sec" data-module="diag">
       <h2>Dibujo</h2>
       <div class="seg small" role="group" aria-label="Plano de dibujo" style="margin-left:0; align-self:flex-start">
         <button id="plane-xz" data-plane="xz" aria-pressed="true">Suelo (XZ)</button>
@@ -634,7 +657,7 @@
       <p class="muted">Snap al dibujar o mover: mantén Alt (rejilla), Ctrl (puntos) o Ctrl+Alt (curvas), o actívalos fijos arriba.</p>
     </section>
 
-    <section class="sec">
+    <section class="sec" data-module="diag">
       <h2 id="sec-analysis">Análisis</h2>
       <div class="row"><label for="zfreq">Franjas cebra</label><input id="zfreq" type="range" min="4" max="40" step="1" value="14"><output id="zfreq-o">14</output></div>
       <label class="check"><input type="checkbox" id="show-comb" checked> Peine de curvatura</label>
@@ -644,7 +667,7 @@
       <div class="row"><label for="res">Teselado</label><input id="res" type="range" min="16" max="140" step="2" value="90"><output id="res-o">90</output></div>
     </section>
 
-    <section class="sec">
+    <section class="sec" data-module="diag">
       <h2>Navegación</h2>
       <div class="seg small" role="group" aria-label="Estilo de navegación" style="margin-left:0; align-self:flex-start">
         <button id="nav-alias" data-nav="alias" aria-pressed="true">Alias (ratón)</button>
@@ -656,7 +679,36 @@
       <div class="row"><label for="sel-buttons">Botones</label><select id="sel-buttons" class="sel"><option value="alt" selected>Izq elige · medio añade · der quita</option><option value="default">Izq alterna · medio añade · der quita</option></select><span></span></div>
       <p class="muted">Selección con los 3 botones del ratón, como en Alias (solo en navegación Alias). Ctrl + flechas: pasar al CV vecino. Ctrl+Shift + clic: menú radial.</p>
     </section>
+    </div>
   </aside>
+
+  <header class="top">
+    <div class="brand"><svg id="logo" role="img" aria-label="FORJA"></svg></div>
+    <div class="reveal-top" id="reveal-top">
+    <button class="filebtn" id="file-btn" aria-expanded="false" aria-controls="filepanel" title="Importar y exportar (Ctrl+E)">ARCHIVO</button>
+    <span class="file" id="file-name">vaso_concepto.forja</span>
+    <span class="lbl">Seleccionar</span>
+    <div class="seg pick" role="group" aria-label="Qué seleccionar">
+      <button id="pick-object" data-pick="object" aria-pressed="true" title="Seleccionar objetos completos (O)">Objetos</button>
+      <button id="pick-cv" data-pick="cv" aria-pressed="false" title="Seleccionar puntos de control (P)">CVs</button>
+    </div>
+    <span class="lbl">Snap</span>
+    <div class="seg snap" role="group" aria-label="Snap fijo">
+      <button id="snap-grid" data-snap="grid" aria-pressed="false" title="Snap a la rejilla. Momentáneo: mantener Alt">Rejilla</button>
+      <button id="snap-curve" data-snap="curve" aria-pressed="false" title="Snap a curvas y bordes. Momentáneo: mantener Ctrl+Alt">Curva</button>
+      <button id="snap-point" data-snap="point" aria-pressed="false" title="Snap a puntos: CVs, pivotes, extremos, esquinas. Momentáneo: mantener Ctrl">Punto</button>
+    </div>
+    <div class="seg lay" role="group" aria-label="Distribución de la vista">
+      <button id="lay-diag" data-layout="diag" aria-pressed="true" title="Modelado: shaders de evaluación (V)">Modelado</button>
+      <button id="lay-render" data-layout="render" aria-pressed="false" title="Visu: render realista con materiales (V)">Visu</button>
+    </div>
+    <div class="seg theme" role="group" aria-label="Tema">
+      <button id="theme-light" data-theme-btn="light" aria-pressed="false" title="Fondo claro">Claro</button>
+      <button id="theme-dark" data-theme-btn="dark" aria-pressed="true" title="Fondo oscuro">Oscuro</button>
+    </div>
+    <span class="tag">v0.7 · propuesta</span>
+    </div>
+  </header>
 
   <footer class="status">
     <span><span class="dot"></span>Listo</span>

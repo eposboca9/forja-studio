@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { Sky } from 'three/addons/objects/Sky.js';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -56,7 +57,37 @@ const renderBg = (() => {
 })();
 // Capa 1 = solo en la vista de diagnóstico (cuadrícula, isoparamétricas, polígonos de control, peines)
 const DIAG = 1;
-scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(renderer), 0.04).texture;
+// Entornos de VISU (como los HDRI de Blender), generados por código y guardados al primer uso
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envCache = {};
+function envTexture(k) {
+  if (envCache[k]) return envCache[k];
+  let tex;
+  if (k === 'studio') tex = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+  else if (k === 'overcast') {
+    const sc = new THREE.Scene();
+    sc.add(new THREE.Mesh(new THREE.SphereGeometry(10, 48, 24), new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      vertexShader: 'varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'varying vec3 vP; void main(){ float y = normalize(vP).y; vec3 c = mix(vec3(0.16,0.15,0.14), vec3(0.85,0.87,0.9), smoothstep(-0.15, 0.5, y)); gl_FragColor = vec4(c * 1.4, 1.0); }',
+    })));
+    tex = pmrem.fromScene(sc, 0.02).texture;
+  } else {
+    const sky = new Sky(), u = sky.material.uniforms, sunset = k === 'sunset';
+    sky.scale.setScalar(50);
+    u.turbidity.value = sunset ? 8 : 2.5; u.rayleigh.value = sunset ? 2.5 : 1; u.mieCoefficient.value = 0.005; u.mieDirectionalG.value = 0.8;
+    u.sunPosition.value.setFromSphericalCoords(1, THREE.MathUtils.degToRad(sunset ? 87 : 52), THREE.MathUtils.degToRad(140));
+    const sc = new THREE.Scene(); sc.add(sky);
+    // suelo neutro para que la parte baja del reflejo no sea negra
+    const ground = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshBasicMaterial({ color: sunset ? 0x2a2018 : 0x3a3834 }));
+    ground.rotation.x = -Math.PI / 2; ground.position.y = -1; sc.add(ground);
+    tex = pmrem.fromScene(sc, 0.01).texture;
+  }
+  return (envCache[k] = tex);
+}
+let envKey = 'studio', envBg = true;
+scene.environment = envTexture('studio');
+scene.backgroundBlurriness = 0.55;
 
 const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 400);
 
@@ -173,6 +204,7 @@ function navModeFor(e) {
 }
 renderer.domElement.addEventListener('pointerdown', (e) => {
   const m = navModeFor(e);
+  if (carousel) return;
   if (!m || (navStyle === 'simple' && gizmo.axis)) return; // en modo touchpad el gizmo tiene prioridad
   navDrag = { mode: m, x: e.clientX, y: e.clientY, moved: false, pane: paneAt(e.clientX) };
   renderer.domElement.setPointerCapture(e.pointerId);
@@ -290,22 +322,22 @@ const envDiagMat = new THREE.ShaderMaterial({
       vec2 q = abs(p - c) - h;
       return 1.0 - smoothstep(0.0, soft, max(q.x, q.y));
     }
-    // Entorno de estudio suave, como el Showroom de Alias: techo claro con dos paneles largos,
-    // ventanales verticales difusos a los lados, horizonte luminoso y suelo gris con su borde marcado.
+    // Estudio de Alias: techo y paredes claros, horizonte marcado y suelo oscuro que se refleja en la parte baja.
+    // Es ese contraste claro arriba / oscuro abajo el que da brillo, sombra y profundidad a la superficie.
     vec3 showroom(vec3 d) {
       float y = d.y;
-      float sky = smoothstep(-0.05, 0.9, y), floorK = smoothstep(0.02, -0.5, y);
-      vec3 col = mix(vec3(0.56, 0.57, 0.58), vec3(0.74, 0.75, 0.76), sky);           // paredes y techo
-      col = mix(col, vec3(0.30, 0.30, 0.31), floorK);                                  // suelo
-      col += vec3(0.30) * exp(-pow(y * 9.0, 2.0));                                     // horizonte luminoso
-      col -= vec3(0.16) * exp(-pow((y + 0.07) * 24.0, 2.0));                           // borde del suelo: define la línea
-      if (y > 0.15) {                                                                  // paneles del techo, de bordes suaves
+      float hz = -0.32;                                                              // horizonte bajo: las paredes claras ocupan la vista de frente
+      vec3 up = mix(vec3(0.66, 0.67, 0.69), vec3(0.97, 0.97, 0.98), smoothstep(hz, 0.85, y));
+      vec3 down = mix(vec3(0.12, 0.11, 0.1), vec3(0.03, 0.028, 0.026), smoothstep(hz, -0.9, y));
+      vec3 col = mix(down, up, smoothstep(hz - 0.03, hz + 0.03, y));               // horizonte nítido
+      col += vec3(0.3) * exp(-pow((y - hz - 0.07) * 12.0, 2.0));                   // franja luminosa sobre el horizonte
+      if (y > 0.12) {                                                                // dos softbox largos en el techo
         vec2 p = vec2(d.x, d.z) / y;
-        float l = box(p, vec2(-0.55, 0.0), vec2(0.18, 2.4), 0.22) + box(p, vec2(0.55, 0.0), vec2(0.18, 2.4), 0.22);
-        col += vec3(0.85) * l * smoothstep(0.15, 0.4, y);
+        float l = box(p, vec2(-0.6, 0.0), vec2(0.16, 2.6), 0.18) + box(p, vec2(0.6, 0.0), vec2(0.16, 2.6), 0.18);
+        col += vec3(1.1) * l * smoothstep(0.12, 0.35, y);
       }
-      float a = atan(d.x, d.z);                                                        // ventanales laterales difusos
-      col += vec3(0.45) * (1.0 - smoothstep(0.06, 0.2, abs(abs(a) - 1.3))) * (1.0 - smoothstep(0.35, 0.65, abs(y)));
+      float a = atan(d.x, d.z);                                                      // ventanales verticales a los lados
+      col += vec3(0.7) * (1.0 - smoothstep(0.05, 0.16, abs(abs(a) - 1.25))) * smoothstep(-0.05, 0.1, y) * (1.0 - smoothstep(0.5, 0.75, y));
       return col;
     }
     void main() {
@@ -314,26 +346,27 @@ const envDiagMat = new THREE.ShaderMaterial({
       vec3 v = normalize(vWP - cameraPosition);
       vec3 r = toEnv(reflect(v, n));
       vec3 ne = toEnv(n);
-      vec3 L = normalize(vec3(-0.35, 0.65, 0.68));                                     // luz ligada a la cámara: arriba a la izquierda
-      float dif = max(dot(ne, L), 0.0);
+      vec3 ve = toEnv(-v);
+      vec3 L = normalize(vec3(-0.45, 0.7, 0.55)), L2 = normalize(vec3(0.6, 0.25, 0.4));   // luz principal y de relleno, ligadas a la cámara
+      float dif = max(dot(ne, L), 0.0), dif2 = max(dot(ne, L2), 0.0);
+      float spec = pow(max(dot(ne, normalize(L + ve)), 0.0), 90.0);
+      float hemi = smoothstep(-0.9, 0.9, ne.y);                                        // oscurece lo que mira al suelo
+      float fres = 0.04 + 0.96 * pow(1.0 - max(dot(ve, ne), 0.0), 5.0);
       vec3 col;
       if (uMode == 1) {
-        // Ambiente 0.5 + difusa 0.5 sobre gris claro, y encima el reflejo del estudio
-        vec3 base = vec3(0.80, 0.80, 0.79) * (0.5 + 0.5 * dif);
-        float fres = 0.75 + 0.25 * pow(1.0 - max(dot(-v, n), 0.0), 3.0);
-        col = mix(base, showroom(r), 0.55 * fres);
-        col = pow(col, vec3(0.92));
+        vec3 base = vec3(0.70) * (0.12 + 0.48 * dif + 0.12 * dif2 + 0.28 * hemi);
+        vec3 env = showroom(r);
+        col = mix(base, env, 0.5 + 0.45 * fres) + vec3(0.9) * spec;
       } else if (uMode == 2) {
-        float hemi = 0.5 + 0.5 * ne.y;
-        col = vec3(0.80, 0.79, 0.77) * (0.22 + 0.58 * dif + 0.2 * hemi);
+        col = vec3(0.78, 0.77, 0.75) * (0.08 + 0.62 * dif + 0.12 * dif2 + 0.3 * hemi) + vec3(0.12) * spec;
       } else {
-        // Shade-Sky: azul donde la superficie mira al cielo, crema hacia los lados y tierra ocre abajo
-        float t = 0.8 * ne.y + 0.2 * r.y;
-        vec3 sky = vec3(0.40, 0.52, 0.90), horizon = vec3(0.96, 0.95, 0.88), ground = vec3(0.88, 0.84, 0.70), deep = vec3(0.52, 0.48, 0.40);
-        col = mix(horizon, sky, smoothstep(0.35, 0.92, t));
-        col = mix(col, ground, smoothstep(0.15, -0.25, t));
-        col = mix(col, deep, smoothstep(-0.3, -0.95, t));
-        col *= 0.82 + 0.18 * dif;
+        float t = 0.75 * ne.y + 0.25 * r.y;
+        vec3 sky = vec3(0.36, 0.5, 0.92), horizon = vec3(0.97, 0.96, 0.9), ground = vec3(0.86, 0.8, 0.62), deep = vec3(0.32, 0.27, 0.2);
+        col = mix(horizon, sky, smoothstep(0.3, 0.92, t));
+        col = mix(col, ground, smoothstep(0.12, -0.2, t));
+        col = mix(col, deep, smoothstep(-0.25, -0.9, t));
+        col *= 0.55 + 0.45 * dif + 0.15 * dif2;
+        col += vec3(0.7) * spec + vec3(0.25) * fres * smoothstep(0.0, 0.6, r.y);
       }
       gl_FragColor = vec4(col, 1.0);
     }`,
@@ -1340,22 +1373,68 @@ function setDiag(m) {
 }
 document.querySelectorAll('[data-diag]').forEach((b) => b.addEventListener('click', () => setDiag(b.dataset.diag)));
 const LAYOUTS = ['split', 'diag', 'render'];
-// Cambio de modo con giro de carrusel: la vista sale girando, se cambia el contenido y entra la otra cara
-let spinning = false;
+// Carrusel 3D: el módulo actual gira sobre sí mismo, se aleja y se hace pequeño hacia un lado,
+// mientras el siguiente entra por el otro lado girando y creciendo. Los dos se dibujan a la vez.
+let carousel = null;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
-async function switchLayout(l) {
-  if (l === layout || spinning) return;
-  if (reduceMotion.matches || !view.animate) { setLayout(l); return; }
-  spinning = true;
-  const dir = l === 'render' ? -1 : 1;                 // hacia VISU gira a la izquierda; de vuelta, a la derecha
-  const out = view.animate([{ transform: 'rotateY(0deg)', opacity: 1 }, { transform: `rotateY(${90 * dir}deg)`, opacity: 0.2 }],
-    { duration: 340, easing: 'cubic-bezier(.55,0,.8,.4)' });
-  await out.finished;
-  setLayout(l);
-  const inn = view.animate([{ transform: `rotateY(${-90 * dir}deg)`, opacity: 0.2 }, { transform: 'rotateY(0deg)', opacity: 1 }],
-    { duration: 420, easing: 'cubic-bezier(.2,.6,.3,1)' });
-  await inn.finished;
-  spinning = false;
+function switchLayout(l) {
+  if (l === layout || carousel) return;
+  if (l === 'split' || layout === 'split' || reduceMotion.matches) { setLayout(l); return; }
+  carousel = { t0: performance.now(), dur: 1300, from: layout, to: l, swapped: false, dir: l === 'render' ? 1 : -1,
+    pos: camera.position.clone(), quat: camera.quaternion.clone(), piv: pivot.clone() };
+  flipPanel(l);
+}
+// Pose de la cámara para un módulo en la posición s del carrusel (0 = delante, ±1 = fuera, a un lado)
+function carouselPose(c, s) {
+  const d = c.pos.distanceTo(c.piv), a = Math.abs(s);
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s * c.dir * THREE.MathUtils.degToRad(150));
+  const pos = c.pos.clone().sub(c.piv).applyQuaternion(q).multiplyScalar(1 + 4.5 * a * a).add(c.piv);
+  const quat = q.clone().multiply(c.quat);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+  pos.addScaledVector(right, -s * c.dir * d * 2.2 * a);            // se desplaza hacia un lado mientras se aleja
+  return { pos, quat };
+}
+function renderCarousel(now) {
+  const c = carousel, k = Math.min(1, (now - c.t0) / c.dur);
+  const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;   // suave al empezar y al terminar
+  if (!c.swapped && e >= 0.5) { c.swapped = true; setLayout(c.to); }
+  const full = { x: 0, w: view.clientWidth, h: Math.max(view.clientHeight, 1) };
+  const showG = ground.visible;
+  ground.visible = false;                                             // sin sombra doble durante el giro
+  const bg = envBg; envBg = false;
+  // primero el que está más lejos, después el más cercano
+  const passes = [[c.from, e], [c.to, e - 1]].sort((p1, p2) => Math.abs(p2[1]) - Math.abs(p1[1]));
+  passes.forEach(([kind, s], n) => {
+    const p = carouselPose(c, s);
+    camera.position.copy(p.pos); camera.quaternion.copy(p.quat);
+    renderer.autoClear = n === 0;
+    if (n > 0) renderer.clearDepth();
+    renderPane({ ...full, kind });
+  });
+  renderer.autoClear = true;
+  envBg = bg; ground.visible = showG;
+  camera.position.copy(c.pos); camera.quaternion.copy(c.quat);
+  if (k === 1) { carousel = null; bgFadeT0 = now; }
+}
+let bgFadeT0 = -1e9;
+// El panel derecho cambia de módulo girando como una placa
+const MODULE_TITLES = { diag: 'Modelado', render: 'Visu', split: 'Modelado + Visu' };
+function showModule(l) {
+  document.querySelectorAll('#panel-body [data-module]').forEach((sec) => {
+    const m = sec.dataset.module;
+    sec.hidden = !(m === 'all' || m === l || l === 'split');
+  });
+  $('panel-title').textContent = MODULE_TITLES[l];
+}
+async function flipPanel(l) {
+  const body = $('panel-body');
+  if (reduceMotion.matches || !body.animate) { showModule(l); return; }
+  const dir = l === 'render' ? 1 : -1;
+  await body.animate([{ transform: 'perspective(900px) rotateY(0deg)', opacity: 1 }, { transform: `perspective(900px) rotateY(${-90 * dir}deg)`, opacity: 0 }],
+    { duration: 380, easing: 'cubic-bezier(.55,0,.8,.4)' }).finished;
+  showModule(l);
+  body.animate([{ transform: `perspective(900px) rotateY(${90 * dir}deg)`, opacity: 0 }, { transform: 'perspective(900px) rotateY(0deg)', opacity: 1 }],
+    { duration: 480, easing: 'cubic-bezier(.2,.6,.3,1)' });
 }
 function setLayout(l) {
   layout = l;
@@ -1364,12 +1443,41 @@ function setLayout(l) {
   $('pane-render').hidden = l === 'diag';
   $('pane-diag').className = 'pane left' + (l === 'diag' ? ' full' : '');
   $('pane-render').className = 'pane right' + (l === 'render' ? ' full' : '');
+  if (!carousel) showModule(l);
   resize();
 }
 const cycleLayout = () => switchLayout(layout === 'render' ? 'diag' : 'render');
 document.querySelectorAll('[data-layout]').forEach((b) => b.addEventListener('click', () => switchLayout(b.dataset.layout)));
 document.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => setPickMode(b.dataset.pick)));
 document.querySelectorAll('[data-plane]').forEach((b) => b.addEventListener('click', () => setDrawPlane(b.dataset.plane)));
+
+// ---------- VISU: editor de material, entorno y color ----------
+const TONES = { agx: THREE.AgXToneMapping, aces: THREE.ACESFilmicToneMapping, none: THREE.NoToneMapping };
+let toneKey = 'agx';
+const fmt2 = (v) => (+v).toFixed(2);
+function syncMaterialEditor() {
+  const m = materials[matKey];
+  $('me-name').textContent = MAT_NAMES[matKey];
+  $('me-color').value = '#' + m.color.getHexString(); $('me-color-o').textContent = $('me-color').value;
+  for (const [id, prop] of [['me-metal', 'metalness'], ['rough', 'roughness'], ['me-coat', 'clearcoat'], ['me-coatr', 'clearcoatRoughness'], ['me-trans', 'transmission']]) {
+    $(id).value = m[prop]; $(id + '-o').textContent = fmt2(m[prop]);
+  }
+}
+$('me-color').addEventListener('input', (e) => { materials[matKey].color.set(e.target.value); $('me-color-o').textContent = e.target.value; });
+for (const [id, prop] of [['me-metal', 'metalness'], ['me-coat', 'clearcoat'], ['me-coatr', 'clearcoatRoughness'], ['me-trans', 'transmission']]) {
+  $(id).addEventListener('input', (e) => { materials[matKey][prop] = +e.target.value; $(id + '-o').textContent = fmt2(e.target.value); });
+}
+document.querySelectorAll('[data-env]').forEach((b) => b.addEventListener('click', () => {
+  envKey = b.dataset.env;
+  document.querySelectorAll('[data-env]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  $('expo').value = envKey === 'sun' || envKey === 'sunset' ? -1.4 : 0; $('expo').dispatchEvent(new Event('input'));
+}));
+$('env-int').addEventListener('input', (e) => { Object.values(materials).forEach((m) => (m.envMapIntensity = +e.target.value)); $('env-int-o').textContent = fmt2(e.target.value); });
+$('env-bg').addEventListener('change', (e) => { envBg = e.target.checked; });
+$('env-blur').addEventListener('input', (e) => { scene.backgroundBlurriness = +e.target.value; $('env-blur-o').textContent = fmt2(e.target.value); });
+$('tone').addEventListener('change', (e) => { toneKey = e.target.value; });
+$('expo').addEventListener('input', (e) => { renderer.toneMappingExposure = Math.pow(2, +e.target.value); $('expo-o').textContent = (+e.target.value).toFixed(1); });
+$('shadow-int').addEventListener('input', (e) => { ground.material.opacity = +e.target.value; $('shadow-int-o').textContent = fmt2(e.target.value); });
 
 // El material se aplica a las superficies seleccionadas; si no hay ninguna, a todas.
 function setMaterial(k) {
@@ -1380,6 +1488,7 @@ function setMaterial(k) {
   $('rough').value = materials[k].roughness;
   $('rough-o').textContent = (+materials[k].roughness).toFixed(2);
   $('mat-name').textContent = MAT_NAMES[k];
+  syncMaterialEditor();
   if (layout === 'diag') switchLayout('render');
 }
 function buildMaterialLibrary() {
@@ -1852,7 +1961,9 @@ function renderPane(p) {
   const diag = p.kind === 'diag';
   const dm = diagMaterial();
   objects.forEach((o) => { if (o.kind !== 'curve') o.parts.mesh.material = diag ? dm : materials[o.mat]; });
-  scene.background = null;
+  scene.background = !diag && envBg ? scene.environment : null;
+  renderer.toneMapping = diag ? THREE.ACESFilmicToneMapping : TONES[toneKey];
+  scene.environment = diag ? envTexture('studio') : envTexture(envKey);
   camera.layers.set(0);
   if (diag) camera.layers.enable(DIAG);
   renderer.render(scene, camera);
@@ -1869,7 +1980,8 @@ function renderFrame(now) {
   snapRing.scale.setScalar(camera.position.distanceTo(snapRing.position) * 0.06);
   syncPivotMarkers();
   renderer.shadowMap.needsUpdate = true;
-  panes().forEach(renderPane);
+  if (carousel) renderCarousel(now); else panes().forEach(renderPane);
+  scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
   // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
   useAspect(dragPane || paneAt(lastPtr.x));
 }
@@ -1927,5 +2039,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy };
+window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel };
+syncMaterialEditor();
+showModule(layout);
 window.__ready = true;
