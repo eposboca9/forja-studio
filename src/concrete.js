@@ -1,4 +1,4 @@
-// Fondo de la app: superficie cepillada (vetas horizontales finas), con una luz suave en el centro
+// Fondo de la app: piedra rugosa (ruido en varias escalas y arañazos sutiles), con una luz suave en el centro
 // y los bordes en penumbra. Una sola imagen del tamaño de la pantalla, en versión clara u oscura.
 
 function rand(seed) {
@@ -19,23 +19,37 @@ export function brushedTexture({ w = 1600, h = 900, theme = 'dark', seed = 11 } 
   g.fillStyle = `rgb(${P.base.join(',')})`;
   g.fillRect(0, 0, w, h);
 
-  // Vetas horizontales: muchas líneas finas de largo y opacidad variables (efecto cepillado)
-  const count = Math.round(h * 2.2);
-  for (let i = 0; i < count; i++) {
-    const y = r() * h, x = r() * w * 0.6 - w * 0.2, len = w * (0.2 + r() * 0.9);
-    const a = 0.015 + r() * 0.05, lightLine = r() > 0.5;
-    const grd = g.createLinearGradient(x, 0, x + len, 0);
-    const col = (lightLine ? P.light : P.shade);
-    grd.addColorStop(0, col + '0)');
-    grd.addColorStop(0.5, col + a + ')');
-    grd.addColorStop(1, col + '0)');
-    g.fillStyle = grd;
-    g.fillRect(x, y, len, r() > 0.85 ? 2 : 1);
+  // Ruido en varias escalas (piedra rugosa): rejillas pequeñas de valores al azar, ampliadas con suavizado
+  const octaves = [[6, 0.22], [16, 0.16], [44, 0.13], [120, 0.11], [320, 0.1], [700, 0.09]];
+  for (const [cells, alpha] of octaves) {
+    const cw = Math.max(2, Math.round(cells * (w / h))), ch = cells;
+    const n = document.createElement('canvas');
+    n.width = cw; n.height = ch;
+    const ng = n.getContext('2d'), nd = ng.createImageData(cw, ch);
+    for (let k = 0; k < nd.data.length; k += 4) {
+      const v = Math.round(r() * 255);
+      nd.data[k] = nd.data[k + 1] = nd.data[k + 2] = v; nd.data[k + 3] = 255;
+    }
+    ng.putImageData(nd, 0, 0);
+    g.imageSmoothingEnabled = true;
+    g.globalAlpha = alpha * (theme === 'dark' ? 0.55 : 0.4);
+    g.globalCompositeOperation = 'overlay';
+    g.drawImage(n, 0, 0, w, h);
   }
-  // Grano muy fino
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = 'source-over';
+
+  // Pocos arañazos finos en direcciones al azar
+  for (let i = 0; i < 70; i++) {
+    const x = r() * w, y = r() * h, ang = r() * Math.PI, len = 20 + r() * 160;
+    g.strokeStyle = (r() > 0.5 ? P.light : P.shade) + (0.03 + r() * 0.05) + ')';
+    g.lineWidth = 0.6;
+    g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(ang) * len, y + Math.sin(ang) * len); g.stroke();
+  }
+  // Grano fino y rugoso
   const img = g.getImageData(0, 0, w, h), d = img.data;
   for (let i = 0; i < d.length; i += 4) {
-    const n = (r() - 0.5) * 6;
+    const n = (r() - 0.5) * 14;
     d[i] += n; d[i + 1] += n; d[i + 2] += n;
   }
   g.putImageData(img, 0, 0);
