@@ -6,9 +6,13 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import * as N from './nurbs.js';
-import { applyConcrete } from './concrete.js';
+import { applyBackground } from './concrete.js';
 
-applyConcrete();
+// Tema claro u oscuro (se recuerda en este navegador)
+let theme = 'dark';
+try { theme = localStorage.getItem('forja-theme') || 'dark'; } catch (e) { /* sin almacenamiento */ }
+document.documentElement.dataset.theme = theme;
+const repaintWall = applyBackground(() => theme);
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -57,7 +61,7 @@ scene.add(ground);
 const grid = new THREE.GridHelper(30, 30, 0x8a8781, 0xa3a09a);
 grid.position.y = 0.001;
 grid.layers.set(DIAG);
-grid.material.transparent = true; grid.material.opacity = 0.22;
+grid.material.transparent = true; grid.material.opacity = 0.09;
 scene.add(grid);
 const gridXY = new THREE.GridHelper(30, 30, 0x4a3a22, 0x2a251d);
 gridXY.rotation.x = Math.PI / 2;
@@ -267,6 +271,26 @@ const envMat = new THREE.LineBasicMaterial({ color: '#e07a1f' });
 const handleGeo = new THREE.SphereGeometry(0.075, 16, 12);
 const handleMat = new THREE.MeshBasicMaterial({ color: '#2d6aa8', depthTest: false, transparent: true });
 const handleSelMat = new THREE.MeshBasicMaterial({ color: '#e07a1f', depthTest: false, transparent: true });
+
+const THEME_3D = {
+  dark: { curve: 0xe8e6e1, grid: 0x8a8781, iso: '#000000', shadow: 0.55 },
+  light: { curve: 0x2b2a27, grid: 0x6e6b66, iso: '#0b0d10', shadow: 0.35 },
+};
+function applyTheme3D() {
+  const t = THEME_3D[theme];
+  curveMat.color.setHex(t.curve);
+  grid.material.color.setHex(t.grid);
+  ground.material.opacity = t.shadow;
+}
+function setTheme(t) {
+  theme = t;
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('forja-theme', t); } catch (e) { /* sin almacenamiento */ }
+  document.querySelectorAll('[data-theme-btn]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeBtn === t)));
+  repaintWall();
+  applyTheme3D();
+}
+document.querySelectorAll('[data-theme-btn]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeBtn)));
 
 let diagMode = 'zebra', layout = 'split', matKey = 'paint', res = 90, combScale = 0.8;
 
@@ -1209,9 +1233,10 @@ function buildMaterialLibrary() {
   }
   // Miniaturas: una esfera con cada material, renderizada una sola vez en un lienzo aparte
   requestAnimationFrame(() => {
-    const tr = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    const tr = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
+    tr.setClearColor(0x000000, 0);
     tr.setSize(128, 128); tr.toneMapping = THREE.ACESFilmicToneMapping;
-    const ts = new THREE.Scene(); ts.background = new THREE.Color('#cfcdc8');
+    const ts = new THREE.Scene(); // sin fondo: las esferas flotan sobre la superficie de la app
     ts.environment = new THREE.PMREMGenerator(tr).fromScene(new RoomEnvironment(tr), 0.04).texture;
     const l = new THREE.DirectionalLight(0xffffff, 1.4); l.position.set(2, 3, 2); ts.add(l);
     const tc = new THREE.PerspectiveCamera(30, 1, 0.1, 10); tc.position.set(0, 0.25, 3.9); tc.lookAt(0, 0, 0);
@@ -1441,6 +1466,7 @@ camera.lookAt(0, 0.6, 0.6);
 pivot.set(0, 0.6, 0.6);
 
 setNavStyle(navStyle);
+setTheme(theme);
 setLayout(layout);
 setPinned(false);
 frameObjects([]);

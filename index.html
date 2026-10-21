@@ -23,7 +23,7 @@
     --engrave-light: rgba(255, 255, 255, .5);
     --font-ui: "Jost", "Futura", "Century Gothic", system-ui, sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
-    --concrete: none; --concrete-slab: none;
+    --wall: none; --concrete-slab: none;
     color-scheme: light;
   }
   html, body { height: 100%; }
@@ -206,7 +206,7 @@
   .tools .tl { font-size: 9px; color: var(--muted); text-align: center; letter-spacing: .05em; padding: 2px 0; }
 
   /* ===== Muro de hormigón ===== */
-  body { background: var(--bg) var(--concrete) no-repeat center / 100% 100%; background-attachment: fixed; }
+  body { background: var(--bg) var(--wall) no-repeat center / 100% 100%; background-attachment: fixed; }
   .app, .app.auto {
     grid-template-columns: 64px 1fr 56px;
     grid-template-rows: 58px 1fr 34px;
@@ -337,6 +337,30 @@
   .glyph.dot:hover::before { transform: scaleX(1.6); }
   .tools button[aria-pressed="true"]::after { width: 8px; height: 1.5px; margin-top: -1px; left: -8px; border-radius: 0; background: #2b2a27; box-shadow: 0 1px 0 var(--engrave-light); }
   .status .dot { width: 8px; height: 1.5px; border-radius: 0; vertical-align: middle; }
+
+  /* Tema oscuro: superficie cepillada en penumbra, texto claro grabado */
+  :root[data-theme="dark"] {
+    --bg: #222223; --panel: #2a2a2b; --panel-2: #333334; --line: rgba(255,255,255,.12);
+    --fg: #e4e2dd; --muted: #8f8c86; --accent: #d39a55; --sel: #6aa6e0; --steel: #e4e2dd;
+    --engrave-light: rgba(0,0,0,.65);
+    color-scheme: dark;
+  }
+  :root[data-theme="dark"] .wordmark { color: #d8d6d1; text-shadow: 0 1px 0 rgba(0,0,0,.7); }
+  :root[data-theme="dark"] .tools button { color: #b9b6b0; filter: drop-shadow(0 1px 0 rgba(0,0,0,.7)); }
+  :root[data-theme="dark"] .tools button[aria-pressed="true"]::after, :root[data-theme="dark"] .glyph.dot::before { background: #d8d6d1; }
+  :root[data-theme="dark"] .hint, :root[data-theme="dark"] .toast, :root[data-theme="dark"] .drawbar, :root[data-theme="dark"] .navhint { background: rgba(30,30,31,.8); color: var(--fg); }
+  :root[data-theme="dark"] .radial .ring { background: radial-gradient(circle, rgba(30,30,31,.75) 0 34%, rgba(30,30,31,.35) 35% 100%); }
+  :root[data-theme="dark"] .radial .item { background: rgba(40,40,41,.96); color: var(--fg); }
+  :root[data-theme="dark"] .radial .item.on { background: #e4e2dd; color: #1d1d1e; }
+  :root[data-theme="dark"] .btn, :root[data-theme="dark"] .coord, :root[data-theme="dark"] select.sel,
+  :root[data-theme="dark"] .grid4 select, :root[data-theme="dark"] .grid4 input { background: rgba(255,255,255,.07); color: var(--fg); }
+  :root[data-theme="dark"] .btn:hover { background: rgba(255,255,255,.14); }
+  :root[data-theme="dark"] .ol-item.sel { background: rgba(255,255,255,.08); }
+  :root[data-theme="dark"] .mat img { mix-blend-mode: normal; opacity: .95; }
+  :root[data-theme="dark"] .seg.snap button[aria-pressed="true"], :root[data-theme="dark"] .seg.snap button.held, :root[data-theme="dark"] #st-snap { color: #7fd3a0 !important; }
+  .top .seg.theme { margin-left: 4px; }
+
+  .mat img, .mat .ph, :root[data-theme="dark"] .mat img { background: transparent; box-shadow: none; mix-blend-mode: normal; opacity: 1; }
 </style>
 </head>
 <body>
@@ -359,6 +383,10 @@
       <button id="lay-split" data-layout="split" aria-pressed="true" title="Diagnóstico y render lado a lado (V)">Dividida</button>
       <button id="lay-diag" data-layout="diag" aria-pressed="false" title="Solo diagnóstico (V)">Diagnóstico</button>
       <button id="lay-render" data-layout="render" aria-pressed="false" title="Solo render (V)">Render</button>
+    </div>
+    <div class="seg theme" role="group" aria-label="Tema">
+      <button id="theme-light" data-theme-btn="light" aria-pressed="false" title="Fondo claro">Claro</button>
+      <button id="theme-dark" data-theme-btn="dark" aria-pressed="true" title="Fondo oscuro">Oscuro</button>
     </div>
     <span class="tag">v0.7 · propuesta</span>
   </header>
