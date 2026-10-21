@@ -206,7 +206,7 @@
   .tools .tl { font-size: 9px; color: var(--muted); text-align: center; letter-spacing: .05em; padding: 2px 0; }
 
   /* ===== Muro de hormigón ===== */
-  body { background: var(--bg) var(--concrete); background-size: 1400px 1050px; background-attachment: fixed; }
+  body { background: var(--bg) var(--concrete) no-repeat center / 100% 100%; background-attachment: fixed; }
   .app, .app.auto {
     grid-template-columns: 64px 1fr 56px;
     grid-template-rows: 58px 1fr 34px;
@@ -331,6 +331,12 @@
   .panel .sec, .panel-head { text-shadow: 0 1px 0 var(--engrave-light); }
   .btn, .coord, select.sel, .grid4 select, .grid4 input { background: rgba(255,255,255,.28); }
   .mat img { mix-blend-mode: multiply; }
+
+  /* Sin puntos: los símbolos son líneas finas grabadas */
+  .glyph.dot::before { width: 14px; height: 1.5px; border-radius: 0; background: #3b3833; box-shadow: 0 1px 0 var(--engrave-light); }
+  .glyph.dot:hover::before { transform: scaleX(1.6); }
+  .tools button[aria-pressed="true"]::after { width: 8px; height: 1.5px; margin-top: -1px; left: -8px; border-radius: 0; background: #2b2a27; box-shadow: 0 1px 0 var(--engrave-light); }
+  .status .dot { width: 8px; height: 1.5px; border-radius: 0; vertical-align: middle; }
 </style>
 </head>
 <body>

@@ -7,7 +7,7 @@ function rand(seed) {
   return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296);
 }
 
-export function concreteTexture({ w = 1400, h = 1050, base = '#c7c5c0', seed = 7, joints = true, mottle = 1 } = {}) {
+export function concreteTexture({ w = 1400, h = 1050, base = '#c7c5c0', seed = 7, joints = false, pores = false, mottle = 1 } = {}) {
   const r = rand(seed);
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -16,10 +16,11 @@ export function concreteTexture({ w = 1400, h = 1050, base = '#c7c5c0', seed = 7
   g.fillRect(0, 0, w, h);
 
   // Manchas grandes y suaves (variación del vertido)
-  for (let i = 0; i < 260; i++) {
-    const x = r() * w, y = r() * h, rad = 40 + r() * 260, light = r() > 0.5;
+  const scale = Math.max(w, h) / 1400;
+  for (let i = 0; i < 140 * scale; i++) {
+    const x = r() * w, y = r() * h, rad = (60 + r() * 320) * Math.max(1, scale * 0.8), light = r() > 0.45;
     const grd = g.createRadialGradient(x, y, 0, x, y, rad);
-    grd.addColorStop(0, light ? `rgba(255,255,255,${0.05 * mottle})` : `rgba(70,64,56,${0.05 * mottle})`);
+    grd.addColorStop(0, light ? `rgba(255,255,255,${0.035 * mottle})` : `rgba(70,64,56,${0.022 * mottle})`);
     grd.addColorStop(1, 'rgba(0,0,0,0)');
     g.fillStyle = grd;
     g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
@@ -40,8 +41,8 @@ export function concreteTexture({ w = 1400, h = 1050, base = '#c7c5c0', seed = 7
     d[i] += n; d[i + 1] += n; d[i + 2] += n;
   }
   g.putImageData(img, 0, 0);
-  // Poros (burbujas de aire)
-  for (let i = 0; i < 420 * mottle; i++) {
+  // Poros (burbujas de aire), desactivados por defecto
+  for (let i = 0; pores && i < 420 * mottle; i++) {
     const x = r() * w, y = r() * h, rad = 0.4 + r() * r() * 1.4;
     g.fillStyle = `rgba(45,42,38,${0.12 + r() * 0.25})`;
     g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill();
@@ -74,8 +75,15 @@ export function concreteTexture({ w = 1400, h = 1050, base = '#c7c5c0', seed = 7
   return c.toDataURL('image/jpeg', 0.86);
 }
 
+// Una sola imagen del tamaño de la pantalla (sin mosaico); se regenera al cambiar el tamaño de la ventana.
 export function applyConcrete() {
   const root = document.documentElement.style;
-  root.setProperty('--concrete', `url(${concreteTexture()})`);
-  root.setProperty('--concrete-slab', `url(${concreteTexture({ w: 700, h: 700, base: '#d6d4cf', seed: 21, joints: false, mottle: 0.45 })})`);
+  const paint = () => {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const w = Math.round(innerWidth * dpr), h = Math.round(innerHeight * dpr);
+    root.setProperty('--concrete', `url(${concreteTexture({ w, h })})`);
+  };
+  paint();
+  let t = 0;
+  addEventListener('resize', () => { clearTimeout(t); t = setTimeout(paint, 250); });
 }
