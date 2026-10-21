@@ -450,21 +450,21 @@ const isoSelMat = LM({ color: 0xe07a1f, linewidth: 1.8 });
 const hullMat = new THREE.LineDashedMaterial({ color: '#2d6aa8', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.7 });
 const combMat = new THREE.LineBasicMaterial({ color: '#e07a1f', transparent: true, opacity: 0.55 });
 const envMat = new THREE.LineBasicMaterial({ color: '#e07a1f' });
-// CVs como pequeños objetos 3D: una cruz "+" (como la del logotipo) y, en las esquinas de las superficies,
-// un cubo para distinguirlas. Cada CV es una esfera invisible (fácil de elegir) con la figura dentro;
+// CVs como pequeños objetos 3D: una cruz "+" fina, plana y orientada con la geometría (en superficies queda
+// tumbada sobre el plano tangente, con los brazos en U y V; en curvas, sobre la tangente y la normal) y,
+// en las esquinas de las superficies, un cubo pequeño para distinguirlas. Cada CV es una esfera invisible (fácil de elegir) con la figura dentro;
 // se escalan con la distancia a la cámara para verse siempre del mismo tamaño.
 const handleGeo = new THREE.SphereGeometry(0.75, 10, 8);
 const handlePickMat = new THREE.MeshBasicMaterial({ visible: false });
-const plusGeo = mergeGeometries([new THREE.BoxGeometry(1.1, 0.26, 0.26), new THREE.BoxGeometry(0.26, 1.1, 0.26), new THREE.BoxGeometry(0.26, 0.26, 1.1)]);
-const cornerGeo = new THREE.BoxGeometry(0.62, 0.62, 0.62);
-const handleMat = new THREE.MeshStandardMaterial({ color: '#2f7bff', roughness: 0.35, metalness: 0.1, depthTest: false, transparent: true });
-const handleSelMat = new THREE.MeshStandardMaterial({ color: '#ff8a1f', emissive: '#5a2400', roughness: 0.35, metalness: 0.1, depthTest: false, transparent: true });
+const plusGeo = mergeGeometries([new THREE.BoxGeometry(1.2, 0.11, 0.05), new THREE.BoxGeometry(0.11, 1.2, 0.05)]);
+const cornerGeo = new THREE.BoxGeometry(0.42, 0.42, 0.42);
+const handleMat = new THREE.MeshStandardMaterial({ color: '#2f7bff', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true, opacity: 0.85 });
+const handleSelMat = new THREE.MeshStandardMaterial({ color: '#ff8a1f', emissive: '#5a2400', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true });
 const HANDLE_PX = 0.013;   // tamaño en pantalla (fracción de la distancia a la cámara)
 function makeHandle(corner, sel) {
   const h = new THREE.Mesh(handleGeo, handlePickMat);
   const shape = new THREE.Mesh(corner ? cornerGeo : plusGeo, sel ? handleSelMat : handleMat);
   shape.renderOrder = 10;
-  if (!corner) shape.rotation.set(0.35, 0.6, 0);   // un poco girada para que se lea como objeto 3D
   h.add(shape);
   h.renderOrder = 10;
   return h;
@@ -692,6 +692,31 @@ function allCVRefs(obj) {
   else obj.data.cvs.forEach((_, i) => out.push({ obj, i, key: cvKey(obj, i) }));
   return out;
 }
+// Orientación de la cruz a partir de los CVs vecinos (direcciones U y V, o tangente de la curva)
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _n = new THREE.Vector3(), _m = new THREE.Matrix4();
+function orientHandle(shape, obj, ref) {
+  const cv = (q) => _n.set(q.x, q.y, q.z);
+  if (obj.kind === 'surface') {
+    const g = obj.data.cvs, nu = g.length, nv = g[0].length, i = ref.i, j = ref.j;
+    _a.copy(cv(g[Math.min(nu - 1, i + 1)][j])).sub(cv(g[Math.max(0, i - 1)][j]));
+    _b.copy(cv(g[i][Math.min(nv - 1, j + 1)])).sub(cv(g[i][Math.max(0, j - 1)]));
+    const z = new THREE.Vector3().crossVectors(_a, _b);
+    if (z.lengthSq() < 1e-12 || _a.lengthSq() < 1e-12) return;
+    z.normalize(); const x = _a.normalize(), y = new THREE.Vector3().crossVectors(z, x);
+    shape.quaternion.setFromRotationMatrix(_m.makeBasis(x, y, z));
+  } else {
+    // curvas: un brazo sobre la tangente y el otro sobre la normal, en el plano de la curva
+    const c = obj.data.cvs, i = ref.i;
+    const x = cv(c[Math.min(c.length - 1, i + 1)]).clone().sub(cv(c[Math.max(0, i - 1)]));
+    if (x.lengthSq() < 1e-12) return;
+    x.normalize();
+    const z = obj.data.plane === 'xy' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+    z.addScaledVector(x, -z.dot(x));
+    if (z.lengthSq() < 1e-6) return;
+    z.normalize();
+    shape.quaternion.setFromRotationMatrix(_m.makeBasis(x, new THREE.Vector3().crossVectors(z, x), z));
+  }
+}
 function rebuildHandles(obj) {
   const g = obj.parts.handles;
   g.clear();
@@ -701,6 +726,7 @@ function rebuildHandles(obj) {
     const corner = nu > 0 && (ref.i === 0 || ref.i === nu - 1) && (ref.j === 0 || ref.j === nv - 1);
     const h = makeHandle(corner, selCVs.has(ref.key));
     h.position.set(p.x, p.y, p.z);
+    orientHandle(h.children[0], obj, ref);
     h.userData = ref;
     g.add(h);
   }
@@ -2015,13 +2041,19 @@ addEventListener('keydown', (e) => {
 
 // ---------- Módulo IA ----------
 let sampleCap;
-async function askClaude(text) {
+async function claudeSample() {
   // Dentro de claude.ai la página puede preguntarle a Claude (capacidad "sample"); en GitHub Pages no hay IA conectada
   sampleCap ??= window.claude?.use ? await window.claude.use('sample').catch(() => null) : null;
-  if (!sampleCap) return null;
-  const r = await sampleCap.json(`${AI.CLAUDE_INSTRUCTIONS}\n\nPedido: ${text}`, { modelTier: 'quick' });
-  return r && Array.isArray(r.items) ? r : null;
+  return sampleCap;
 }
+async function askClaude(text, answers) {
+  const cap = await claudeSample();
+  if (!cap) return null;
+  const done = answers.length ? `\n\nRespuestas del usuario a tus preguntas:\n${answers.map((a) => `- ${a.q} → ${a.a}`).join('\n')}\nYa no preguntes más: devuelve items.` : '';
+  const r = await cap.json(`${AI.CLAUDE_INSTRUCTIONS}\n\nPedido: ${text}${done}`, { modelTier: 'quick' });
+  return r && (Array.isArray(r.items) || Array.isArray(r.questions)) ? r : null;
+}
+// Coloca lo generado en fila a la derecha de la escena. Mallas (tornillería, muebles) o superficies NURBS (vasos…)
 function placeGenerated(cmds) {
   const box = boundsOf(objects.filter((o) => o.visible));
   let x = box.isEmpty() ? 0 : box.max.x + 1;
@@ -2030,7 +2062,20 @@ function placeGenerated(cmds) {
     const gen = AI.GENERATORS[c.type];
     if (!gen) continue;
     for (let k = 0; k < Math.min(20, c.n || 1); k++) {
-      const { geometry, name } = gen(c.params || {});
+      const res = gen(c.params || {});
+      if (res.surfaces) {
+        const all = res.surfaces.flatMap((sf) => sf.data.cvs.flat());
+        const x0 = Math.min(...all.map((v) => v.x)), x1 = Math.max(...all.map((v) => v.x));
+        for (const sf of res.surfaces) {
+          sf.data.cvs.forEach((row) => row.forEach((v) => (v.x += x - x0)));
+          const o = addSurface(sf.data, sf.name);
+          o.name = res.name + (k ? ` ${k + 1}` : '');
+          created.push(o);
+        }
+        x += (x1 - x0) * 1.35 + 0.15;
+        continue;
+      }
+      const { geometry, name } = res;
       geometry.computeBoundingBox();
       const bb = geometry.boundingBox, w = bb.max.x - bb.min.x;
       geometry.translate(x - bb.min.x, 0, -(bb.min.z + bb.max.z) / 2);
@@ -2042,31 +2087,110 @@ function placeGenerated(cmds) {
   }
   return created;
 }
-async function runAI(text) {
-  text = text.trim();
-  if (!text) return;
-  const log = (msg) => { const li = document.createElement('li'); li.innerHTML = msg; $('ai-log').prepend(li); };
-  $('ai-status').textContent = 'Pensando…';
-  let cmds = AI.parsePrompt(text), note = '';
-  if (!cmds) {
-    try { const r = await askClaude(text); if (r) { cmds = r.items; note = r.note || ''; } } catch (e) { console.warn(e); }
-  }
-  if (!cmds || !cmds.length) {
-    $('ai-status').textContent = note || 'No entendí el pedido. Prueba con tornillos, tuercas, arandelas, mesas o sillas, con sus medidas.';
-    log(`<b>${text.replace(/</g, '&lt;')}</b> · sin resultado`);
+
+// Conversación del módulo IA: el pedido se interpreta y, si le faltan datos, la IA hace un par de
+// preguntas concretas (con opciones para elegir de un clic) antes de crear nada.
+let aiConv = null;   // { text, items, queue: [{ idx, param }], total }  o  { text, claude: true, queue: [{ q, options }], answers: [] }
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+function aiSay(html, who = 'ai') {
+  const el = document.createElement('div');
+  el.className = 'msg ' + who;
+  el.innerHTML = html;
+  $('ai-chat').append(el);
+  $('ai-chat').scrollTop = 1e9;
+  return el;
+}
+function aiAsk() {
+  const c = aiConv, item = c.queue[0], n = c.total - c.queue.length + 1;
+  const q = c.claude ? item.q : item.param.q;
+  const options = c.claude ? (item.options || []).map((o) => ({ label: o, value: o })) : item.param.options;
+  const el = aiSay(`<small>Pregunta ${n} de ${c.total}${!c.claude && c.items.length > 1 ? ' · ' + AI.CATALOG[c.items[item.idx].type].label : ''}</small><p>${esc(q)}</p>
+    <div class="ai-chips">${options.map((o, i) => `<button class="chip" data-i="${i}">${esc(o.label)}</button>`).join('')}
+    <button class="chip ghost" data-def>${c.claude ? 'Como veas' : 'Por defecto'}</button><button class="chip ghost" data-now>Crear ya</button></div>`);
+  el.querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', () => aiAnswer(options[+b.dataset.i], b)));
+  el.querySelector('[data-def]').addEventListener('click', (e) => aiAnswer(null, e.target));
+  el.querySelector('[data-now]').addEventListener('click', (e) => { if (aiConv !== c) return; c.queue.length = 0; markChosen(e.target); aiNext(); });
+  $('ai-status').textContent = 'Elige una opción o escribe la respuesta.';
+}
+function markChosen(btn) { btn.closest('.ai-chips').querySelectorAll('button').forEach((b) => { b.disabled = true; b.classList.toggle('on', b === btn); }); }
+// Respuesta a la pregunta actual: una opción ({label, value}), null = por defecto, o texto escrito
+function aiAnswer(choice, btn, typed) {
+  const c = aiConv;
+  if (!c || !c.queue.length || (btn && btn.disabled)) return;
+  const item = c.queue[0];
+  if (c.claude) {
+    c.answers.push({ q: item.q, a: typed ?? (choice ? choice.label : 'lo que mejor quede') });
+  } else if (typed !== undefined) {
+    const v = item.param.answer(AI.normalize(typed));
+    if (v === undefined) { aiSay('No te entendí. Elige una de las opciones o escribe un número.'); return; }
+    c.items[item.idx].given[item.param.key] = v;
+  } else if (choice) c.items[item.idx].given[item.param.key] = choice.value;
+  if (btn) markChosen(btn);
+  if (typed !== undefined) aiSay(esc(typed), 'user');
+  c.queue.shift();
+  aiNext();
+}
+async function aiNext() {
+  const c = aiConv;
+  if (c.queue.length) return aiAsk();
+  aiConv = null;
+  if (c.claude) {
+    $('ai-status').textContent = 'Pensando…';
+    try { const r = await askClaude(c.text, c.answers); if (r?.items?.length) return aiCreate(c.text, r.items, r.note); aiSay(esc(r?.note || 'No pude hacerlo.')); }
+    catch (e) { aiSay('No pude hablar con Claude ahora. Prueba de nuevo en un momento.'); console.warn(e); }
+    $('ai-status').textContent = '';
     return;
   }
+  aiCreate(c.text, AI.toCommands(c.items));
+}
+function aiCreate(text, cmds, note) {
   const created = placeGenerated(cmds);
+  if (!created.length) { aiSay('No pude crear nada con eso.'); return; }
   setPickMode('object');
   applySelection(created, 'replace');
   frameObjects(created);
-  $('ai-status').textContent = note || `Creado: ${created.map((o) => o.name).join(', ')}.`;
-  log(`<b>${text.replace(/</g, '&lt;')}</b> → ${created.length} ${created.length === 1 ? 'objeto' : 'objetos'}`);
+  const what = cmds.filter((c) => AI.CATALOG[c.type]).map((c) => AI.describe({ ...c, n: c.n || 1, params: { ...c.params } }));
+  aiSay(`Listo: ${esc(note || what.join(' · '))}.`);
+  $('ai-status').textContent = '';
+  const li = document.createElement('li');
+  li.innerHTML = `<b>${esc(text)}</b> → ${created.length} ${created.length === 1 ? 'objeto' : 'objetos'}`;
+  $('ai-log').prepend(li);
   updateStatus();
+}
+async function runAI(text) {
+  text = text.trim();
+  if (!text) return;
+  $('ai-prompt').value = '';
+  // si hay una pregunta abierta, lo escrito es la respuesta
+  if (aiConv?.queue.length && !AI.parsePrompt(text)) return aiAnswer(null, null, text);
+  aiConv = null;
+  aiSay(esc(text), 'user');
+  const items = AI.parsePrompt(text);
+  if (items) {
+    const queue = AI.questionsFor(items, 2);
+    aiConv = { text, items, queue, total: queue.length };
+    if (queue.length) aiSay(`Voy a hacer ${items.map((it) => AI.CATALOG[it.type].label).join(' y ')}. Para que salga como quieres, ${queue.length === 1 ? 'una pregunta' : 'un par de preguntas'}:`);
+    return aiNext();
+  }
+  // Pedido que el intérprete local no conoce: dentro de claude.ai se le pregunta a Claude
+  $('ai-status').textContent = 'Pensando…';
+  let r = null;
+  try { r = await askClaude(text, []); } catch (e) { console.warn(e); }
+  $('ai-status').textContent = '';
+  if (r?.questions?.length) {
+    aiConv = { text, claude: true, queue: r.questions.slice(0, 2), answers: [] };
+    aiConv.total = aiConv.queue.length;
+    return aiNext();
+  }
+  if (r?.items?.length) return aiCreate(text, r.items, r.note);
+  const known = Object.values(AI.CATALOG);
+  const el = aiSay(`${r?.note ? esc(r.note) + '<br>' : ''}Todavía no sé hacer eso${sampleCap ? '' : ' aquí (sin conexión con Claude solo entiendo objetos conocidos)'}. Sé hacer:
+    <div class="ai-chips">${known.map((k) => `<button class="chip">${k.label}</button>`).join('')}</div>`);
+  el.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => runAI('un ' + b.textContent)));
 }
 $('ai-go').addEventListener('click', () => runAI($('ai-prompt').value));
 $('ai-prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runAI(e.target.value); } });
-document.querySelectorAll('#ai-chips .chip').forEach((b) => b.addEventListener('click', () => { $('ai-prompt').value = b.textContent; runAI(b.textContent); }));
+document.querySelectorAll('#ai-chips .chip').forEach((b) => b.addEventListener('click', () => runAI(b.textContent)));
 
 // ---------- Atajos de teclado ----------
 addEventListener('keydown', (e) => {
