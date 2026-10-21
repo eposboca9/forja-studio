@@ -6,21 +6,25 @@
 <style>body{margin:0}[hidden]{display:none!important}</style>
 <title>Forja Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
-  /* Layout: estudio de modelado — barra superior, viewport dominante con herramientas flotantes, panel de propiedades a la derecha, barra de estado. Tema oscuro deliberado, como las apps 3D profesionales. */
+  /* Layout: muro de hormigón visto a pantalla completa. La vista 3D es un vano con marco de acero;
+     herramientas y menús son símbolos grabados en el muro; las propiedades salen como una losa. */
   :root {
-    --bg: #0d0f12;
-    --panel: #15181c;
-    --panel-2: #1b1f24;
-    --line: #262b32;
-    --fg: #dfe3e8;
-    --muted: #818a96;
-    --accent: #f0a63a;
-    --sel: #57b6ff;
-    --font-ui: "Geist", "Segoe UI", system-ui, sans-serif;
-    --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
-    color-scheme: dark;
+    --bg: #c7c5c0;          /* hormigón */
+    --panel: #d0cec9;       /* losa */
+    --panel-2: #dad8d3;
+    --line: rgba(40, 37, 33, .2);
+    --fg: #2b2a27;          /* grafito */
+    --muted: #5c5953;
+    --accent: #9a6a36;      /* roble */
+    --sel: #2d6aa8;
+    --steel: #1f1e1c;       /* perfiles de acero */
+    --engrave-light: rgba(255, 255, 255, .5);
+    --font-ui: "Jost", "Futura", "Century Gothic", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    --concrete: none; --concrete-slab: none;
+    color-scheme: light;
   }
   html, body { height: 100%; }
   body {
@@ -200,15 +204,124 @@
   .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
   select.sel { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12px; }
   .tools .tl { font-size: 9px; color: var(--muted); text-align: center; letter-spacing: .05em; padding: 2px 0; }
+
+  /* ===== Muro de hormigón ===== */
+  body { background: var(--bg) var(--concrete); background-size: 1400px 1050px; background-attachment: fixed; }
+  .app, .app.auto {
+    grid-template-columns: 64px 1fr 56px;
+    grid-template-rows: 58px 1fr 34px;
+    grid-template-areas: "top top top" "tools view right" "status status status";
+  }
+  .top, .status, .panel, .panel-head { background: transparent; border: 0; }
+  .top { gap: 20px; padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px)); }
+  .brand { gap: 10px; align-items: baseline; }
+  .wordmark { font-weight: 300; font-size: 22px; letter-spacing: .5em; color: #3a3833; text-shadow: 0 1px 0 var(--engrave-light), 0 -1px 0 rgba(0,0,0,.18); }
+  .brand .sub { font-size: 11px; letter-spacing: .3em; text-transform: uppercase; color: var(--muted); }
+  .file { font-size: 11px; letter-spacing: .06em; }
+  .top .lbl { font-size: 10px; letter-spacing: .24em; text-transform: uppercase; color: var(--muted); margin-left: 6px; }
+  .tag { border: 0; color: var(--muted); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; padding: 0; }
+  /* Interruptores como texto grabado: el activo se subraya con una línea de acero */
+  .seg, .seg.small { background: none; border: 0; padding: 0; border-radius: 0; gap: 2px; }
+  .seg button, .seg.small button { border-radius: 0; background: none; color: var(--muted); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; padding: 6px 8px 5px; text-shadow: 0 1px 0 var(--engrave-light); }
+  .seg button[aria-pressed="true"] { background: none; box-shadow: inset 0 -1.5px 0 var(--steel); color: var(--fg); }
+  .seg.snap button[aria-pressed="true"] { background: none; color: #2f6b47; box-shadow: inset 0 -1.5px 0 #2f6b47; }
+  .seg.snap button.held { color: #2f6b47; box-shadow: inset 0 -1.5px 0 rgba(47,107,71,.5); }
+
+  /* El vano: la vista 3D como una abertura con marco de acero en el muro */
+  .view { margin: 0 0 6px; outline: 2px solid var(--steel); outline-offset: 0;
+    box-shadow: 0 0 0 4px rgba(255,255,255,.18), 0 18px 30px -18px rgba(0,0,0,.45); }
+  .pane.right { border-left: 3px solid var(--steel); }
+  .pane-title { letter-spacing: .2em; color: var(--muted); font-size: 10px; }
+  .pane-title b { color: var(--fg); font-weight: 500; }
+  .pane .seg.small button { text-shadow: none; }
+
+  /* Herramientas: símbolos grabados en el muro; el activo lleva un tensor (punto) a su lado */
+  .tools, .app.auto .tools, .app.auto .tools.show {
+    grid-area: tools; position: static; transform: none; opacity: 1; align-self: center; justify-self: center;
+    background: none; border: 0; backdrop-filter: none; padding: 0; gap: 4px; border-radius: 0;
+  }
+  .tools button { width: 40px; height: 36px; border-radius: 0; color: #4b4943; position: relative;
+    filter: drop-shadow(0 1px 0 rgba(255,255,255,.55)); }
+  .tools button svg { width: 19px; height: 19px; stroke-width: 1.4; }
+  .tools button:hover:not(:disabled) { background: rgba(40,37,33,.07); color: var(--fg); box-shadow: inset 0 1px 2px rgba(0,0,0,.18); }
+  .tools button[aria-pressed="true"] { background: none; color: var(--fg); }
+  .tools button[aria-pressed="true"]::after { content: ""; position: absolute; left: -6px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%;
+    background: radial-gradient(circle at 50% 40%, #1a1917, #3b3833 70%, rgba(255,255,255,.2)); }
+  .tools hr { border: 0; border-top: 1px solid rgba(40,37,33,.25); box-shadow: 0 1px 0 var(--engrave-light); margin: 6px 8px; }
+  .tools .tl { font-size: 8px; letter-spacing: .2em; color: var(--muted); text-shadow: 0 1px 0 var(--engrave-light); }
+
+  /* Muro derecho */
+  .wall-right { grid-area: right; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
+  .glyph { background: none; border: 0; cursor: pointer; color: var(--muted); padding: 6px; }
+  .glyph .vt { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 10px; letter-spacing: .4em; text-shadow: 0 1px 0 var(--engrave-light); }
+  .glyph:hover, .glyph[aria-pressed="true"] { color: var(--fg); }
+  .glyph.dot { width: 22px; height: 22px; padding: 0; display: grid; place-items: center; }
+  .glyph.dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #1a1917, #3b3833 70%, rgba(255,255,255,.2)); transition: transform .15s; }
+  .glyph.dot:hover::before { transform: scale(1.5); }
+
+  /* Losa de propiedades: sale del muro, cantos rectos */
+  .panel, .app.auto .panel {
+    position: fixed; top: 58px; bottom: 34px; right: 56px; width: 300px; z-index: 30; grid-area: auto;
+    background: linear-gradient(rgba(226,224,219,.55), rgba(226,224,219,.55)), var(--panel) var(--concrete-slab); background-size: auto, 700px 700px;
+    border: 0; border-left: 3px solid var(--steel); border-radius: 0;
+    box-shadow: -24px 0 40px -20px rgba(0,0,0,.45);
+    transform: translateX(calc(100% + 60px)); transition: transform .22s cubic-bezier(.2,.7,.2,1);
+  }
+  .app.auto .panel.show, .app:not(.auto) .panel { transform: none; }
+  .panel-head { background: transparent; border-bottom: 1px solid var(--line); }
+  .panel-head span { font-weight: 400; letter-spacing: .3em; text-transform: uppercase; font-size: 11px; }
+  .sec { border-bottom: 1px solid var(--line); }
+  .sec h2 { font-weight: 500; letter-spacing: .22em; font-size: 10px; color: var(--muted); }
+  .iconbtn, .btn, .coord, select.sel, .grid4 select, .grid4 input { border-radius: 0; }
+  .btn { background: rgba(255,255,255,.35); border-color: rgba(40,37,33,.25); letter-spacing: .06em; }
+  .btn:hover { border-color: var(--steel); }
+  .btn.primary { background: var(--steel); border-color: var(--steel); color: #e9e7e2; }
+  .coord, select.sel, .grid4 select, .grid4 input { background: rgba(255,255,255,.4); }
+  .mat img, .mat .ph { border-radius: 0; }
+  .mat[aria-pressed="true"] img { box-shadow: 0 0 0 2px var(--steel); }
+  .ol-item, .ol-eye { border-radius: 0; }
+  .ol-item.sel { background: rgba(40,37,33,.1); }
+  input[type="range"], .check input { accent-color: var(--steel); }
+
+  /* Barra de estado grabada en el zócalo */
+  .status { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); text-shadow: 0 1px 0 var(--engrave-light);
+    padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px)); }
+  .status .dot { background: var(--steel); border-radius: 50%; }
+  #st-snap { color: #2f6b47 !important; }
+
+  /* Elementos flotantes sobre la vista: placas finas, sin redondeos */
+  .hint, .toast, .drawbar, .navhint { border-radius: 0; background: rgba(214,212,207,.92); border: 1px solid rgba(40,37,33,.3); color: var(--fg); }
+  .hint { letter-spacing: .04em; }
+  .navhint { border-color: var(--steel); }
+  .drawbar { border-color: var(--steel); }
+  .radial .ring { border-radius: 50%; background: radial-gradient(circle, rgba(214,212,207,.75) 0 34%, rgba(214,212,207,.35) 35% 100%); border: 1px solid rgba(40,37,33,.3); }
+  .radial .item { border-radius: 0; background: rgba(222,220,215,.96); border: 1px solid rgba(40,37,33,.3); color: var(--fg); letter-spacing: .04em; }
+  .radial .item.on { background: var(--steel); border-color: var(--steel); color: #ecebe7; }
+  .radial .item.on kbd { color: #b9b6af; }
+  .legend .bar { border-radius: 0; }
+  .marquee { border-color: var(--steel); background: rgba(31,30,28,.08); }
+
+  /* Sin marcos: todo limpio sobre el hormigón */
+  .view { outline: 0; box-shadow: none; margin: 0; }
+  .pane.right { border-left: 0; }
+  .panel, .app.auto .panel { border: 0; box-shadow: none; }
+  .panel-head, .sec { border: 0; }
+  .btn, .coord, select.sel, .grid4 select, .grid4 input, .iconbtn { border-color: transparent; }
+  .btn { background: rgba(255,255,255,.45); }
+  .btn:hover { border-color: transparent; background: rgba(255,255,255,.7); }
+  .hint, .toast, .drawbar, .navhint { border: 0; background: rgba(214,212,207,.82); }
+  .radial .ring { border: 0; }
+  .radial .item { border: 0; }
+  .tools button:hover:not(:disabled) { box-shadow: none; }
+  .tools hr { box-shadow: none; border-top-color: transparent; }
+  .mat[aria-pressed="true"] img { box-shadow: none; outline: 0; }
+  .mat[aria-pressed="true"] { color: var(--fg); font-weight: 500; }
 </style>
 </head>
 <body>
 <div class="app auto" id="app">
   <header class="top">
-    <div class="brand">
-      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 17c4-9 14-9 18 0" stroke="#f0a63a" stroke-width="2" stroke-linecap="round"/><circle cx="3" cy="17" r="2" fill="#57b6ff"/><circle cx="12" cy="7.5" r="2" fill="#57b6ff"/><circle cx="21" cy="17" r="2" fill="#57b6ff"/></svg>
-      Forja Studio
-    </div>
+    <div class="brand"><span class="wordmark">FORJA</span><span class="sub">studio</span></div>
     <span class="file">capo_concepto.forja</span>
     <span class="lbl">Seleccionar</span>
     <div class="seg pick" role="group" aria-label="Qué seleccionar">
@@ -217,17 +330,39 @@
     </div>
     <span class="lbl">Snap</span>
     <div class="seg snap" role="group" aria-label="Snap fijo">
-      <button id="snap-grid" data-snap="grid" aria-pressed="false" title="Snap a la rejilla. Momentáneo: mantener Alt">Rejilla <kbd>Alt</kbd></button>
-      <button id="snap-curve" data-snap="curve" aria-pressed="false" title="Snap a curvas y bordes. Momentáneo: mantener Ctrl+Alt">Curva <kbd>Ctrl+Alt</kbd></button>
-      <button id="snap-point" data-snap="point" aria-pressed="false" title="Snap a puntos: CVs, pivotes, extremos, esquinas. Momentáneo: mantener Ctrl">Punto <kbd>Ctrl</kbd></button>
+      <button id="snap-grid" data-snap="grid" aria-pressed="false" title="Snap a la rejilla. Momentáneo: mantener Alt">Rejilla</button>
+      <button id="snap-curve" data-snap="curve" aria-pressed="false" title="Snap a curvas y bordes. Momentáneo: mantener Ctrl+Alt">Curva</button>
+      <button id="snap-point" data-snap="point" aria-pressed="false" title="Snap a puntos: CVs, pivotes, extremos, esquinas. Momentáneo: mantener Ctrl">Punto</button>
     </div>
     <div class="seg lay" role="group" aria-label="Distribución de la vista">
       <button id="lay-split" data-layout="split" aria-pressed="true" title="Diagnóstico y render lado a lado (V)">Dividida</button>
       <button id="lay-diag" data-layout="diag" aria-pressed="false" title="Solo diagnóstico (V)">Diagnóstico</button>
       <button id="lay-render" data-layout="render" aria-pressed="false" title="Solo render (V)">Render</button>
     </div>
-    <span class="tag">DEMO v0.6.1</span>
+    <span class="tag">v0.7 · propuesta</span>
   </header>
+
+  <nav class="tools" id="tools" aria-label="Herramientas">
+      <button id="t-select" aria-pressed="true" title="Seleccionar (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 8-6 1.5L10 19z"/></svg></button>
+      <button id="t-move" aria-pressed="true" title="Mover (W)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></button>
+      <button id="t-rotate" aria-pressed="false" title="Rotar alrededor del pivote (E)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-3-6.2"/><path d="M20 4v5h-5"/></svg></button>
+      <button id="t-scale" aria-pressed="false" title="Escalar desde el pivote (R)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="10" height="10"/><path d="M13 4h7v7M20 4l-8 8"/></svg></button>
+      <button id="t-pivot" aria-pressed="false" title="Editar pivote del objeto (D)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>
+      <button id="t-frame" title="Encuadrar selección (F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg></button>
+      <button id="t-top" title="Vista superior (T)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></svg></button>
+      <hr>
+      <span class="tl">CREAR</span>
+      <button id="t-curve" aria-pressed="false" title="Dibujar curva NURBS (C)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18C7 4 17 20 21 6"/></svg></button>
+      <button id="t-plane" aria-pressed="false" title="Superficie plana: clic para colocarla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16l6-9h12l-6 9z"/></svg></button>
+      <button id="t-loft" title="Loft: superficie que pasa por 2 o más curvas seleccionadas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18c3-4 6-4 9-2s5 1 7-2M4 12c3-4 6-4 9-2s5 1 7-2M4 6c3-4 6-4 9-2s5 1 7-2"/></svg></button>
+      <button id="t-extrude" title="Extruir curvas seleccionadas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18c4-3 8 1 12-2M8 6c4-3 8 1 12-2M4 18l4-12M16 16l4-12"/></svg></button>
+      <button id="t-revolve" title="Revolución de una curva alrededor del eje Y"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><ellipse cx="12" cy="12" rx="8" ry="3"/><path d="M15 6c2 2 2 9 0 12"/></svg></button>
+      <hr>
+      <span class="tl">SÓLIDOS</span>
+      <button disabled title="Redondeo / fillet (próxima versión, con OpenCASCADE)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V12a8 8 0 0 1 8-8h8"/></svg></button>
+      <button disabled title="Chaflán (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10l6-6h10"/></svg></button>
+      <button disabled title="Booleanas (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg></button>
+    </nav>
 
   <main class="view" id="view">
     <div class="loading" id="loading">Cargando motor 3D…</div>
@@ -253,27 +388,6 @@
       <div class="ring"></div>
       <div class="center" id="radial-center">Suelta sobre una opción</div>
     </div>
-    <nav class="tools" id="tools" aria-label="Herramientas">
-      <button id="t-select" aria-pressed="true" title="Seleccionar (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 8-6 1.5L10 19z"/></svg></button>
-      <button id="t-move" aria-pressed="true" title="Mover (W)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/></svg></button>
-      <button id="t-rotate" aria-pressed="false" title="Rotar alrededor del pivote (E)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-3-6.2"/><path d="M20 4v5h-5"/></svg></button>
-      <button id="t-scale" aria-pressed="false" title="Escalar desde el pivote (R)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="10" height="10"/><path d="M13 4h7v7M20 4l-8 8"/></svg></button>
-      <button id="t-pivot" aria-pressed="false" title="Editar pivote del objeto (D)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>
-      <button id="t-frame" title="Encuadrar selección (F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg></button>
-      <button id="t-top" title="Vista superior (T)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></svg></button>
-      <hr>
-      <span class="tl">CREAR</span>
-      <button id="t-curve" aria-pressed="false" title="Dibujar curva NURBS (C)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18C7 4 17 20 21 6"/></svg></button>
-      <button id="t-plane" aria-pressed="false" title="Superficie plana: clic para colocarla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16l6-9h12l-6 9z"/></svg></button>
-      <button id="t-loft" title="Loft: superficie que pasa por 2 o más curvas seleccionadas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18c3-4 6-4 9-2s5 1 7-2M4 12c3-4 6-4 9-2s5 1 7-2M4 6c3-4 6-4 9-2s5 1 7-2"/></svg></button>
-      <button id="t-extrude" title="Extruir curvas seleccionadas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18c4-3 8 1 12-2M8 6c4-3 8 1 12-2M4 18l4-12M16 16l4-12"/></svg></button>
-      <button id="t-revolve" title="Revolución de una curva alrededor del eje Y"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><ellipse cx="12" cy="12" rx="8" ry="3"/><path d="M15 6c2 2 2 9 0 12"/></svg></button>
-      <hr>
-      <span class="tl">SÓLIDOS</span>
-      <button disabled title="Redondeo / fillet (próxima versión, con OpenCASCADE)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V12a8 8 0 0 1 8-8h8"/></svg></button>
-      <button disabled title="Chaflán (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10l6-6h10"/></svg></button>
-      <button disabled title="Booleanas (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg></button>
-    </nav>
     <div class="drawbar" id="drawbar" hidden>
       <span id="draw-msg"></span>
       <button class="btn primary" id="draw-done">Terminar curva</button>
@@ -288,9 +402,14 @@
     <div class="marquee" id="marquee" hidden></div>
     <div class="toast" id="toast" hidden></div>
     <div class="hint" id="hint"></div>
-    <div class="edge-tab" aria-hidden="true"></div>
-    <div class="edge-tab l" aria-hidden="true"></div>
   </main>
+
+  <div class="wall-right" aria-label="Menús">
+    <button class="glyph" id="open-panel" title="Propiedades"><span class="vt">PROPIEDADES</span></button>
+    <button class="glyph dot" data-goto="sec-scene" title="Escena"></button>
+    <button class="glyph dot" data-goto="sec-mat" title="Materiales"></button>
+    <button class="glyph dot" data-goto="sec-analysis" title="Análisis"></button>
+  </div>
 
   <aside class="panel" id="panel" aria-label="Propiedades">
     <div class="panel-head">
@@ -299,7 +418,7 @@
     </div>
 
     <section class="sec">
-      <h2>Escena · <span id="scene-count"></span></h2>
+      <h2 id="sec-scene">Escena · <span id="scene-count"></span></h2>
       <ul class="outliner" id="outliner"></ul>
     </section>
 
@@ -320,7 +439,7 @@
     </section>
 
     <section class="sec">
-      <h2>Materiales</h2>
+      <h2 id="sec-mat">Materiales</h2>
       <div class="matlib" id="matlib"></div>
       <div class="row"><label for="rough">Rugosidad</label><input id="rough" type="range" min="0" max="1" step="0.01" value="0.35"><output id="rough-o">0.35</output></div>
       <p class="muted">Se aplica a las superficies seleccionadas; si no hay ninguna, a todas.</p>
@@ -337,7 +456,7 @@
     </section>
 
     <section class="sec">
-      <h2>Análisis</h2>
+      <h2 id="sec-analysis">Análisis</h2>
       <div class="row"><label for="zfreq">Franjas cebra</label><input id="zfreq" type="range" min="4" max="40" step="1" value="14"><output id="zfreq-o">14</output></div>
       <label class="check"><input type="checkbox" id="show-comb" checked> Peine de curvatura</label>
       <div class="row"><label for="comb">Escala peine</label><input id="comb" type="range" min="0.1" max="4" step="0.1" value="0.8"><output id="comb-o">0.8</output></div>

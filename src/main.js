@@ -6,6 +6,9 @@ import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import * as N from './nurbs.js';
+import { applyConcrete } from './concrete.js';
+
+applyConcrete();
 
 const $ = (id) => document.getElementById(id);
 const view = $('view');
@@ -23,11 +26,11 @@ view.prepend(renderer.domElement);
 $('loading').remove();
 
 const scene = new THREE.Scene();
-const diagBg = new THREE.Color('#14171b');
+const diagBg = new THREE.Color('#b9b8b4');
 const renderBg = (() => {
   const c = document.createElement('canvas'); c.width = 16; c.height = 256;
   const g = c.getContext('2d'), grd = g.createLinearGradient(0, 0, 0, 256);
-  grd.addColorStop(0, '#2b3038'); grd.addColorStop(0.6, '#1a1d22'); grd.addColorStop(1, '#101215');
+  grd.addColorStop(0, '#e4e6e5'); grd.addColorStop(0.55, '#d6d6d3'); grd.addColorStop(1, '#bcbab5');
   g.fillStyle = grd; g.fillRect(0, 0, 16, 256);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 })();
@@ -49,7 +52,7 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.ShadowM
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
-const grid = new THREE.GridHelper(30, 30, 0x3a414a, 0x23282e);
+const grid = new THREE.GridHelper(30, 30, 0x8a8781, 0xa3a09a);
 grid.position.y = 0.001;
 grid.layers.set(DIAG);
 scene.add(grid);
@@ -196,7 +199,7 @@ function makeCross(color, size, withBall) {
   g.children.forEach((c) => (c.renderOrder = 20));
   return g;
 }
-const pivotMarker = makeCross('#f0a63a', 0.5, true);
+const pivotMarker = makeCross('#e07a1f', 0.5, true);
 pivotMarker.visible = false;
 scene.add(pivotMarker);
 let pivotShowUntil = 0;
@@ -245,22 +248,22 @@ const zebraMat = new THREE.ShaderMaterial({
 });
 zebraMat.extensions = { derivatives: true };
 const curvMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
-const wireMat = new THREE.MeshBasicMaterial({ color: '#57b6ff', wireframe: true, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
+const wireMat = new THREE.MeshBasicMaterial({ color: '#2d6aa8', wireframe: true, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
 
 const lineMats = [];
 const LM = (o) => { const m = new LineMaterial(o); lineMats.push(m); return m; };
-const curveMat = LM({ color: 0xe9edf2, linewidth: 2.5 });
-const curveSelMat = LM({ color: 0xf0a63a, linewidth: 3 });
-const draftMat = LM({ color: 0xf0a63a, linewidth: 2 });
-const edgeSelMat = LM({ color: 0xf0a63a, linewidth: 2.5 });
+const curveMat = LM({ color: 0x2b2a27, linewidth: 2.5 });
+const curveSelMat = LM({ color: 0xe07a1f, linewidth: 3 });
+const draftMat = LM({ color: 0xe07a1f, linewidth: 2 });
+const edgeSelMat = LM({ color: 0xe07a1f, linewidth: 2.5 });
 const isoMat = new THREE.LineBasicMaterial({ color: '#0b0d10', transparent: true, opacity: 0.35 });
-const isoSelMat = new THREE.LineBasicMaterial({ color: '#f0a63a', transparent: true, opacity: 0.75 });
-const hullMat = new THREE.LineDashedMaterial({ color: '#57b6ff', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.7 });
-const combMat = new THREE.LineBasicMaterial({ color: '#f0a63a', transparent: true, opacity: 0.55 });
-const envMat = new THREE.LineBasicMaterial({ color: '#f0a63a' });
+const isoSelMat = new THREE.LineBasicMaterial({ color: '#e07a1f', transparent: true, opacity: 0.75 });
+const hullMat = new THREE.LineDashedMaterial({ color: '#2d6aa8', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.7 });
+const combMat = new THREE.LineBasicMaterial({ color: '#e07a1f', transparent: true, opacity: 0.55 });
+const envMat = new THREE.LineBasicMaterial({ color: '#e07a1f' });
 const handleGeo = new THREE.SphereGeometry(0.075, 16, 12);
-const handleMat = new THREE.MeshBasicMaterial({ color: '#57b6ff', depthTest: false, transparent: true });
-const handleSelMat = new THREE.MeshBasicMaterial({ color: '#f0a63a', depthTest: false, transparent: true });
+const handleMat = new THREE.MeshBasicMaterial({ color: '#2d6aa8', depthTest: false, transparent: true });
+const handleSelMat = new THREE.MeshBasicMaterial({ color: '#e07a1f', depthTest: false, transparent: true });
 
 let diagMode = 'zebra', layout = 'split', matKey = 'paint', res = 90, combScale = 0.8;
 
@@ -691,7 +694,7 @@ function applySnapToProxy(ex) {
   if (modes.grid) { snapGrid(proxy.position, null); showSnap({ point: proxy.position, kind: 'rejilla' }); return; }
   hideSnap();
 }
-const snapRing = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.15, 28), new THREE.MeshBasicMaterial({ color: '#7cf0a0', depthTest: false, transparent: true, side: THREE.DoubleSide }));
+const snapRing = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.15, 28), new THREE.MeshBasicMaterial({ color: '#2f8a57', depthTest: false, transparent: true, side: THREE.DoubleSide }));
 snapRing.renderOrder = 30; snapRing.visible = false;
 scene.add(snapRing);
 function showSnap(s) { snapRing.position.copy(s.point); snapRing.visible = true; $('st-snap').textContent = `Snap: ${s.kind}`; }
@@ -702,7 +705,7 @@ const objPivotMarkers = new THREE.Group();
 scene.add(objPivotMarkers);
 function syncPivotMarkers() {
   const list = pickMode === 'object' ? selObjs.filter((o) => o.visible) : [];
-  while (objPivotMarkers.children.length < list.length) objPivotMarkers.add(makeCross('#57b6ff', 0.35, false));
+  while (objPivotMarkers.children.length < list.length) objPivotMarkers.add(makeCross('#2d6aa8', 0.35, false));
   objPivotMarkers.children.forEach((m, i) => {
     m.visible = i < list.length;
     if (m.visible) { m.position.copy(list[i].pivot); m.scale.setScalar(camera.position.distanceTo(list[i].pivot) * 0.05); }
@@ -1008,11 +1011,16 @@ function setPinned(v) {
   requestAnimationFrame(resize);
 }
 $('pin').addEventListener('click', () => setPinned(!pinned));
+$('open-panel').addEventListener('click', () => { if (!pinned) $('panel').classList.toggle('show'); });
+document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => {
+  $('panel').classList.add('show');
+  $(b.dataset.goto).scrollIntoView({ block: 'start', behavior: 'smooth' });
+}));
 addEventListener('pointermove', (e) => {
   if (pinned) return;
   const r = view.getBoundingClientRect(), panel = $('panel'), tools = $('tools');
   const busy = e.buttons !== 0;
-  if (e.clientX > r.right - 18 && e.clientY > r.top && e.clientY < r.bottom) panel.classList.add('show');
+  if (e.clientX > r.right + 8 && e.clientY > r.top && e.clientY < r.bottom) panel.classList.add('show');
   else if (!busy && panel.classList.contains('show') && e.clientX < r.right - panel.offsetWidth - 40) panel.classList.remove('show');
   if (e.clientX < r.left + 64 && e.clientY > r.top && e.clientY < r.bottom) tools.classList.add('show');
   else if (!busy && e.clientX > r.left + 140) tools.classList.remove('show');
@@ -1198,7 +1206,7 @@ function buildMaterialLibrary() {
   requestAnimationFrame(() => {
     const tr = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     tr.setSize(128, 128); tr.toneMapping = THREE.ACESFilmicToneMapping;
-    const ts = new THREE.Scene(); ts.background = new THREE.Color('#1b1f24');
+    const ts = new THREE.Scene(); ts.background = new THREE.Color('#cfcdc8');
     ts.environment = new THREE.PMREMGenerator(tr).fromScene(new RoomEnvironment(tr), 0.04).texture;
     const l = new THREE.DirectionalLight(0xffffff, 1.4); l.position.set(2, 3, 2); ts.add(l);
     const tc = new THREE.PerspectiveCamera(30, 1, 0.1, 10); tc.position.set(0, 0.25, 3.9); tc.lookAt(0, 0, 0);
@@ -1318,7 +1326,7 @@ RADIAL.forEach((it, n) => {
   const b = document.createElement('button');
   b.className = 'item';
   b.innerHTML = it.key ? `${it.label}<kbd>${it.key}</kbd>` : it.label;
-  b.style.left = Math.cos(a) * 165 + 'px'; b.style.top = Math.sin(a) * 120 + 'px';
+  b.style.left = Math.cos(a) * 185 + 'px'; b.style.top = Math.sin(a) * 120 + 'px';
   b.addEventListener('pointerenter', () => highlightRadial(n));
   b.addEventListener('click', () => { radialPick = n; closeRadial(true); });
   radialEl.append(b);
@@ -1343,7 +1351,7 @@ addEventListener('pointermove', (e) => {
   if (!radialOn) return;
   const dx = e.clientX - radialAt.x, dy = e.clientY - radialAt.y;
   if (Math.hypot(dx, dy) < 30) return highlightRadial(-1);
-  const a = Math.atan2(dy / 120, dx / 165) - ROFF;
+  const a = Math.atan2(dy / 120, dx / 185) - ROFF;
   highlightRadial(Math.round(((a + Math.PI * 4) % (Math.PI * 2)) / RSTEP) % RADIAL.length);
 });
 let radialByMouse = false;
