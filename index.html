@@ -76,6 +76,12 @@
   .tools hr { border: 0; border-top: 1px solid var(--line); margin: 3px 4px; }
   .vlabel { position: absolute; left: 12px; top: 10px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .04em; }
   .hint { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); font-size: 11px; color: var(--muted); background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; white-space: nowrap; }
+  .db-group { display: inline-flex; align-items: center; gap: 2px; }
+  .db-group b { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; font-weight: 600; margin-right: 4px; opacity: .7; }
+  .db-group button { border: 0; background: rgba(127,127,127,.16); color: var(--fg); font: inherit; font-size: 11.5px; padding: 4px 8px; cursor: pointer; }
+  .db-group button:first-of-type { border-radius: 5px 0 0 5px; } .db-group button:last-of-type { border-radius: 0 5px 5px 0; }
+  .db-group button[aria-pressed="true"] { background: #2f7bff; color: #fff; }
+  .db-group button.held { box-shadow: inset 0 0 0 1.5px #2f7bff; }
   .drawbar {
     position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
     display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px;
@@ -435,7 +441,7 @@
   .seg button, .seg.small button { white-space: nowrap; }
   .pane-head { flex-wrap: nowrap; }
   /* la losa de propiedades tapa lo que queda detrás, con un velo del fondo, sin marcos */
-  .panel, .app.auto .panel { background: color-mix(in srgb, var(--bg) 86%, transparent); backdrop-filter: blur(12px); scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 60%, transparent) transparent; }
+  .panel, .app.auto .panel { background: transparent; backdrop-filter: none; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--muted) 60%, transparent) transparent; }
   .panel::-webkit-scrollbar { width: 6px; } .panel::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--muted) 55%, transparent); }
   .panel::-webkit-scrollbar-track { background: transparent; }
   /* en pantallas de portátil se esconden los rótulos que no son imprescindibles */
@@ -537,11 +543,20 @@
      bordes difuminados (como un filtro de foto) y los ajustes encima --- */
   .toolwin { position: fixed; left: 84px; top: 96px; z-index: 45; width: 272px; padding: 16px 20px 18px; color: var(--fg); }
   .toolwin[hidden], .quickpick[hidden] { display: none; }
-  .toolwin::before, .quickpick::before { content: ""; position: absolute; inset: -22px; z-index: -1; pointer-events: none;
-    backdrop-filter: blur(16px) saturate(1.05); -webkit-backdrop-filter: blur(16px) saturate(1.05);
-    background: color-mix(in srgb, var(--bg) 88%, transparent);
-    -webkit-mask-image: radial-gradient(closest-side, #000 78%, transparent 100%); mask-image: radial-gradient(closest-side, #000 78%, transparent 100%);
-    -webkit-mask-size: 100% 100%; mask-size: 100% 100%; }
+  /* Velo desenfocado "gaussiano": desenfoque + tinte del fondo al 50 % y una máscara que es el desenfoque gaussiano de un
+     rectángulo (producto de dos rampas erf): no se nota ninguna forma. Lo usan la ventana de herramienta, la elección
+     rápida, el panel derecho y el Puck. El texto encima cambia a negro o blanco (adaptInk, con data-ink-tint). */
+  .soft-veil, .toolwin::before, .quickpick::before { --soft: 46px;
+    backdrop-filter: blur(18px) saturate(1.05); -webkit-backdrop-filter: blur(18px) saturate(1.05);
+    background: color-mix(in srgb, var(--bg) 50%, transparent);
+    -webkit-mask-image: linear-gradient(to right, transparent 0, rgba(0,0,0,.02) calc(var(--soft) * .06), rgba(0,0,0,.07) calc(var(--soft) * .19), rgba(0,0,0,.16) calc(var(--soft) * .31), rgba(0,0,0,.31) calc(var(--soft) * .44), rgba(0,0,0,.5) calc(var(--soft) * .56), rgba(0,0,0,.69) calc(var(--soft) * .69), rgba(0,0,0,.84) calc(var(--soft) * .81), rgba(0,0,0,.93) calc(var(--soft) * .9), #000 var(--soft), #000 calc(100% - var(--soft)), rgba(0,0,0,.93) calc(100% - var(--soft) * .9), rgba(0,0,0,.84) calc(100% - var(--soft) * .81), rgba(0,0,0,.69) calc(100% - var(--soft) * .69), rgba(0,0,0,.5) calc(100% - var(--soft) * .56), rgba(0,0,0,.31) calc(100% - var(--soft) * .44), rgba(0,0,0,.16) calc(100% - var(--soft) * .31), rgba(0,0,0,.07) calc(100% - var(--soft) * .19), rgba(0,0,0,.02) calc(100% - var(--soft) * .06), transparent 100%), linear-gradient(to bottom, transparent 0, rgba(0,0,0,.02) calc(var(--soft) * .06), rgba(0,0,0,.07) calc(var(--soft) * .19), rgba(0,0,0,.16) calc(var(--soft) * .31), rgba(0,0,0,.31) calc(var(--soft) * .44), rgba(0,0,0,.5) calc(var(--soft) * .56), rgba(0,0,0,.69) calc(var(--soft) * .69), rgba(0,0,0,.84) calc(var(--soft) * .81), rgba(0,0,0,.93) calc(var(--soft) * .9), #000 var(--soft), #000 calc(100% - var(--soft)), rgba(0,0,0,.93) calc(100% - var(--soft) * .9), rgba(0,0,0,.84) calc(100% - var(--soft) * .81), rgba(0,0,0,.69) calc(100% - var(--soft) * .69), rgba(0,0,0,.5) calc(100% - var(--soft) * .56), rgba(0,0,0,.31) calc(100% - var(--soft) * .44), rgba(0,0,0,.16) calc(100% - var(--soft) * .31), rgba(0,0,0,.07) calc(100% - var(--soft) * .19), rgba(0,0,0,.02) calc(100% - var(--soft) * .06), transparent 100%); mask-image: linear-gradient(to right, transparent 0, rgba(0,0,0,.02) calc(var(--soft) * .06), rgba(0,0,0,.07) calc(var(--soft) * .19), rgba(0,0,0,.16) calc(var(--soft) * .31), rgba(0,0,0,.31) calc(var(--soft) * .44), rgba(0,0,0,.5) calc(var(--soft) * .56), rgba(0,0,0,.69) calc(var(--soft) * .69), rgba(0,0,0,.84) calc(var(--soft) * .81), rgba(0,0,0,.93) calc(var(--soft) * .9), #000 var(--soft), #000 calc(100% - var(--soft)), rgba(0,0,0,.93) calc(100% - var(--soft) * .9), rgba(0,0,0,.84) calc(100% - var(--soft) * .81), rgba(0,0,0,.69) calc(100% - var(--soft) * .69), rgba(0,0,0,.5) calc(100% - var(--soft) * .56), rgba(0,0,0,.31) calc(100% - var(--soft) * .44), rgba(0,0,0,.16) calc(100% - var(--soft) * .31), rgba(0,0,0,.07) calc(100% - var(--soft) * .19), rgba(0,0,0,.02) calc(100% - var(--soft) * .06), transparent 100%), linear-gradient(to bottom, transparent 0, rgba(0,0,0,.02) calc(var(--soft) * .06), rgba(0,0,0,.07) calc(var(--soft) * .19), rgba(0,0,0,.16) calc(var(--soft) * .31), rgba(0,0,0,.31) calc(var(--soft) * .44), rgba(0,0,0,.5) calc(var(--soft) * .56), rgba(0,0,0,.69) calc(var(--soft) * .69), rgba(0,0,0,.84) calc(var(--soft) * .81), rgba(0,0,0,.93) calc(var(--soft) * .9), #000 var(--soft), #000 calc(100% - var(--soft)), rgba(0,0,0,.93) calc(100% - var(--soft) * .9), rgba(0,0,0,.84) calc(100% - var(--soft) * .81), rgba(0,0,0,.69) calc(100% - var(--soft) * .69), rgba(0,0,0,.5) calc(100% - var(--soft) * .56), rgba(0,0,0,.31) calc(100% - var(--soft) * .44), rgba(0,0,0,.16) calc(100% - var(--soft) * .31), rgba(0,0,0,.07) calc(100% - var(--soft) * .19), rgba(0,0,0,.02) calc(100% - var(--soft) * .06), transparent 100%);
+    -webkit-mask-composite: source-in; mask-composite: intersect; }
+  .toolwin::before, .quickpick::before { content: ""; position: absolute; inset: -40px; z-index: -1; pointer-events: none; }
+  .soft-veil { position: fixed; pointer-events: none; z-index: 29; --soft: 56px; }
+  .soft-veil[hidden] { display: none; }
+  .cube-probe { position: fixed; pointer-events: none; z-index: -1; }
+  /* dentro de los velos, los botones activos (azules) siguen con texto blanco aunque el resto pase a negro */
+  :is(.ink-dark, .ink-light) :is([aria-pressed="true"], .primary) { color: #fff !important; }
   .tw-head { display: flex; align-items: center; gap: 8px; cursor: grab; user-select: none; touch-action: none; margin-bottom: 8px; }
   .tw-head b { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tw-x { width: 22px; height: 22px; border: 0; background: none; color: var(--fg); font-size: 18px; line-height: 1; cursor: pointer; opacity: .7; }
@@ -565,6 +580,9 @@
   .tw-group button { border: 0; background: none; color: var(--fg); font: inherit; font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
     padding: 4px 0 0; cursor: pointer; width: 100%; text-align: left; border-top: 1px solid rgba(127,127,127,.25); }
   /* etiquetas de la herramienta en la vista (Lado 1, Inicio [..]...) */
+  .proj-btn { position: fixed; transform: translateX(-50%); z-index: 30; border: 0; background: none; color: var(--fg); cursor: pointer;
+    font: inherit; font-size: 10.5px; font-weight: 600; letter-spacing: .14em; padding: 3px 6px; }
+  .proj-btn[aria-pressed="true"] { color: #2f7bff !important; }
   #rel-labels { position: fixed; inset: 0; pointer-events: none; z-index: 30; }
   .rel-label { position: fixed; transform: translate(10px, -50%); font-size: 11px; font-weight: 500; white-space: nowrap; color: var(--fg);
     padding-left: 10px; border-left: 1.5px solid #2f7bff; }
@@ -663,8 +681,10 @@
   .ol-group.sel > .ol-gh .ol-name { color: #2f7bff; }
   .ol-group small { color: var(--muted); font-family: var(--font-mono); font-size: 9px; }
   .puck { position: fixed; width: 0; height: 0; z-index: 70; pointer-events: none; }
-  .puck::before { content: ""; position: absolute; left: -330px; top: -200px; width: 660px; height: 400px; border-radius: 50%;
-    background: radial-gradient(closest-side, color-mix(in srgb, var(--bg) 82%, transparent) 0 58%, transparent 100%); backdrop-filter: blur(2px); }
+  .puck::before { content: ""; position: absolute; left: -380px; top: -240px; width: 760px; height: 480px;
+    background: color-mix(in srgb, var(--bg) 50%, transparent); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    --g: radial-gradient(closest-side, #000 0, rgba(0,0,0,.98) 20%, rgba(0,0,0,.9) 35%, rgba(0,0,0,.75) 48%, rgba(0,0,0,.55) 60%, rgba(0,0,0,.35) 71%, rgba(0,0,0,.18) 81%, rgba(0,0,0,.07) 90%, transparent 100%);
+    -webkit-mask-image: var(--g); mask-image: var(--g); }
   .puck-lines { position: absolute; overflow: visible; pointer-events: none; }
   .puck-lines ellipse { fill: none; stroke: color-mix(in srgb, var(--fg) 16%, transparent); stroke-width: 1; }
   .puck-lines ellipse.outer { stroke-dasharray: 2 5; stroke: color-mix(in srgb, var(--fg) 10%, transparent); }
@@ -781,6 +801,10 @@
     </div>
     <div class="drawbar" id="drawbar" hidden>
       <span id="draw-msg"></span>
+      <span class="db-group" title="Plano donde se dibuja. Vista: depende de la vista (arriba = suelo, frente = XY, lado = YZ; en perspectiva, en el aire)"><b>Plano</b>
+        <button data-plane="auto" aria-pressed="true">Vista</button><button data-plane="xz" aria-pressed="false">Suelo</button><button data-plane="xy" aria-pressed="false">Frente</button><button data-plane="yz" aria-pressed="false">Lado</button></span>
+      <span class="db-group"><b>Snap</b>
+        <button data-snapbtn="grid" aria-pressed="false" title="Rejilla · mantener Alt">Rejilla</button><button data-snapbtn="point" aria-pressed="false" title="Puntos: CVs, extremos, esquinas · mantener Ctrl">Punto</button><button data-snapbtn="curve" aria-pressed="false" title="Curvas, aristas y líneas de parche · mantener Ctrl+Alt">Curva</button><button data-snapbtn="surface" aria-pressed="false" title="Sobre superficies · mantener Shift">Superficie</button></span>
       <button class="btn primary" id="draw-done">Terminar curva</button>
       <button class="btn" id="draw-cancel">Cancelar</button>
     </div>
@@ -835,7 +859,7 @@
     </div>
   </section>
 
-  <aside class="panel" id="panel" aria-label="Propiedades">
+  <aside class="panel" id="panel" aria-label="Propiedades" data-ink-tint="0.5">
     <div class="panel-head">
       <span id="panel-title">Modelado</span>
       <button class="iconbtn" id="pin" aria-pressed="false" title="Panel automático: clic para fijarlo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 5 3 3H7l3-3zM12 15v6"/></svg></button>
@@ -930,11 +954,13 @@
     <section class="sec" data-module="diag">
       <h2>Dibujo</h2>
       <div class="seg small" role="group" aria-label="Plano de dibujo" style="margin-left:0; align-self:flex-start">
-        <button id="plane-xz" data-plane="xz" aria-pressed="true">Suelo (XZ)</button>
-        <button id="plane-xy" data-plane="xy" aria-pressed="false">Frontal (XY)</button>
+        <button data-plane="auto" aria-pressed="true">Según la vista</button>
+        <button id="plane-xz" data-plane="xz" aria-pressed="false">Suelo</button>
+        <button id="plane-xy" data-plane="xy" aria-pressed="false">Frente</button>
+        <button data-plane="yz" aria-pressed="false">Lado</button>
       </div>
       <div class="row"><label for="grid-step">Rejilla</label><select id="grid-step" class="sel"><option value="0.1">0.1 dm</option><option value="0.25" selected>0.25 dm</option><option value="0.5">0.5 dm</option><option value="1">1 dm</option></select><span></span></div>
-      <p class="muted">Snap al dibujar o mover: mantén Alt (rejilla), Ctrl (puntos) o Ctrl+Alt (curvas), o actívalos fijos arriba.</p>
+      <p class="muted">Según la vista: arriba = suelo, frente = XY, lado = YZ; en perspectiva, en el aire. Snap: Alt rejilla, Ctrl puntos, Ctrl+Alt curvas, aristas y líneas de parche, Shift superficies.</p>
     </section>
 
     <section class="sec" data-module="diag">
@@ -977,7 +1003,7 @@
     </div>
   </header>
 
-  <div class="toolwin" id="toolwin" hidden role="dialog" aria-label="Opciones de la herramienta">
+  <div class="toolwin" id="toolwin" data-ink-tint="0.5" hidden role="dialog" aria-label="Opciones de la herramienta">
     <div class="tw-head" id="tw-head"><b id="tw-title"></b><button class="tw-x" id="tw-close" title="Cerrar" aria-label="Cerrar">×</button></div>
     <div class="tw-body" id="tw-body"></div>
   </div>
@@ -1076,7 +1102,7 @@
     <span><span class="dot"></span>Listo</span>
     <span id="st-sel">Nada seleccionado</span>
     <span id="st-snap" style="color:#7cf0a0"></span>
-    <span class="r viewinfo" id="viewinfo"><span>PERSPECTIVA</span><span id="vi-shader">SHOWROOM</span><span id="vi-objs">—</span><span id="vi-cvs">—</span><span id="vi-sel">SIN SELECCIÓN</span><span id="st-scene">DM</span></span>
+    <span class="r viewinfo" id="viewinfo"><span id="vi-proj">PERSPECTIVA</span><span id="vi-shader">SHOWROOM</span><span id="vi-objs">—</span><span id="vi-cvs">—</span><span id="vi-sel">SIN SELECCIÓN</span><span id="st-scene">DM</span></span>
   </footer>
 </div>
 

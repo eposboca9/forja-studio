@@ -95,6 +95,22 @@ export const spansOf = (n, deg) => n - deg;
 
 // ---------- Creación de superficies ----------
 
+// Normal del plano de una curva: 'xz' suelo, 'xy' frente, 'yz' lado; 'free' (dibujada en el aire) = la del polígono de CVs
+export function curvePlaneNormal(c) {
+  if (c.plane === 'xy') return new THREE.Vector3(0, 0, 1);
+  if (c.plane === 'yz') return new THREE.Vector3(1, 0, 0);
+  if (c.plane === 'free') {
+    // método de Newell sobre el polígono cerrado de CVs
+    const n = new THREE.Vector3(), P = c.cvs;
+    for (let i = 0; i < P.length; i++) {
+      const a = P[i], b = P[(i + 1) % P.length];
+      n.x += (a.y - b.y) * (a.z + b.z); n.y += (a.z - b.z) * (a.x + b.x); n.z += (a.x - b.x) * (a.y + b.y);
+    }
+    if (n.lengthSq() > 1e-12) return n.normalize();
+  }
+  return new THREE.Vector3(0, 1, 0);
+}
+
 export function planeData(center, plane = 'xz', w = 4, h = 3) {
   const rows = [];
   for (let i = 0; i < 4; i++) {
@@ -103,6 +119,7 @@ export function planeData(center, plane = 'xz', w = 4, h = 3) {
       const a = (i / 3 - 0.5) * w, b = (j / 3 - 0.5) * h;
       row.push(plane === 'xz'
         ? new THREE.Vector4(center.x + a, center.y, center.z + b, 1)
+        : plane === 'yz' ? new THREE.Vector4(center.x, center.y + b, center.z - a, 1)
         : new THREE.Vector4(center.x + a, center.y + b, center.z, 1));
     }
     rows.push(row);

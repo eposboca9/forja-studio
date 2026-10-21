@@ -125,6 +125,30 @@ scene.environment = envTexture('studio');
 scene.backgroundBlurriness = 0.55;
 
 const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 400);
+// Proyección ortogonal (como Alias: al elegir una cara del cubo de vistas la vista se vuelve ortogonal y al girarla
+// vuelve a perspectiva). Es la misma cámara con otra matriz: el alto visible es el que tenía la perspectiva a la
+// profundidad del pivote, así el cambio no salta; acercar (dolly) hacia el pivote hace zoom.
+const proj = { ortho: false, temp: false, keep: false };
+const perspUpdate = camera.updateProjectionMatrix.bind(camera);
+camera.updateProjectionMatrix = function () {
+  if (!proj.ortho) return perspUpdate();
+  const h = orthoHeight(), w = h * this.aspect;
+  this.projectionMatrix.makeOrthographic(-w / 2, w / 2, h / 2, -h / 2, -400, 400);
+  this.projectionMatrixInverse.copy(this.projectionMatrix).invert();
+};
+function orthoHeight() {
+  const depth = Math.max(0.05, pivot.clone().sub(camera.position).dot(viewDir()));
+  return 2 * depth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+}
+// temp = la puso el cubo (girar la devuelve a perspectiva); keep = el usuario eligió trabajar siempre en ortogonal
+function setProjection(ortho, temp = false) {
+  proj.ortho = ortho || proj.keep;
+  proj.temp = proj.ortho && !proj.keep && temp;
+  camera.isOrthographicCamera = proj.ortho;
+  camera.isPerspectiveCamera = !proj.ortho;
+  camera.updateProjectionMatrix();
+  if (typeof updateViewName === 'function') updateViewName();
+}
 
 const key = new THREE.DirectionalLight(0xffffff, 1.6);
 key.position.set(4, 9, 3);
@@ -250,6 +274,7 @@ addEventListener('pointermove', (e) => {
   const dx = e.clientX - navDrag.x, dy = e.clientY - navDrag.y;
   if (!navDrag.moved && Math.hypot(dx, dy) < 3) return;
   navDrag.moved = true; navDrag.x = e.clientX; navDrag.y = e.clientY;
+  if (navDrag.mode === 'tumble' && proj.temp) setProjection(false);   // girar una vista del cubo vuelve a perspectiva
   const obj = tumbleMode === 'object' && navStyle === 'alias';
   if (navDrag.mode === 'tumble') obj ? tumbleObject(dx, dy, navDrag.pane) : tumble(dx, dy);
   else if (navDrag.mode === 'track') track(dx, dy, navDrag.pane);
@@ -662,15 +687,21 @@ function updateSurface(obj) {
   setGeo(p.mesh, geo);
   // Isoparamétricas en los límites de cada span, como en Alias (sin lo recortado)
   const iso = [], S = 60, t = new THREE.Vector3();
-  const seg = (uv) => {
+  obj.isoLines = [];   // polilíneas de cada isoparamétrica interior (para el snap de curva)
+  const seg = (uv, inner) => {
+    let line = null;
     for (let k = 0; k < S; k++) {
       const [u0, v0] = uv(k / S), [u1, v1] = uv((k + 1) / S);
-      if (rm && rm((u0 + u1) / 2, (v0 + v1) / 2)) continue;
-      s.getPoint(u0, v0, t); iso.push(t.x, t.y, t.z); s.getPoint(u1, v1, t); iso.push(t.x, t.y, t.z);
+      if (rm && rm((u0 + u1) / 2, (v0 + v1) / 2)) { line = null; continue; }
+      s.getPoint(u0, v0, t); iso.push(t.x, t.y, t.z);
+      if (inner) { if (!line) obj.isoLines.push((line = [t.clone()])); }
+      s.getPoint(u1, v1, t); iso.push(t.x, t.y, t.z);
+      if (inner) line.push(t.clone());
     }
   };
-  N.uniqueKnots(d.knotsU).forEach((u) => seg((a) => [u, a]));
-  N.uniqueKnots(d.knotsV).forEach((v) => seg((a) => [a, v]));
+  const inside = (k) => k > 1e-6 && k < 1 - 1e-6;
+  N.uniqueKnots(d.knotsU).forEach((u) => seg((a) => [u, a], inside(u)));
+  N.uniqueKnots(d.knotsV).forEach((v) => seg((a) => [a, v], inside(v)));
   { const g = new LineSegmentsGeometry(); g.setPositions(iso); setGeo(p.iso, g); }
   const hull = [], rim = [], nu = d.cvs.length, nv = d.cvs[0].length;
   for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
@@ -790,7 +821,7 @@ function orientHandle(shape, obj, ref) {
     const x = cv(c[Math.min(c.length - 1, i + 1)]).clone().sub(cv(c[Math.max(0, i - 1)]));
     if (x.lengthSq() < 1e-12) return;
     x.normalize();
-    const z = obj.data.plane === 'xy' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+    const z = N.curvePlaneNormal(obj.data);
     z.addScaledVector(x, -z.dot(x));
     if (z.lengthSq() < 1e-6) return;
     z.normalize();
@@ -1024,7 +1055,7 @@ gizmo.addEventListener('objectChange', () => {
 // ---------- Snap ----------
 // Como en Alias: mantener Alt = rejilla, Ctrl = punto, Ctrl+Alt = curva (en Mac, Cmd hace de Alt).
 // Los botones de arriba los dejan activos sin mantener teclas.
-const snapToggles = { grid: false, curve: false, point: false };
+const snapToggles = { grid: false, curve: false, point: false, surface: false };
 let gridStep = 0.25;
 const SNAP_PX = 22;
 function snapModes(e) {
@@ -1042,12 +1073,18 @@ function updateSnapButtons() {
     b.setAttribute('aria-pressed', String(snapToggles[k]));
     b.classList.toggle('held', held[k] && !snapToggles[k]);
   }
+  // los mismos snaps en la barra de dibujo (más el de superficie: fijo o Shift mantenido)
+  document.querySelectorAll('[data-snapbtn]').forEach((b) => {
+    const k = b.dataset.snapbtn, h = k === 'surface' ? mods.shiftKey && !mods.altKey : held[k];
+    b.setAttribute('aria-pressed', String(!!snapToggles[k]));
+    b.classList.toggle('held', !!h && !snapToggles[k]);
+  });
   gizmo.setRotationSnap(held.grid ? Math.PI / 12 : null);
   gizmo.setScaleSnap(held.grid ? 0.25 : null);
 }
 function snapGrid(p, planeKind) {
   const r = (v) => Math.round(v / gridStep) * gridStep;
-  p.x = r(p.x);
+  if (planeKind !== 'yz') p.x = r(p.x);
   if (planeKind !== 'xz') p.y = r(p.y);
   if (planeKind !== 'xy') p.z = r(p.z);
   return p;
@@ -1073,6 +1110,8 @@ function curvePolylines(ex) {
     if (o.kind === 'curve') { if (o.samples) out.push(o.samples); continue; }
     const e = o.edgePts || [], E = (e.length - 1) / 4;   // el contorno son 4 bordes seguidos
     for (let k = 0; k < 4 && E >= 1; k++) out.push(e.slice(k * E, k * E + E + 1));
+    // y las líneas de parche (isoparamétricas de los límites de span), sin las partes recortadas
+    if (prefs.snapIso !== false) (o.isoLines || []).forEach((l) => out.push(l));
   }
   return out;
 }
@@ -1205,21 +1244,63 @@ function pickAt(e) {
 
 // ---------- Herramientas ----------
 let tool = 'select';
-let drawPlaneKind = 'xz';
-const drawPlanes = { xz: new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.01), xy: new THREE.Plane(new THREE.Vector3(0, 0, 1), 0) };
-function placePoint(e) {
+// Plano de construcción. 'auto' (por defecto) depende de la vista, como en Alias: vista de arriba = suelo XZ,
+// de frente = XY, de lado = YZ (por el origen); en perspectiva las curvas se dibujan en el aire, en el plano de la pantalla
+// que pasa por el pivote (o por el primer punto de la curva). También se puede fijar: suelo, frente o lado.
+let drawPlaneKind = 'auto';
+const PLANE_NAMES = { xz: 'el suelo (XZ)', xy: 'el plano frontal (XY)', yz: 'el plano lateral (YZ)', free: 'el aire (plano de la pantalla)' };
+function axisView() {
+  const d = viewDir(), a = [Math.abs(d.x), Math.abs(d.y), Math.abs(d.z)], i = a.indexOf(Math.max(...a));
+  return a[i] > 0.9995 ? i : null;
+}
+// solid = círculos y planos: en perspectiva van al suelo
+function resolvePlaneKind(solid = false) {
+  if (drawPlaneKind !== 'auto') return drawPlaneKind;
+  const i = axisView();
+  if (i != null && proj.ortho) return ['yz', 'xz', 'xy'][i];
+  return solid ? 'xz' : 'free';
+}
+function planeFor(k) {
+  if (k === 'xz') return new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.01);
+  if (k === 'xy') return new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+  if (k === 'yz') return new THREE.Plane(new THREE.Vector3(1, 0, 0), 0);
+  return new THREE.Plane().setFromNormalAndCoplanarPoint(viewDir().negate(), draft?.pts[0] || pivot);
+}
+// punto de una superficie bajo el cursor (snap a superficie)
+function surfacePointAt() {
+  const hit = ray.intersectObjects(objects.filter((o) => o.visible && o.kind !== 'curve').map((o) => o.parts.mesh), false)[0];
+  return hit ? hit.point.clone() : null;
+}
+function placePoint(e, solid = false) {
   const modes = snapModes(e);
   const s = findSnap(e.clientX, e.clientY, modes, {});
   if (s) { showSnap(s); return s.point; }
   setRay(e);
-  const p = ray.ray.intersectPlane(drawPlanes[drawPlaneKind], new THREE.Vector3());
-  if (p && modes.grid) { snapGrid(p, drawPlaneKind); showSnap({ point: p, kind: 'rejilla' }); } else hideSnap();
+  // superficie: botón fijo o Shift mantenido al dibujar
+  if (modes.surface || (e.shiftKey && !e.altKey)) {
+    const q = surfacePointAt();
+    if (q) { showSnap({ point: q, kind: 'superficie' }); return q; }
+  }
+  const k = resolvePlaneKind(solid), gk = modes.grid && k === 'free' ? 'xz' : k;   // en perspectiva la rejilla es la del suelo
+  const p = ray.ray.intersectPlane(planeFor(gk), new THREE.Vector3());
+  if (p && modes.grid) { snapGrid(p, gk); showSnap({ point: p, kind: 'rejilla' }); } else hideSnap();
   return p;
 }
 function setDrawPlane(k) {
   drawPlaneKind = k;
   document.querySelectorAll('[data-plane]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.plane === k)));
-  gridXY.visible = k === 'xy' && (tool === 'curve' || tool === 'plane' || tool === 'circle');
+  updateDrawGrids();
+  if (draft) showDraft();
+}
+// rejilla del plano de construcción mientras se dibuja
+const gridYZ = new THREE.GridHelper(30, 30, 0x4a3a22, 0x2a251d);
+gridYZ.rotation.z = Math.PI / 2;
+gridYZ.layers.set(DIAG);
+gridYZ.visible = false;
+scene.add(gridYZ);
+function updateDrawGrids() {
+  const drawing = tool === 'curve' || tool === 'plane' || tool === 'circle', k = drawing ? resolvePlaneKind(tool !== 'curve') : null;
+  gridXY.visible = k === 'xy'; gridYZ.visible = k === 'yz';
 }
 
 const HINTS = {
@@ -1261,7 +1342,8 @@ function circleData(c, R, plane = 'xz') {
   const cvs = [];
   for (let k = 0; k <= 8; k++) {
     const a = (k * Math.PI) / 4, f = k % 2 ? Math.SQRT2 : 1, x = Math.cos(a) * R * f, y = Math.sin(a) * R * f;
-    cvs.push(plane === 'xz' ? new THREE.Vector4(c.x + x, c.y, c.z - y, k % 2 ? Math.SQRT1_2 : 1) : new THREE.Vector4(c.x + x, c.y + y, c.z, k % 2 ? Math.SQRT1_2 : 1));
+    const w = k % 2 ? Math.SQRT1_2 : 1;
+    cvs.push(plane === 'xz' ? new THREE.Vector4(c.x + x, c.y, c.z - y, w) : plane === 'yz' ? new THREE.Vector4(c.x, c.y + y, c.z - x, w) : new THREE.Vector4(c.x + x, c.y + y, c.z, w));
   }
   return { deg: 2, knots: [0, 0, 0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1, 1, 1], cvs, plane };
 }
@@ -1285,12 +1367,16 @@ function showDraft() {
   }
   pts.forEach((p) => { const h = makeHandle(false, false); h.position.copy(p); draftHandles.add(h); });
   const n = draft.pts.length;
-  $('draw-msg').textContent = n === 0 ? `Haz clic en el plano ${drawPlaneKind === 'xz' ? 'del suelo' : 'frontal'} para el primer punto` : `${n} ${n === 1 ? 'punto' : 'puntos'} · sigue haciendo clic para añadir más`;
+  $('draw-msg').textContent = n === 0 ? `Clic: primer punto en ${PLANE_NAMES[resolvePlaneKind()]}` : `${n} ${n === 1 ? 'punto' : 'puntos'} · sigue haciendo clic`;
   $('draw-done').disabled = n < 2;
 }
 function finishDraft() {
   if (!draft || draft.pts.length < 2) return;
-  const obj = addCurve(N.curveData(draft.pts, 3, drawPlaneKind));
+  // el plano de la curva: el de construcción si todos los puntos están en él (un snap pudo sacarlos)
+  let pk = resolvePlaneKind();
+  const ax = { xz: 'y', xy: 'z', yz: 'x' }[pk];
+  if (ax && draft.pts.some((q) => Math.abs(q[ax] - draft.pts[0][ax]) > 1e-6)) pk = 'free';
+  const obj = addCurve(N.curveData(draft.pts, 3, pk));
   startDraft();
   toast(`${obj.name} creada`);
 }
@@ -1373,17 +1459,17 @@ addEventListener('pointerup', (e) => {
   if (tool === 'edge') { edgeClick(e); return; }
   if (tool === 'circle') {
     if (e.button !== 0) return;
-    const p = placePoint(e);
+    const p = placePoint(e, true);
     if (!p) return;
-    const o = addCurve(circleData(p, toolDef.circleR ?? 1, drawPlaneKind), 'Círculo');
+    const o = addCurve(circleData(p, toolDef.circleR ?? 1, resolvePlaneKind(true)), 'Círculo');
     setTool('select');
     finishCreate([o], `${o.name} creado (NURBS exacto, grado 2)`);
     return;
   }
   if (tool === 'plane') {
-    const p = placePoint(e);
+    const p = placePoint(e, true);
     if (!p) return;
-    const o = addSurface(N.planeData(p, drawPlaneKind), 'Plano');
+    const o = addSurface(N.planeData(p, resolvePlaneKind(true)), 'Plano');
     setTool('select');
     finishCreate([o], `${o.name} creado`);
     return;
@@ -1431,7 +1517,7 @@ renderer.domElement.addEventListener('dblclick', (e) => {
   const live = objects.filter((o) => o.visible);
   ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
   const hit = ray.intersectObjects(live.map((o) => pickTarget(o)), false)[0];
-  const pt = hit ? hit.point : ray.ray.intersectPlane(drawPlanes.xz, new THREE.Vector3());
+  const pt = hit ? hit.point : ray.ray.intersectPlane(planeFor('xz'), new THREE.Vector3());
   if (pt) setPivot(pt);
 });
 
@@ -1460,10 +1546,8 @@ function pivotToSelection() {
   setPivot(refs.length ? centroid(refs) : boundsOf(objects).getCenter(new THREE.Vector3()));
 }
 function topView() {
-  const c = boundsOf(objects).getCenter(new THREE.Vector3());
-  pivot.copy(c);
-  camera.position.set(c.x, c.y + 18, c.z);
-  camera.quaternion.setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+  pivot.copy(boundsOf(objects).getCenter(new THREE.Vector3()));
+  goToView(new THREE.Vector3(0, 1, 0), true);
 }
 
 // ---------- Paneles laterales que se ocultan solos (como Alias) ----------
@@ -2039,6 +2123,7 @@ $('t-rotate').addEventListener('click', () => { setTool('select'); setXform('rot
 $('t-scale').addEventListener('click', () => { setTool('select'); setXform('scale'); });
 $('t-pivot').addEventListener('click', togglePivotEdit);
 document.querySelectorAll('[data-snap]').forEach((b) => b.addEventListener('click', () => { snapToggles[b.dataset.snap] = !snapToggles[b.dataset.snap]; updateSnapButtons(); }));
+document.querySelectorAll('[data-snapbtn]').forEach((b) => b.addEventListener('click', () => { snapToggles[b.dataset.snapbtn] = !snapToggles[b.dataset.snapbtn]; updateSnapButtons(); }));
 $('grid-step').addEventListener('change', (e) => { gridStep = +e.target.value; });
 $('t-frame').addEventListener('click', frameSelection);
 $('t-top').addEventListener('click', topView);
@@ -2800,7 +2885,7 @@ const RADIAL_TILT = 0.6;   // achatamiento vertical del anillo (vista elevada)
 function makeRadial(items, { r = 140, title = '' } = {}) {
   const K = RADIAL_TILT, r2 = r + 78, R = r2 + 46;
   const el = document.createElement('div');
-  el.className = 'puck'; el.hidden = true;
+  el.className = 'puck'; el.hidden = true; el.dataset.inkTint = '0.5';
   el.innerHTML = `<svg class="puck-lines" viewBox="${-R} ${-R} ${2 * R} ${2 * R}" width="${2 * R}" height="${2 * R}" style="left:${-R}px;top:${-R}px">
       <ellipse rx="${r}" ry="${r * K}" /><ellipse class="outer" rx="${r2}" ry="${r2 * K}" /><line x1="0" y1="0" x2="0" y2="0" /></svg>
     <div class="puck-center"><b></b><span></span></div>`;
@@ -4209,6 +4294,166 @@ addEventListener('keydown', (e) => {
   $('st-snap').textContent = xform === 'translate' ? `Nudge ${'XYZ'[AXES.findIndex((a) => Math.abs(a.dot(ax)) > 0.5)]}` : xform === 'rotate' ? `Nudge ${big}°` : `Nudge ${big}%`;
 });
 
+// ---------- Cubo de vistas (el ViewCube de Alias) ----------
+// Arriba a la derecha de cada vista. Clic en una cara: vista ortogonal de ese lado (girar la devuelve a perspectiva);
+// clic en una arista o esquina: vista en perspectiva desde ahí. Arrastrar el cubo gira la vista.
+// Debajo, PERSP / ORTO: trabajar siempre en ortogonal o en perspectiva.
+const CUBE_PX = 92, CUBE_TOP = 58, CUBE_RIGHT = 66;   // fuera de la franja derecha que abre el panel
+const cubeScene = new THREE.Scene();
+const cubeCam = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
+const FACE_LABELS = ['DERECHA', 'IZQUIERDA', 'ARRIBA', 'ABAJO', 'FRENTE', 'ATRÁS'];   // +X −X +Y −Y +Z −Z
+// Solo líneas y nombres, sin relleno; su color (negro o blanco) cambia según lo que hay detrás, como los menús
+function faceTex(label) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.font = `600 ${label.length > 7 ? 21 : 26}px Outfit, Jost, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(label, 64, 66);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  return t;
+}
+// el cubo invisible solo escribe profundidad (tapa las aristas y nombres de atrás) y sirve para saber qué se toca
+const viewCube = new THREE.Mesh(new THREE.BoxGeometry(0.995, 0.995, 0.995), new THREE.MeshBasicMaterial({ colorWrite: false }));
+const cubeInk = new THREE.Color('#0b0d10');
+const cubeEdges = new LineSegments2(new LineSegmentsGeometry().fromEdgesGeometry(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1))),
+  new LineMaterial({ color: cubeInk, linewidth: 1.4, resolution: new THREE.Vector2(92, 92), toneMapped: false }));
+const cubeLabels = FACE_LABELS.map((l, i) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 0.92), new THREE.MeshBasicMaterial({ map: faceTex(l), color: cubeInk, transparent: true, toneMapped: false }));
+  const n = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][i];
+  m.position.set(...n).multiplyScalar(0.502);
+  if (i === 2) m.rotation.x = -Math.PI / 2;        // ARRIBA se lee con FRENTE abajo (vista de arriba)
+  else if (i === 3) m.rotation.x = Math.PI / 2;
+  else m.lookAt(m.position.clone().multiplyScalar(2));
+  return m;
+});
+viewCube.renderOrder = 0; cubeEdges.renderOrder = 1; cubeLabels.forEach((m) => (m.renderOrder = 1));
+const cubeHot = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: '#2f7bff', transparent: true, opacity: 0.32, toneMapped: false, depthTest: false }));
+cubeHot.renderOrder = 2; cubeHot.visible = false;
+// ejes junto a la esquina de atrás abajo a la izquierda: X rojo, Y verde, Z azul
+const cubeAxes = new THREE.AxesHelper(1.25);
+cubeAxes.position.set(-0.5, -0.5, -0.5);
+cubeAxes.material.toneMapped = false;
+cubeScene.add(viewCube, cubeEdges, ...cubeLabels, cubeHot, cubeAxes);
+// muestra invisible sobre el cubo: adaptInk le pone .ink-dark / .ink-light y de ahí sale el color de las líneas
+const cubeProbe = document.createElement('div');
+cubeProbe.className = 'cube-probe';
+document.body.append(cubeProbe);
+let cubeHover = null, cubeDrag = null, camAnim = null;
+function cubeRect(p) { const r = renderer.domElement.getBoundingClientRect(); return { x: r.left + p.x + p.w - CUBE_PX - CUBE_RIGHT, y: r.top + CUBE_TOP, s: CUBE_PX }; }
+function placeCubeCam() { cubeCam.quaternion.copy(camera.quaternion); cubeCam.position.copy(viewDir()).multiplyScalar(-3.5); cubeCam.updateMatrixWorld(); }
+// región del cubo bajo el cursor (cara, arista o esquina) como dirección con componentes −1, 0 o 1
+function cubeRegionAt(x, y) {
+  if (prefs.viewCube === false || carousel || layout === 'render') return null;
+  for (const p of panes()) {
+    if (p.kind === 'render') continue;
+    const c = cubeRect(p);
+    if (x < c.x || x > c.x + c.s || y < c.y || y > c.y + c.s) continue;
+    placeCubeCam();
+    const rc = new THREE.Raycaster();
+    rc.setFromCamera(new THREE.Vector2(((x - c.x) / c.s) * 2 - 1, -((y - c.y) / c.s) * 2 + 1), cubeCam);
+    const hit = rc.intersectObject(viewCube, false)[0];
+    if (!hit) return { pane: p, dir: null };
+    const k = (v) => (v > 0.3 ? 1 : v < -0.3 ? -1 : 0), q = hit.point;
+    return { pane: p, dir: new THREE.Vector3(k(q.x), k(q.y), k(q.z)) };
+  }
+  return null;
+}
+const DIR_NAMES = { '1,0,0': 'DERECHA', '-1,0,0': 'IZQUIERDA', '0,1,0': 'ARRIBA', '0,-1,0': 'ABAJO', '0,0,1': 'FRENTE', '0,0,-1': 'ATRÁS' };
+// Lleva la cámara a mirar desde la dirección dir (desde el pivote hacia la cámara), con una animación corta
+function goToView(dir, ortho) {
+  const d = dir.clone().normalize(), dist = camera.position.distanceTo(pivot);
+  const up = Math.abs(d.y) > 0.99 ? new THREE.Vector3(0, 0, -Math.sign(d.y)) : new THREE.Vector3(0, 1, 0);
+  const q1 = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(d, new THREE.Vector3(), up));
+  if (!ortho) setProjection(false);
+  camAnim = { q0: camera.quaternion.clone(), q1, dist, t0: performance.now(), dur: 420, ortho };
+}
+function stepCamAnim(now) {
+  const a = camAnim;
+  if (!a) return;
+  const t = Math.min(1, (now - a.t0) / a.dur), e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+  camera.quaternion.slerpQuaternions(a.q0, a.q1, e);
+  camera.position.copy(pivot).addScaledVector(viewDir(), -a.dist);
+  if (t >= 1) { camAnim = null; if (a.ortho) setProjection(true, true); }
+}
+function renderViewCube(p) {
+  if (prefs.viewCube === false || p.kind === 'render') return;
+  const S = CUBE_PX, x = p.x + p.w - S - CUBE_RIGHT, y = p.h - S - CUBE_TOP;
+  placeCubeCam();
+  const hv = cubeHover?.pane.x === p.x ? cubeHover.dir : null;
+  cubeHot.visible = !!hv;
+  if (hv) {
+    const sz = (c) => (c ? 0.22 : 0.62), ps = (c) => c * 0.4;
+    cubeHot.scale.set(sz(hv.x), sz(hv.y), sz(hv.z));
+    cubeHot.position.set(ps(hv.x), ps(hv.y), ps(hv.z)).multiplyScalar(1.03);
+  }
+  cubeInk.set(cubeProbe.classList.contains('ink-light') ? '#f4f5f7' : '#0b0d10');
+  cubeEdges.material.color.copy(cubeInk);
+  cubeLabels.forEach((m) => m.material.color.copy(cubeInk));
+  renderer.setViewport(x, y, S, S); renderer.setScissor(x, y, S, S);
+  renderer.autoClear = false; renderer.clearDepth();
+  const tm = renderer.toneMapping;
+  renderer.toneMapping = THREE.NoToneMapping;
+  renderer.render(cubeScene, cubeCam);
+  renderer.toneMapping = tm; renderer.autoClear = true;
+}
+addEventListener('pointerdown', (e) => {
+  if (e.target !== renderer.domElement || e.button !== 0) return;
+  const h = cubeRegionAt(e.clientX, e.clientY);
+  if (!h) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  cubeDrag = { x: e.clientX, y: e.clientY, moved: false, h };
+}, true);
+addEventListener('pointermove', (e) => {
+  if (cubeDrag) {
+    const dx = e.clientX - cubeDrag.x, dy = e.clientY - cubeDrag.y;
+    if (!cubeDrag.moved && Math.hypot(dx, dy) < 3) return;
+    if (!cubeDrag.moved && proj.temp) setProjection(false);
+    cubeDrag.moved = true; cubeDrag.x = e.clientX; cubeDrag.y = e.clientY;
+    camAnim = null;
+    tumble(dx, dy);
+    return;
+  }
+  if (e.buttons) return;
+  const h = cubeRegionAt(e.clientX, e.clientY), was = !!cubeHover;
+  cubeHover = h?.dir ? h : null;
+  if (was !== !!cubeHover) renderer.domElement.style.cursor = cubeHover ? 'pointer' : '';
+}, true);
+addEventListener('pointerup', (e) => {
+  const c = cubeDrag;
+  if (!c) return;
+  cubeDrag = null;
+  e.stopImmediatePropagation();
+  if (c.moved || !c.h.dir) return;
+  const faces = Math.abs(c.h.dir.x) + Math.abs(c.h.dir.y) + Math.abs(c.h.dir.z);
+  goToView(c.h.dir, faces === 1);
+}, true);
+// botón PERSP / ORTO debajo del cubo y nombre de la vista en la barra de estado
+const projBtn = document.createElement('button');
+projBtn.className = 'proj-btn';
+projBtn.title = 'Perspectiva u ortogonal. Con PERSP, elegir una cara del cubo da una vista ortogonal que vuelve a perspectiva al girarla.';
+document.body.append(projBtn);
+projBtn.addEventListener('click', () => { proj.keep = !proj.ortho; prefs.ortho = proj.keep; savePrefs(); setProjection(proj.keep); });
+function viewName() {
+  const d = viewDir().negate(), k = [d.x, d.y, d.z].map((v) => (Math.abs(v) > 0.9995 ? Math.sign(v) : 0));
+  const face = Math.abs(k[0]) + Math.abs(k[1]) + Math.abs(k[2]) === 1 ? DIR_NAMES[k.join(',')] : null;
+  return (proj.ortho ? 'ORTOGONAL' : 'PERSPECTIVA') + (face ? ' · ' + face : '');
+}
+function updateViewName() {
+  const n = viewName(), el = $('vi-proj');
+  if (el && el.textContent !== n) el.textContent = n;
+  const t = proj.ortho ? 'ORTO' : 'PERSP';
+  if (projBtn.textContent !== t) projBtn.textContent = t;
+  projBtn.setAttribute('aria-pressed', String(proj.keep));
+  const p = panes().find((x) => x.kind !== 'render');
+  projBtn.hidden = !p || prefs.viewCube === false || !!carousel || layout === 'render';
+  if (p && !projBtn.hidden) {
+    const c = cubeRect(p);
+    projBtn.style.left = c.x + c.s / 2 + 'px'; projBtn.style.top = c.y + c.s + 4 + 'px';
+    Object.assign(cubeProbe.style, { left: c.x + 'px', top: c.y + 'px', width: c.s + 'px', height: c.s + 'px' });
+  }
+  cubeProbe.hidden = projBtn.hidden;
+}
+if (prefs.ortho) { proj.keep = true; setProjection(true); }
+
 // ---------- Dibujo de cada cuadro ----------
 function renderPane(p) {
   renderer.setViewport(p.x, 0, p.w, p.h);
@@ -4244,7 +4489,7 @@ function updateXfPrompt() {
 // Color del texto de los menús según lo que tiene detrás: se leen los píxeles de la vista bajo cada rótulo
 // (donde no hay objeto se ve el muro) y el texto pasa entero a negro o a blanco.
 let inkT = 0;
-const INK_SEL = '#rel-labels:not([hidden]) .rel-label, .top .brand, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
+const INK_SEL = '.cube-probe:not([hidden]), .proj-btn, .app .panel .sec, .app .panel .panel-head, #toolwin:not([hidden]) .tw-head, #toolwin:not([hidden]) .tw-row, #toolwin:not([hidden]) .tw-hint, #toolwin:not([hidden]) .tw-group, .puck:not([hidden]) .puck-item span, .puck:not([hidden]) .puck-center, #rel-labels:not([hidden]) .rel-label, .top .brand, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
 function adaptInk(now) {
   if (now - inkT < 250) return;
   inkT = now;
@@ -4263,12 +4508,28 @@ function adaptInk(now) {
       // el lienzo es transparente donde no hay objeto (color premultiplicado): ahí cuenta el muro
       for (let i = 0; i < buf.length; i += 4) { sum += (0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2]) / 255 + (1 - buf[i + 3] / 255) * bgL; n++; }
     }
-    const L = n ? sum / n : bgL;
+    let L = n ? sum / n : bgL;
+    // bajo un velo desenfocado se ve una mezcla del tinte del fondo y de lo de detrás
+    const t = +(el.closest('[data-ink-tint]')?.dataset.inkTint || 0);
+    if (t) L = t * bgL + (1 - t) * L;
     el.classList.toggle('ink-dark', L > 0.5);
     el.classList.toggle('ink-light', L <= 0.5);
   }
 }
+// velo desenfocado detrás del panel derecho (sigue al panel mientras entra y sale)
+const panelVeil = document.createElement('div');
+panelVeil.className = 'soft-veil';
+$('panel').before(panelVeil);   // misma capa que el panel, justo detrás
+function placePanelVeil() {
+  const r = $('panel').getBoundingClientRect(), on = r.width > 0 && r.left < innerWidth - 4;
+  panelVeil.hidden = !on;
+  if (on) Object.assign(panelVeil.style, { left: r.left - 30 + 'px', top: r.top - 30 + 'px', width: r.width + 60 + 'px', height: r.height + 60 + 'px' });
+}
 function renderFrame(now) {
+  stepCamAnim(now);
+  placePanelVeil();
+  updateViewName();
+  updateDrawGrids();
   updateXfPrompt();
   pivotMarker.position.copy(pivot);
   pivotMarker.scale.setScalar(camera.position.distanceTo(pivot) * 0.06);
@@ -4280,7 +4541,7 @@ function renderFrame(now) {
   if (relArrows.children.length) scaleRelArrows();
   placeRelLabels();
   renderer.shadowMap.needsUpdate = true;
-  if (carousel) renderCarousel(now); else panes().forEach(renderPane);
+  if (carousel) renderCarousel(now); else { panes().forEach(renderPane); panes().forEach(renderViewCube); }
   scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
   // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
   useAspect(dragPane || paneAt(lastPtr.x));
@@ -4342,7 +4603,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

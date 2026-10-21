@@ -240,7 +240,7 @@ function blendOn(rel, A, B) {
 // dirección: 'auto' = perpendicular al plano de la curva; 'x' | 'y' | 'z'. both = hacia los dos lados.
 export function extrudeData(c, dist, dir = 'auto', both = false) {
   const v = dir === 'x' ? new THREE.Vector3(1, 0, 0) : dir === 'z' ? new THREE.Vector3(0, 0, 1)
-    : dir === 'y' ? new THREE.Vector3(0, 1, 0) : c.plane === 'xy' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+    : dir === 'y' ? new THREE.Vector3(0, 1, 0) : N.curvePlaneNormal(c);
   const a = v.clone().multiplyScalar(both ? -dist : 0), b = v.clone().multiplyScalar(dist);
   const sh = (p, o) => new THREE.Vector4(p.x + o.x * p.w / p.w, p.y + o.y, p.z + o.z, p.w);
   return { degU: 1, knotsU: [0, 0, 1, 1], degV: c.deg, knotsV: c.knots.slice(), cvs: [c.cvs.map((p) => sh(p, a)), c.cvs.map((p) => sh(p, b))] };

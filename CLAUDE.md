@@ -311,6 +311,31 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (?demo=asa: puerta + fondo recortados por círculos proyectados y unidos G2/G1).
 - Pruebas: scratchpad aitest/ff.mjs (matemática), tff.mjs (ejemplo e historial), tff3.mjs (Skin, Proyectar y Extender con clics).
 
+## Hecho (v0.17) — cubo de vistas, ortogonal y dibujo de curvas según la vista
+
+- Cubo de vistas (ViewCube de Alias) arriba a la derecha de cada vista de modelado (cubeScene/cubeCam, renderViewCube después de
+  cada pane con clearDepth). Cara = vista ortogonal de ese lado; arista/esquina = perspectiva desde ahí (goToView + camAnim,
+  420 ms); arrastrar el cubo = girar. Resaltado azul de la región bajo el ratón (cubeRegionAt: componentes −1/0/1, umbral 0.3).
+  CUBE_RIGHT = 66 px para no caer en la franja de 56 px que abre el panel derecho (si no, el panel tapaba el clic).
+- Ortogonal: la misma cámara cambia de matriz (camera.updateProjectionMatrix sobrescrito; isOrthographicCamera se cambia para
+  que Raycaster y los shaders lo sepan). Alto visible = 2·profundidad del pivote·tan(fov/2): pasar de una a otra no salta y dolly
+  hace zoom. proj = {ortho, temp, keep}: temp = puesta por el cubo (girar vuelve a perspectiva); keep = botón PERSP/ORTO bajo el
+  cubo (prefs.ortho). Nombre de la vista en la barra de estado (#vi-proj: "ORTOGONAL · FRENTE"). T = vista de arriba ortogonal.
+- Dibujo (drawPlaneKind 'auto' por defecto; barra de dibujo y panel: Vista | Suelo | Frente | Lado): ortogonal de arriba = XZ,
+  de frente (+Z) = XY, de lado = YZ (por el origen); en perspectiva = en el aire (plano de la pantalla por el pivote o por el
+  primer punto). Círculos y planos en perspectiva van al suelo. Curvas con plane 'yz' o 'free' (N.curvePlaneNormal: Newell);
+  extruir 'Normal' usa esa normal. Rejillas gridXY / gridYZ según el plano (updateDrawGrids).
+- Snap al dibujar (botones en la barra de dibujo): rejilla (Alt; en perspectiva la del suelo), punto (Ctrl), curva (Ctrl+Alt:
+  curvas, aristas y líneas de parche = obj.isoLines, sin lo recortado; prefs.snapIso), superficie (botón o Shift mantenido).
+- Pruebas: scratchpad tcube.mjs (en swiftshader los cuadros son lentos: esperar ~1.5 s tras clic en el cubo).
+- Cubo solo de líneas (LineSegments2) y nombres sin fondo; un cubo invisible (colorWrite false) tapa lo de atrás y sirve para
+  elegir. Color negro/blanco desde .cube-probe (un div sobre el cubo que adaptInk clasifica).
+- Velo "gaussiano" (clase .soft-veil y ::before de toolwin/quickpick): blur 18px + tinte --bg 50 % + máscara = producto de dos
+  rampas erf (desenfoque gaussiano de un rectángulo, no se ve forma). Panel derecho: #panel transparente + panelVeil (div
+  hermano antes de #panel, colocado cada cuadro). Puck: ::before con máscara radial de rampa gaussiana.
+  Texto encima con negro/blanco: INK_SEL incluye secciones del panel, filas de la ventana de herramienta y etiquetas del Puck;
+  adaptInk mezcla el tinte del velo (data-ink-tint="0.5") con lo que hay detrás. Botones activos (azules) siguen en blanco.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
