@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>body{margin:0}[hidden]{display:none!important}</style>
 <title>Forja Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Crect x='5' y='0' width='2' height='12' fill='%232f7bff'/%3E%3Crect x='0' y='5' width='12' height='2' fill='%232f7bff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -392,12 +393,21 @@
   .viewinfo { margin-left: 18px; display: flex; gap: 14px; font-family: var(--font-mono); font-size: 10px;
     letter-spacing: .14em; color: var(--muted); pointer-events: none; text-shadow: 0 1px 0 var(--engrave-light); z-index: 1; }
   .viewinfo span + span::before { content: "·"; margin-right: 14px; opacity: .6; }
+
+  /* Logotipo: minúsculas finas, espaciado amplio y una cruz azul que resalta sobre el fondo */
+  :root { --brand-blue: #2f7bff; }
+  .brand { gap: 3px; align-items: flex-start; }
+  .wordmark, :root[data-theme="dark"] .wordmark { font-family: "Jost", "Futura", system-ui, sans-serif; font-weight: 300; font-size: 24px;
+    letter-spacing: .14em; text-transform: lowercase; color: var(--fg); text-shadow: none; line-height: 1; }
+  .brand .plus { width: 11px; height: 11px; fill: var(--brand-blue); margin-top: -1px; filter: drop-shadow(0 0 6px rgba(47,123,255,.45)); }
 </style>
 </head>
 <body>
 <div class="app auto" id="app">
   <header class="top">
-    <div class="brand"><span class="wordmark">FORJA</span><span class="sub">studio</span></div>
+    <div class="brand" aria-label="Forja">
+      <span class="wordmark">forja</span><svg class="plus" viewBox="0 0 12 12" aria-hidden="true"><rect x="5" y="0" width="2" height="12"/><rect x="0" y="5" width="12" height="2"/></svg>
+    </div>
     <div class="reveal-top" id="reveal-top">
     <span class="file">vaso_concepto.forja</span>
     <span class="lbl">Seleccionar</span>
