@@ -69,6 +69,16 @@ y de guías de Alias. Sirven para que Forja Studio se comporte como Alias.
   Side 1/2 Shape 1.0, Modify Parameter, Crown Mode, Explicit Control (U Degree 6, Uniform Spans), Flow Control
   (Start Edge Align, Interior Free, End Edge Align), Modify Range (Side 1/2 Start/End). "Pick input curves or modify the parameters".
 
+### Video 3: borrar historial, template, Freeform Blend
+- Selección "Surface" → trim (Shift añade/quita superficies, clic o recuadro elige regiones de recorte) → dact (Delete Active):
+  aviso "Construction history will be deleted. Delete active?" Yes/No → borra la superficie seleccionada (una franja del cuerpo).
+- templ (Template): "Use mouse or enter name of template to pick/unpick: [Left Toggle] [Middle Add] [Right Unpick]".
+  Las plantillas se ven en alambre gris y no se seleccionan como objetos normales; clic en vacío muestra la etiqueta "Nothing".
+  Se alterna entre objeto normal (sombreado) y plantilla (alambre) para usarlo de referencia.
+- Freeform Blend Control: elige borde 1 (sale lista si hay varios: Loft/Blend/Fillet...), borde 2.
+  Etiquetas en pantalla: Start [Edge Align], End [Edge Align], Side 1 Continuity [G2], Side 2 Continuity [G0].
+  Botones Update, Undo All, Next. Panel derecho: "2 picked surfaces", Degree 6x3, Spans 1x1.
+
 ## Pendiente de implementar en Forja
 - Editor de clutch keys (cambiar Shift+Alt, Alt, Ctrl+Alt, Ctrl, Shift+Ctrl).
 - ViewCube.
