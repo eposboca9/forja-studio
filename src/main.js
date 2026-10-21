@@ -27,6 +27,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const prefs = { evalUI: 'b', xform: 'mouse', theme: null };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem('forja-prefs') || '{}')); } catch { /* sin almacenamiento */ }
 function savePrefs() { try { localStorage.setItem('forja-prefs', JSON.stringify(prefs)); } catch { /* sin almacenamiento */ } }
+// modos de evaluación (los usan el Puck, los menús y la interfaz lateral)
+const EVAL_MODES = [
+  { k: 'showroom', label: 'Showroom', key: '4' }, { k: 'diffuse', label: 'Difuso', key: '5' }, { k: 'sky', label: 'Shade-Sky', key: '6' },
+  { k: 'zebra', label: 'Cebra', key: '1' }, { k: 'curv', label: 'Curvatura', key: '2' }, { k: 'wire', label: 'Malla', key: '3' },
+];
 // capas y grupos de la escena (ver más abajo)
 const layers = [{ id: 1, name: 'Predeterminada', visible: true }];
 let activeLayer = 1, nextLayerId = 2;
@@ -2559,28 +2564,79 @@ Object.assign(IC, {
 // ratón. Cada esfera del anillo puede tener un submenú: al pasar sobre ella salen esferas más pequeñas hacia fuera.
 const mv = () => { setTool('select'); setXform('translate'); }, rot = () => { setTool('select'); setXform('rotate'); }, scl = () => { setTool('select'); setXform('scale'); };
 const env = (k) => () => { document.querySelector(`[data-env="${k}"]`)?.click(); if (layout !== 'render') switchLayout('render'); };
-// Puck (Tab): la caja de herramientas: crear, editar, elegir, transformar y mostrar
-const PUCK = [
-  { k: 'curve', label: 'Curva', key: 'C', run: () => setTool('curve'), sub: [
+Object.assign(IC, {
+  mat: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM7 9a5 5 0 0 1 5-3', bg: 'M3 5h18v14H3zM3 15l5-5 4 4 3-3 6 6', tone: 'M3 17c4 0 5-10 9-10s5 10 9 10M3 21h18',
+  expo: 'M12 3v2M12 19v2M3 12h2M19 12h2M12 8a4 4 0 1 0 0 8zM12 8a4 4 0 0 1 0 8', render: 'M4 6h16v12H4zM4 10h16M8 6v12',
+  chat: 'M4 5h16v11H9l-5 4z', photo: 'M4 7h4l2-2h4l2 2h4v12H4zM12 10a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+  undo: 'M9 7L4 12l5 5M4 12h11a5 5 0 0 1 0 10h-3', redo: 'M15 7l5 5-5 5M20 12H9a5 5 0 0 0 0 10h3',
+  layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5', gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2',
+  modules: 'M12 4a8 3 0 1 0 0 6 8 3 0 0 0 0-6zM4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7', cube: 'M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8',
+});
+// Puck (Tab): cada módulo tiene el suyo, con sus herramientas, y cada quien lo puede personalizar
+// (Preferencias > Puck). PUCK_CMDS es la biblioteca de comandos; PUCK_DEFAULT, lo que trae cada módulo de fábrica.
+const setInput = (id, v, ev = 'input') => { const el = $(id); el.value = v; el.dispatchEvent(new Event(ev)); };
+const matSub = (keys) => keys.map((k) => ({ k: 'mat', label: MAT_NAMES[k], run: () => setMaterial(k) }));
+const PUCK_CMDS = {
+  // Modelado
+  curve: { k: 'curve', label: 'Curva', key: 'C', run: () => setTool('curve'), sub: [
     { k: 'ground', label: 'En el suelo', run: () => { setDrawPlane('xz'); setTool('curve'); } },
     { k: 'front', label: 'De frente', run: () => { setDrawPlane('xy'); setTool('curve'); } }] },
-  { k: 'surf', label: 'Superficie', run: () => setTool('plane'), sub: [
+  surface: { k: 'surf', label: 'Superficie', run: () => setTool('plane'), sub: [
     { k: 'plane', label: 'Plano', run: () => setTool('plane') }, { k: 'revolve', label: 'Revolución', run: () => OPS.revolve() },
     { k: 'loft', label: 'Loft', run: () => OPS.loft() }, { k: 'extrude', label: 'Extruir', run: () => OPS.extrude() }] },
-  { k: 'edit', label: 'Editar', soon: true, sub: [
+  edit: { k: 'edit', label: 'Editar', soon: true, sub: [
     { k: 'align', label: 'Align', soon: true }, { k: 'blend', label: 'Blend', soon: true }, { k: 'round', label: 'Round', soon: true }, { k: 'offset', label: 'Offset', soon: true }] },
-  { k: 'arrow', label: 'Elegir', key: 'O', run: () => setPickMode('object'), sub: [
+  pick: { k: 'arrow', label: 'Elegir', key: 'O', run: () => setPickMode('object'), sub: [
     { k: 'object', label: 'Objeto', run: () => setPickMode('object') }, { k: 'pickCurve', label: 'Curvas', run: () => setPickMode('object', 'curve') },
     { k: 'pickSurf', label: 'Superficies', run: () => setPickMode('object', 'surface') }, { k: 'cv', label: 'CV', run: () => setPickMode('cv') },
     { k: 'nothing', label: 'Nada', run: pickNothing }] },
-  { k: 'move', label: 'Transformar', key: 'W', run: mv, sub: [
+  xform: { k: 'move', label: 'Transformar', key: 'W', run: mv, sub: [
     { k: 'move', label: 'Mover', run: mv }, { k: 'rotate', label: 'Rotar', run: rot }, { k: 'scale', label: 'Escalar', run: scl }, { k: 'pivot', label: 'Pivote', run: togglePivotEdit }] },
-  { k: 'dup', label: 'Duplicar', run: duplicateSelection, sub: [{ k: 'symm', label: 'Simetría', soon: true }, { k: 'measure', label: 'Distancia', soon: true }] },
-  { k: 'show', label: 'Mostrar', run: unhideAll, sub: [
+  dup: { k: 'dup', label: 'Duplicar', run: duplicateSelection, sub: [{ k: 'symm', label: 'Simetría', soon: true }, { k: 'measure', label: 'Distancia', soon: true }] },
+  show: { k: 'show', label: 'Mostrar', run: unhideAll, sub: [
     { k: 'hide', label: 'Ocultar', run: hideSelection }, { k: 'show', label: 'Mostrar todo', run: unhideAll },
     { k: 'frame', label: 'Encuadrar', run: frameSelection }, { k: 'top', label: 'Vista sup.', run: topView }] },
-  { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
-];
+  del: { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
+  eval: { k: 'zebra', label: 'Evaluar', run: () => setDiag('showroom'), sub: EVAL_MODES.map((m) => ({ k: { showroom: 'studio', diffuse: 'shade', sky: 'sun', zebra: 'zebra', curv: 'curvz', wire: 'wire' }[m.k], label: m.label, run: () => setDiag(m.k) })) },
+  // Visu
+  mats: { k: 'mat', label: 'Materiales', run: () => setMaterial(matKey), sub: matSub(['paint', 'black', 'pearl', 'alu', 'chrome']) },
+  mats2: { k: 'mat', label: 'Más materiales', run: () => setMaterial('ceram'), sub: matSub(['ceram', 'glass', 'plastic', 'clay']) },
+  env: { k: 'sun', label: 'Entorno', run: env('studio'), sub: [
+    { k: 'studio', label: 'Estudio', run: env('studio') }, { k: 'sun', label: 'Exterior', run: env('sun') },
+    { k: 'sunset', label: 'Atardecer', run: env('sunset') }, { k: 'cloud', label: 'Nublado', run: env('overcast') }] },
+  bg: { k: 'bg', label: 'Fondo', run: () => $('env-bg').click(), sub: [
+    { k: 'bg', label: 'Ver / quitar', run: () => $('env-bg').click() }, { k: 'bg', label: 'Nítido', run: () => setInput('env-blur', 0) },
+    { k: 'bg', label: 'Desenfocado', run: () => setInput('env-blur', 0.6) }] },
+  tone: { k: 'tone', label: 'Color', run: () => setInput('tone', 'agx', 'change'), sub: [
+    { k: 'tone', label: 'AgX', run: () => setInput('tone', 'agx', 'change') }, { k: 'tone', label: 'ACES', run: () => setInput('tone', 'aces', 'change') },
+    { k: 'tone', label: 'Estándar', run: () => setInput('tone', 'none', 'change') }] },
+  expo: { k: 'expo', label: 'Exposición', run: () => setInput('expo', 0), sub: [
+    { k: 'expo', label: 'Más luz', run: () => setInput('expo', Math.min(3, +$('expo').value + 0.5)) },
+    { k: 'expo', label: 'Normal', run: () => setInput('expo', 0) }, { k: 'expo', label: 'Menos luz', run: () => setInput('expo', Math.max(-3, +$('expo').value - 0.5)) }] },
+  render: { k: 'render', label: 'Render', soon: true, sub: [{ k: 'render', label: 'Trazado de rayos', soon: true }, { k: 'photo', label: 'Guardar imagen', soon: true }] },
+  // IA
+  aiNew: { k: 'chat', label: 'Nuevo pedido', run: () => { setPinned(true); $('ai-prompt').focus(); } },
+  aiPhoto: { k: 'photo', label: 'Desde fotos', run: () => $('ai-photo-btn').click() },
+  aiEx: { k: 'ai', label: 'Ejemplos', run: () => runAI('una taza'), sub: [
+    { k: 'cube', label: 'Tornillo', run: () => runAI('tornillo') }, { k: 'cube', label: 'Mesa', run: () => runAI('una mesa') },
+    { k: 'cube', label: 'Silla', run: () => runAI('una silla') }, { k: 'cube', label: 'Taza', run: () => runAI('una taza') }, { k: 'cube', label: 'Botella', run: () => runAI('una botella') }] },
+  // comunes
+  undo: { k: 'undo', label: 'Deshacer', key: 'Ctrl+Z', run: undo, sub: [{ k: 'redo', label: 'Rehacer', run: redo }] },
+  frame: { k: 'frame', label: 'Encuadrar', key: 'F', run: frameSelection, sub: [{ k: 'frame', label: 'Todo', run: () => frameObjects([]) }, { k: 'top', label: 'Vista sup.', run: topView }] },
+  layers: { k: 'layers', label: 'Capas', run: () => layersWin.show(), sub: [
+    { k: 'layers', label: 'Nueva capa', run: newLayer }, { k: 'layers', label: 'Pasar selección', run: () => assignToLayer() }] },
+  modules: { k: 'modules', label: 'Módulos', run: holdHint, sub: [
+    { k: 'shade', label: 'Modelado', run: () => switchLayout('diag') }, { k: 'visu', label: 'Visu', run: () => switchLayout('render') }, { k: 'ai', label: 'IA', run: () => switchLayout('ai') }] },
+  prefs: { k: 'gear', label: 'Personalizar', run: () => openPrefs('puck') },
+};
+function holdHint() { toast('Mantén V para ver los módulos y elige uno con el ratón'); }
+const PUCK_DEFAULT = {
+  diag: ['curve', 'surface', 'edit', 'pick', 'xform', 'dup', 'show', 'del'],
+  render: ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'render', 'frame'],
+  ai: ['aiNew', 'aiPhoto', 'aiEx', 'frame', 'undo', 'layers'],
+};
+const PUCK_MODULES = { diag: 'Modelado', render: 'Visu', ai: 'IA' };
+const puckIds = (mod) => (prefs.puck?.[mod] || PUCK_DEFAULT[mod]).filter((id) => PUCK_CMDS[id]);
 // Marking menus (Ctrl+Shift + botón del ratón), con la misma forma pero otra información
 const PICK_MM = [
   { k: 'object', label: 'Objeto', key: 'O', run: () => setPickMode('object'), sub: [
@@ -2702,11 +2758,23 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
   });
   return st;
 }
-const puck = makeRadial(PUCK, { r: 150, title: 'Herramientas' });
+let puck = null, puckKey = '';
+// el Puck se construye para el módulo actual (y se rehace si cambia el módulo o la personalización)
+function getPuck() {
+  const mod = layout === 'split' ? 'diag' : layout, ids = puckIds(mod), key = mod + ':' + ids.join(',');
+  if (key !== puckKey) {
+    puck?.el.remove();
+    puck = makeRadial(ids.map((id) => PUCK_CMDS[id]), { r: 150, title: 'Puck · ' + PUCK_MODULES[mod] });
+    puckKey = key;
+    MENUS[0] = puck;
+  }
+  return puck;
+}
 const pickMenu = makeRadial(PICK_MM, { r: 128, title: 'Selección' });
 const xformMenu = makeRadial(XFORM_MM, { r: 128, title: 'Transformar' });
 const disp = makeRadial(DISPLAY_MM, { r: 140, title: 'Visualización' });
-const MENUS = [puck, pickMenu, xformMenu, disp];
+const MENUS = [null, pickMenu, xformMenu, disp];
+getPuck();
 let lastPtr = { x: innerWidth / 2, y: innerHeight / 2 };
 addEventListener('pointermove', (e) => {
   lastPtr = { x: e.clientX, y: e.clientY };
@@ -2716,15 +2784,18 @@ addEventListener('pointerdown', (e) => {
   for (const m of MENUS) if (m.open && m.sticky && !e.target.closest('.puck, .mmenu')) m.close(false);
 }, true);
 // Tab = Puck. Mantener y soltar sobre la opción; una pulsación corta lo deja abierto para hacer clic.
-function bindKey(code, m) {
+function bindKey(code, getMenu) {
+  let m = null;
   addEventListener('keydown', (e) => {
-    if (e.code !== code || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+    if (e.code !== code || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.target.closest?.('dialog')) return;
     e.preventDefault();
     if (e.repeat) return;
-    if (m.open && m.sticky) return m.close(false);
+    if (m?.open && m.sticky) return m.close(false);
+    m = getMenu();
     m.show(lastPtr.x, lastPtr.y); m.t0 = performance.now();
   }, true);
   addEventListener('keyup', (e) => {
+    if (!m) return;
     if (e.code !== code || !m.open || m.sticky) return;
     e.preventDefault();
     if (m.hover) m.close(true);
@@ -2732,8 +2803,8 @@ function bindKey(code, m) {
     else m.close(false);
   }, true);
 }
-bindKey('Tab', puck);
-bindKey('Space', disp);
+bindKey('Tab', getPuck);
+bindKey('Space', () => disp);
 addEventListener('keydown', (e) => { if (e.key === 'Escape') MENUS.forEach((m) => m.close(false)); }, true);
 let mouseMenu = null;
 addEventListener('pointerdown', (e) => {
@@ -2873,10 +2944,6 @@ addEventListener('keydown', (e) => {
 
 // ---------- Modos de evaluación (antes en la barra de arriba): 3 formas de ponerlos en los menús laterales ----------
 // A = esferas en la barra izquierda · B = sección con miniaturas en el panel derecho · C = una esfera que se despliega
-const EVAL_MODES = [
-  { k: 'showroom', label: 'Showroom', key: '4' }, { k: 'diffuse', label: 'Difuso', key: '5' }, { k: 'sky', label: 'Shade-Sky', key: '6' },
-  { k: 'zebra', label: 'Cebra', key: '1' }, { k: 'curv', label: 'Curvatura', key: '2' }, { k: 'wire', label: 'Malla', key: '3' },
-];
 const evalThumbs = {};
 function buildEvalUI() {
   const ph = (m) => `<span class="ev-ph" data-thumb="${m.k}"></span>`;
@@ -2962,7 +3029,7 @@ const MENUBAR = [
   ['Capas', [
     { label: 'Nueva capa', run: newLayer }, { label: 'Pasar selección a la capa activa', run: () => assignToLayer() },
     { label: 'Mostrar todas las capas', run: () => { checkpoint(); layers.forEach((l) => (l.visible = true)); selectionChanged(); renderLayers(); } },
-    { sep: true }, { label: 'Ver capas en el panel', run: () => { setPinned(true); $('outliner').scrollIntoView({ block: 'nearest' }); } }]],
+    { sep: true }, { label: 'Ventana de capas', run: () => (prefs.layersWin?.open === false ? layersWin.show() : layersWin.set({ open: false })), ...chk(() => prefs.layersWin?.open !== false) }]],
   ['Visualización', [
     ...EVAL_MODES.map((m) => ({ label: m.label, key: m.key, run: () => setDiag(m.k), ...chk(() => layout !== 'render' && diagMode === m.k) })),
     { sep: true }, { title: 'Entorno (Visu)' },
@@ -2970,8 +3037,9 @@ const MENUBAR = [
   ['Animación', [{ label: 'Plato giratorio', soon: true }, { label: 'Línea de tiempo', soon: true }]],
   ['Ventanas', [
     { label: 'Panel lateral fijo', run: () => setPinned(!pinned), ...chk(() => pinned) }, { label: 'Pantalla completa', run: fullscreen },
-    { label: 'Puck', key: 'Tab', run: () => puck.show(innerWidth / 2, innerHeight / 2) }]],
-  ['Preferencias', [{ label: 'Preferencias…', run: () => openPrefs() }]],
+    { label: 'Capas', run: () => (prefs.layersWin?.open === false ? layersWin.show() : layersWin.set({ open: false })), ...chk(() => prefs.layersWin?.open !== false) },
+    { label: 'Puck', key: 'Tab', run: () => getPuck().show(innerWidth / 2, innerHeight / 2) }]],
+  ['Preferencias', [{ label: 'Preferencias…', run: () => openPrefs() }, { label: 'Personalizar el Puck…', run: () => openPrefs('puck') }]],
   ['Utilidades', [
     { label: 'Centrar pivote', run: centerPivots }, { label: 'Punto de interés a la selección', key: 'L', run: pivotToSelection },
     { label: 'Medir distancia', soon: true }]],
@@ -3020,7 +3088,26 @@ function openPrefs(tab = 'ui') {
   d.querySelectorAll('[data-ppage]').forEach((p) => (p.hidden = p.dataset.ppage !== tab));
   d.querySelectorAll('[name="pref-eval"]').forEach((r) => (r.checked = r.value === prefs.evalUI));
   $('pref-xform').value = prefs.xform;
+  if (tab === 'puck') { $('pk-mod').value = layout === 'split' ? 'diag' : layout; renderPuckEditor(); }
   if (!d.open) d.showModal();
+}
+// Editor del Puck: lista de esferas del módulo elegido, con subir / bajar / quitar y añadir de la biblioteca
+function renderPuckEditor() {
+  const mod = $('pk-mod').value, ids = puckIds(mod).slice();
+  const save = (next) => { prefs.puck = { ...(prefs.puck || {}), [mod]: next }; savePrefs(); renderPuckEditor(); };
+  $('pk-list').innerHTML = ids.map((id, i) => {
+    const c = PUCK_CMDS[id];
+    return `<li><i>${icon(c.k)}</i><span>${esc(c.label)}${c.sub ? `<small>${c.sub.length} en submenú</small>` : ''}${c.soon ? '<small>próximamente</small>' : ''}</span>
+      <span class="pk-btns"><button data-up="${i}" title="Subir" aria-label="Subir">↑</button><button data-down="${i}" title="Bajar" aria-label="Bajar">↓</button><button data-del="${i}" title="Quitar" aria-label="Quitar">×</button></span></li>`;
+  }).join('');
+  $('pk-list').querySelectorAll('[data-up]').forEach((b) => b.addEventListener('click', () => { const i = +b.dataset.up; if (i > 0) { [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; save(ids); } }));
+  $('pk-list').querySelectorAll('[data-down]').forEach((b) => b.addEventListener('click', () => { const i = +b.dataset.down; if (i < ids.length - 1) { [ids[i + 1], ids[i]] = [ids[i], ids[i + 1]]; save(ids); } }));
+  $('pk-list').querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => { if (ids.length > 1) { ids.splice(+b.dataset.del, 1); save(ids); } }));
+  const rest = Object.keys(PUCK_CMDS).filter((id) => !ids.includes(id));
+  $('pk-add').innerHTML = rest.map((id) => `<option value="${id}">${esc(PUCK_CMDS[id].label)}</option>`).join('');
+  $('pk-add-btn').disabled = !rest.length || ids.length >= 10;
+  $('pk-add-btn').onclick = () => { if ($('pk-add').value && ids.length < 10) save([...ids, $('pk-add').value]); };
+  $('pk-reset').onclick = () => { const p2 = { ...(prefs.puck || {}) }; delete p2[mod]; prefs.puck = p2; savePrefs(); renderPuckEditor(); };
 }
 function initPrefs() {
   const d = $('prefs');
@@ -3031,10 +3118,50 @@ function initPrefs() {
   d.querySelectorAll('[data-ptab]').forEach((b) => b.addEventListener('click', () => openPrefs(b.dataset.ptab)));
   d.querySelectorAll('[name="pref-eval"]').forEach((r) => r.addEventListener('change', () => { prefs.evalUI = r.value; savePrefs(); updateEvalUI(); }));
   $('pref-xform').addEventListener('change', (e) => { prefs.xform = e.target.value; savePrefs(); attachGizmo(); });
+  $('pk-mod').addEventListener('change', renderPuckEditor);
   $('prefs-close').addEventListener('click', () => d.close());
   d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
 }
 $('ly-new').addEventListener('click', (e) => { e.preventDefault(); newLayer(); });
+// Ventana flotante de capas: se arrastra por la cabecera, se pliega o se cierra; recuerda su sitio
+const layersWin = {
+  el: $('layers-win'),
+  apply() {
+    const w = prefs.layersWin || {}, el = this.el;
+    el.hidden = w.open === false;
+    el.classList.toggle('folded', !!w.folded);
+    $('ly-fold').setAttribute('aria-expanded', String(!w.folded));
+    const x = w.x ?? innerWidth - 270 - 330, y = w.y ?? 84;
+    el.style.left = Math.max(8, Math.min(innerWidth - 120, x)) + 'px';
+    el.style.top = Math.max(8, Math.min(innerHeight - 60, y)) + 'px';
+  },
+  set(patch) { prefs.layersWin = { ...(prefs.layersWin || {}), ...patch }; savePrefs(); this.apply(); },
+  show() { this.set({ open: true, folded: false }); },
+};
+{
+  const head = $('layers-head');
+  let drag = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    const r = layersWin.el.getBoundingClientRect();
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    head.setPointerCapture(e.pointerId);
+  });
+  head.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    layersWin.el.style.left = e.clientX - drag.dx + 'px'; layersWin.el.style.top = e.clientY - drag.dy + 'px';
+  });
+  head.addEventListener('pointerup', () => {
+    if (!drag) return;
+    drag = null;
+    const r = layersWin.el.getBoundingClientRect();
+    layersWin.set({ x: Math.round(r.left), y: Math.round(r.top) });
+  });
+  $('ly-fold').addEventListener('click', () => layersWin.set({ folded: !prefs.layersWin?.folded }));
+  $('ly-close').addEventListener('click', () => layersWin.set({ open: false }));
+  addEventListener('resize', () => layersWin.apply());
+  layersWin.apply();
+}
 // opción C: la esfera del modo actual despliega las demás al pasar el ratón
 {
   const btn = $('eval-c-btn'), fly = $('eval-c-fly');

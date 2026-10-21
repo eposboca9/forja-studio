@@ -224,9 +224,14 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 ## Hecho (v0.12)
 
 - Menús desplegables solo texto (sin ventana de fondo), con el mismo cambio de color negro/blanco según lo que haya detrás.
-- Capas en el panel derecho, arriba y en todos los módulos (refreshOutliner): cada capa es una carpeta (ojo, nombre = capa
+- Capas en una VENTANA FLOTANTE independiente (#layers-win, layersWin: arrastrar por la cabecera, plegar, cerrar; posición en
+  prefs.layersWin; se reabre desde el menú Capas o Ventanas). refreshOutliner: cada capa es una carpeta (ojo, nombre = capa
   activa, doble clic renombra) con sus grupos y objetos dentro. Arrastrar objetos/grupos sobre otra capa los pasa (moveToLayer).
-  Se quitó la lista "Escena" suelta y el bloque "Capas" plegable. layers/groups se declaran arriba en main.js (antes de usarse).
+  layers/groups/EVAL_MODES se declaran arriba en main.js (antes de usarse).
+- Puck por módulo y personalizable: PUCK_CMDS (biblioteca de comandos con submenús), PUCK_DEFAULT {diag, render, ai},
+  prefs.puck[mod] = lista de ids. getPuck() rehace el Puck al cambiar de módulo o de personalización (MENUS[0]).
+  Editor en Preferencias > Puck (subir/bajar/quitar/añadir, máx. 10, restablecer).
+- Render: Unreal no es código abierto (licencia propia) ni corre en el navegador; plan sigue siendo three-gpu-pathtracer.
 
 ## Siguiente paso
 

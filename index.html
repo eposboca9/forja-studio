@@ -523,6 +523,16 @@
   .keys { border-collapse: collapse; font-size: 12px; width: 100%; }
   .keys td { padding: 6px 4px; border-bottom: 1px solid color-mix(in srgb, var(--fg) 8%, transparent); }
   .keys td:first-child { font-family: var(--font-mono); font-size: 11px; color: var(--muted); white-space: nowrap; width: 45%; }
+  .pk-list { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 3px; counter-reset: pk; }
+  .pk-list li { display: grid; grid-template-columns: 22px 26px 1fr auto; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px; background: rgba(127,127,127,.08); font-size: 12.5px; }
+  .pk-list li::before { counter-increment: pk; content: counter(pk); font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
+  .pk-list svg { width: 18px; height: 18px; }
+  .pk-list small { color: var(--muted); font-size: 10.5px; margin-left: 6px; }
+  .pk-list .pk-btns { display: flex; gap: 2px; }
+  .pk-list .pk-btns button { width: 24px; height: 24px; border: 0; border-radius: 4px; background: none; color: var(--fg); cursor: pointer; font: inherit; }
+  .pk-list .pk-btns button:hover { background: rgba(127,127,127,.18); }
+  .pk-add { display: flex; gap: 6px; align-items: center; }
+  .pk-add .sel { flex: 1; }
   /* --- Modos de evaluación: 3 opciones --- */
   .app:not([data-evalui="a"]) .eval-a-wrap, .app:not([data-evalui="b"]) .eval-b-wrap, .app:not([data-evalui="c"]) .eval-c-wrap,
   .app:not([data-evalui="c"]) .eval-c-fly { display: none !important; }
@@ -548,6 +558,20 @@
   .ev-row b { font-weight: 500; } .ev-row kbd { font-family: var(--font-mono); font-size: 10px; color: var(--muted); }
   .ev-row:hover { background: rgba(127,127,127,.12); }
   .ev-row[aria-pressed="true"] { background: color-mix(in srgb, #2f7bff 22%, transparent); }
+  /* --- Ventana flotante de capas (independiente del panel derecho) --- */
+  .float-win { position: fixed; z-index: 40; width: 270px; max-height: min(70vh, 560px); display: flex; flex-direction: column; border-radius: 10px;
+    background: color-mix(in srgb, var(--panel) 90%, transparent); backdrop-filter: blur(8px);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent), 0 18px 40px -16px rgba(0,0,0,.6); }
+  .float-win[hidden] { display: none; }
+  .fw-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; cursor: grab; user-select: none; touch-action: none; }
+  .fw-head:active { cursor: grabbing; }
+  .fw-head b { font-size: 10.5px; font-weight: 500; letter-spacing: .16em; text-transform: uppercase; }
+  .fw-count { font-family: var(--font-mono); font-size: 10px; color: var(--muted); margin-right: auto; }
+  .fw-btn { width: 22px; height: 22px; border: 0; border-radius: 4px; background: none; color: var(--fg); font: inherit; cursor: pointer; line-height: 1; }
+  .fw-btn:hover { background: rgba(127,127,127,.18); }
+  .fw-body { overflow-y: auto; padding: 0 8px 8px; }
+  .float-win.folded .fw-body { display: none; }
+  .float-win.folded #ly-fold { transform: rotate(-90deg); }
   /* --- Capas y grupos --- */
   .layers-panel h2 { display: flex; align-items: center; gap: 6px; }
   .layers-panel .mini { margin-left: auto; font: inherit; width: 22px; height: 22px; border-radius: 4px; border: 0; background: rgba(127,127,127,.15); color: var(--fg); cursor: pointer; }
@@ -763,12 +787,6 @@
     </div>
 
     <div class="panel-body" id="panel-body">
-    <section class="sec layers-panel" data-module="all">
-      <h2 id="sec-scene">Capas · <span id="scene-count"></span> <button class="mini" id="ly-new" title="Nueva capa">+</button></h2>
-      <ul class="outliner" id="outliner"></ul>
-      <p class="muted">Arrastra objetos de una capa a otra. Clic en el nombre de una capa: lo nuevo irá ahí. Ctrl+G agrupa la selección.</p>
-    </section>
-
     <section class="sec" data-module="ai">
       <h2>Pide un objeto</h2>
       <div class="ai-chat" id="ai-chat" aria-live="polite"></div>
@@ -899,9 +917,22 @@
     </div>
   </header>
 
+  <div class="float-win" id="layers-win" role="dialog" aria-label="Capas">
+    <div class="fw-head" id="layers-head" title="Arrastra para mover">
+      <b>Capas</b><span class="fw-count" id="scene-count"></span>
+      <button class="fw-btn" id="ly-new" title="Nueva capa">+</button>
+      <button class="fw-btn" id="ly-fold" title="Plegar / desplegar" aria-expanded="true">▾</button>
+      <button class="fw-btn" id="ly-close" title="Cerrar (menú Capas o Ventanas para volver a abrirla)">×</button>
+    </div>
+    <div class="fw-body">
+      <ul class="outliner" id="outliner"></ul>
+      <p class="muted">Arrastra objetos de una capa a otra · clic en una capa: lo nuevo irá ahí · Ctrl+G agrupa.</p>
+    </div>
+  </div>
+
   <dialog class="prefs" id="prefs" aria-label="Preferencias">
     <div class="prefs-head"><b>Preferencias</b>
-      <div class="seg small" role="tablist"><button data-ptab="ui">Interfaz</button><button data-ptab="nav">Navegación</button><button data-ptab="help">Atajos</button></div>
+      <div class="seg small" role="tablist"><button data-ptab="ui">Interfaz</button><button data-ptab="puck">Puck</button><button data-ptab="nav">Navegación</button><button data-ptab="help">Atajos</button></div>
       <button class="iconbtn" id="prefs-close" title="Cerrar" aria-label="Cerrar">×</button></div>
     <div class="prefs-page" data-ppage="ui">
       <h3>Tema</h3><div id="pref-theme"></div>
@@ -914,6 +945,12 @@
         <option value="mouse">Botones del ratón (Alias): izq X · medio Y · der Z</option>
         <option value="both">Botones del ratón y manipulador de flechas</option>
         <option value="gizmo">Solo manipulador de flechas</option></select><span></span></div>
+    </div>
+    <div class="prefs-page" data-ppage="puck" hidden>
+      <p class="muted">Cada módulo tiene su propio Puck (Tab). Elige qué esferas lleva y en qué orden (máximo 10). Las que tienen submenú lo conservan.</p>
+      <div class="row"><label for="pk-mod">Módulo</label><select id="pk-mod" class="sel"><option value="diag">Modelado</option><option value="render">Visu</option><option value="ai">IA</option></select><span></span></div>
+      <ol class="pk-list" id="pk-list"></ol>
+      <div class="pk-add"><select id="pk-add" class="sel"></select><button class="btn" id="pk-add-btn">Añadir</button><button class="btn" id="pk-reset">Restablecer</button></div>
     </div>
     <div class="prefs-page" data-ppage="nav" hidden><div id="pref-nav"></div></div>
     <div class="prefs-page" data-ppage="help" hidden>
