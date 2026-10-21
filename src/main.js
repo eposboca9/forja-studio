@@ -447,7 +447,9 @@ const edgeSelMat = LM({ color: 0xe07a1f, linewidth: 2.5 });
 // Líneas de los parches (límites de cada span), siempre visibles en el diagnóstico
 const isoMat = LM({ color: 0x4a8fe0, linewidth: 1.6 }); // líneas de parche en azul: se ven sobre cebra blanca y negra
 const isoSelMat = LM({ color: 0xe07a1f, linewidth: 1.8 });
-const hullMat = new THREE.LineDashedMaterial({ color: '#2d6aa8', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.7 });
+// Polígono de control: punteado en naranja claro; las aristas (borde de la red de una superficie), continuas en naranja oscuro
+const hullMat = new THREE.LineDashedMaterial({ color: '#ffb46b', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.85 });
+const hullEdgeMat = new THREE.LineBasicMaterial({ color: '#c2560f' });
 const combMat = new THREE.LineBasicMaterial({ color: '#e07a1f', transparent: true, opacity: 0.55 });
 const envMat = new THREE.LineBasicMaterial({ color: '#e07a1f' });
 // CVs como pequeños objetos 3D: una cruz "+" fina, plana y orientada con la geometría (en superficies queda
@@ -456,7 +458,7 @@ const envMat = new THREE.LineBasicMaterial({ color: '#e07a1f' });
 // se escalan con la distancia a la cámara para verse siempre del mismo tamaño.
 const handleGeo = new THREE.SphereGeometry(0.75, 10, 8);
 const handlePickMat = new THREE.MeshBasicMaterial({ visible: false });
-const plusGeo = mergeGeometries([new THREE.BoxGeometry(1.2, 0.11, 0.05), new THREE.BoxGeometry(0.11, 1.2, 0.05)]);
+const plusGeo = mergeGeometries([new THREE.BoxGeometry(1.2, 0.121, 0.055), new THREE.BoxGeometry(0.121, 1.2, 0.055)]);
 const cornerGeo = new THREE.BoxGeometry(0.42, 0.42, 0.42);
 const handleMat = new THREE.MeshStandardMaterial({ color: '#2f7bff', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true, opacity: 0.85 });
 const handleSelMat = new THREE.MeshStandardMaterial({ color: '#ff8a1f', emissive: '#5a2400', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true });
@@ -511,6 +513,8 @@ function addSurface(data, base = 'Superficie') {
   p.mesh.userData.obj = obj;
   p.iso = new LineSegments2(new LineSegmentsGeometry(), isoMat); p.iso.layers.set(DIAG);
   p.hull = new THREE.LineSegments(new THREE.BufferGeometry(), hullMat); p.hull.layers.set(DIAG);
+  p.hullEdge = new THREE.LineSegments(new THREE.BufferGeometry(), hullEdgeMat); p.hullEdge.layers.set(DIAG);
+  p.hull.add(p.hullEdge);   // hijo: se muestra y se oculta junto con el polígono
   p.edge = new Line2(new LineGeometry(), edgeSelMat); p.edge.renderOrder = 6;
   p.handles = new THREE.Group();
   scene.add(p.mesh, p.iso, p.hull, p.edge, p.handles);
@@ -598,13 +602,14 @@ function updateSurface(obj) {
   N.uniqueKnots(d.knotsU).forEach((u) => seg((a, tt) => s.getPoint(u, a, tt)));
   N.uniqueKnots(d.knotsV).forEach((v) => seg((a, tt) => s.getPoint(a, v, tt)));
   { const g = new LineSegmentsGeometry(); g.setPositions(iso); setGeo(p.iso, g); }
-  const hull = [], nu = d.cvs.length, nv = d.cvs[0].length;
+  const hull = [], rim = [], nu = d.cvs.length, nv = d.cvs[0].length;
   for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
     const a = d.cvs[i][j];
-    if (i < nu - 1) { const b = d.cvs[i + 1][j]; hull.push(a.x, a.y, a.z, b.x, b.y, b.z); }
-    if (j < nv - 1) { const b = d.cvs[i][j + 1]; hull.push(a.x, a.y, a.z, b.x, b.y, b.z); }
+    if (i < nu - 1) { const b = d.cvs[i + 1][j]; (j === 0 || j === nv - 1 ? rim : hull).push(a.x, a.y, a.z, b.x, b.y, b.z); }
+    if (j < nv - 1) { const b = d.cvs[i][j + 1]; (i === 0 || i === nu - 1 ? rim : hull).push(a.x, a.y, a.z, b.x, b.y, b.z); }
   }
   setGeo(p.hull, posGeo(hull));
+  setGeo(p.hullEdge, posGeo(rim));
   p.hull.computeLineDistances();
   const loop = [], E = 40;
   const at = (u, v) => { s.getPoint(u, v, t); loop.push(t.x, t.y, t.z); };
