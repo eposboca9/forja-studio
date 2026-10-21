@@ -15,7 +15,9 @@ const view = $('view');
 const app = $('app');
 
 // ---------- Renderer y escena ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+// Lienzo transparente: el muro de hormigón de la página se ve detrás del modelo (una sola imagen)
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
+renderer.setClearColor(0x000000, 0);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
@@ -55,6 +57,7 @@ scene.add(ground);
 const grid = new THREE.GridHelper(30, 30, 0x8a8781, 0xa3a09a);
 grid.position.y = 0.001;
 grid.layers.set(DIAG);
+grid.material.transparent = true; grid.material.opacity = 0.22;
 scene.add(grid);
 const gridXY = new THREE.GridHelper(30, 30, 0x4a3a22, 0x2a251d);
 gridXY.rotation.x = Math.PI / 2;
@@ -984,7 +987,7 @@ function frameObjects(list) {
   const c = box.getCenter(new THREE.Vector3()), rad = box.getSize(new THREE.Vector3()).length() / 2;
   const p = panes()[0], vf = THREE.MathUtils.degToRad(camera.fov) / 2;
   const hf = Math.atan(Math.tan(vf) * (p.w / p.h));
-  const dist = rad / Math.sin(Math.min(vf, hf)) * 1.05;
+  const dist = rad / Math.sin(Math.min(vf, hf)) * 1.3; // margen: los menús grabados quedan encima de la vista
   pivot.copy(c);
   camera.position.copy(c).addScaledVector(viewDir(), -dist);
 }
@@ -1020,8 +1023,10 @@ addEventListener('pointermove', (e) => {
   if (pinned) return;
   const r = view.getBoundingClientRect(), panel = $('panel'), tools = $('tools');
   const busy = e.buttons !== 0;
-  if (e.clientX > r.right + 8 && e.clientY > r.top && e.clientY < r.bottom) panel.classList.add('show');
-  else if (!busy && panel.classList.contains('show') && e.clientX < r.right - panel.offsetWidth - 40) panel.classList.remove('show');
+  // El muro derecho (últimos 56 px) abre la losa; se cierra al alejarse de ella
+  const edge = innerWidth - 56;
+  if (e.clientX > edge && e.clientY > 58 && e.clientY < innerHeight - 34) panel.classList.add('show');
+  else if (!busy && panel.classList.contains('show') && e.clientX < edge - panel.offsetWidth - 40) panel.classList.remove('show');
   if (e.clientX < r.left + 64 && e.clientY > r.top && e.clientY < r.bottom) tools.classList.add('show');
   else if (!busy && e.clientX > r.left + 140) tools.classList.remove('show');
 });
@@ -1386,7 +1391,7 @@ function renderPane(p) {
   const diag = p.kind === 'diag';
   const dm = diagMaterial();
   objects.forEach((o) => { if (o.kind === 'surface') o.parts.mesh.material = diag ? dm : materials[o.mat]; });
-  scene.background = diag ? diagBg : renderBg;
+  scene.background = null;
   camera.layers.set(0);
   if (diag) camera.layers.enable(DIAG);
   renderer.render(scene, camera);

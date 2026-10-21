@@ -316,6 +316,21 @@
   .tools hr { box-shadow: none; border-top-color: transparent; }
   .mat[aria-pressed="true"] img { box-shadow: none; outline: 0; }
   .mat[aria-pressed="true"] { color: var(--fg); font-weight: 500; }
+
+  /* Una sola imagen: la vista 3D ocupa todo el muro y los menús quedan grabados encima */
+  .view { grid-row: 1 / -1; grid-column: 1 / -1; z-index: 0; background: transparent; }
+  .top, .tools, .wall-right, .status { z-index: 2; position: relative; }
+  .tools, .app.auto .tools { top: auto; left: auto; transform: none; }
+  .pane.right { border: 0; }
+  .pane-head { top: 66px; }
+  .pane.left .pane-head, .pane.full .pane-head { left: 76px; }
+  .pane .legend { top: 70px; right: 70px; }
+  .hint { bottom: 42px; background: transparent; text-shadow: 0 1px 0 var(--engrave-light); color: var(--muted); }
+  .toast { bottom: 64px; }
+  .panel, .app.auto .panel { background: transparent; right: 56px; }
+  .panel .sec, .panel-head { text-shadow: 0 1px 0 var(--engrave-light); }
+  .btn, .coord, select.sel, .grid4 select, .grid4 input { background: rgba(255,255,255,.28); }
+  .mat img { mix-blend-mode: multiply; }
 </style>
 </head>
 <body>

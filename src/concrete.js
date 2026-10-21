@@ -25,10 +25,10 @@ export function concreteTexture({ w = 1400, h = 1050, base = '#c7c5c0', seed = 7
     g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
   }
   // Escurrimientos verticales de humedad
-  for (let i = 0; i < 26; i++) {
-    const x = r() * w, y = r() * h * 0.7, len = 80 + r() * 320, wd = 6 + r() * 26;
+  for (let i = 0; i < 10; i++) {
+    const x = r() * w, y = r() * h * 0.7, len = 60 + r() * 200, wd = 3 + r() * 10;
     const grd = g.createLinearGradient(0, y, 0, y + len);
-    grd.addColorStop(0, `rgba(60,56,50,${0.05 * mottle})`);
+    grd.addColorStop(0, `rgba(60,56,50,${0.025 * mottle})`);
     grd.addColorStop(1, 'rgba(60,56,50,0)');
     g.fillStyle = grd;
     g.fillRect(x, y, wd, len);
