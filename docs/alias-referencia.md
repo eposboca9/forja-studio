@@ -44,6 +44,31 @@ y de guías de Alias. Sirven para que Forja Studio se comporte como Alias.
 ## Pick walk
 - `Ctrl` + flechas recorre los CVs: curvas con izquierda/derecha; superficies: izq/der = U, arriba/abajo = V.
 
+## Videos del usuario (flujo de trabajo real en Alias)
+
+### Video 1: Align
+- Flujo: Revert → elegir el borde que se mueve ("Select a natural surface boundary or a free curve as input", queda en verde "Input")
+  → elegir la geometría maestra ("Select the master geometry for input alignment") → "Align was successful".
+- Si hay varios bordes bajo el cursor, sale una lista para elegir (Fillet_srf#208.V=..., Blend_srf#219.V=...).
+- Opciones: Continuity G0/G1/G2/G3, Lock Position Row, Alignment Type Edge/Project, Vector, Tangent Balance, Blending, Partial,
+  Explicit Control (U Degree 6, V Degree 3, U/V Spans 1), Position Influence 1.0, Outer Edge, Tangent and Curvature CV Adjustment,
+  Partials, Auto Update, Create History, Continuity Check (Tool Defined), Proxy Display, Diagnostic. Botones Update/Revert/Accept.
+- Asas Start/End [Skew] en los extremos del borde alineado.
+- Query Edit (qryed): "Use [LEFT MOUSE] to edit construction history or [RIGHT MOUSE] to query" → reabre Align con sus opciones.
+- Pista de navegación en giro por objeto: [Left = Azimuth/Elevation] [Middle = Track] [Right = Vertical Dolly] [Right = Horizontal Twist] [ArrowKeys = Step Azimuth/Elevation].
+
+### Video 2: shaders de evaluación, selección y Freeform Blend
+- Paleta Diagnostic Shade: ShdOff, MulCol, RanCol, CurEvl, IsoAng, HorVer, SurEvl, UseTex, LTunnel, ClayAO, Isophotes, Vis1-3, FileSt, BoxMd.
+- Shader Settings: Layer (Isophotes), Map Type (Showroom, Photo-Horizon, Diffuse, Shade-Sky, Double-horizon, User Defined),
+  Transparency, Lock Texture, Repeats 1, Ambient 0.5, Diffuse 0.5, Link Light to Camera.
+  Isófotas: Base Color blanco, Stripe Color negro, Transparency 0.8, Count 50, Thickness 0.01, Sharpness 0.5, Use Camera View Vector.
+- EL USUARIO USA SOBRE TODO EL MAP TYPE "SHOWROOM" para evaluar.
+- "Toggle Model" (marking menu): oculta las líneas de los parches, los hulls y los CVs; el objeto se ve completo y limpio.
+- Herramienta de selección "Surface": "[Left Toggle] [Middle Add] [Right Unpick]", también se puede escribir el nombre.
+- Freeform Blend (ffblnd): Side 1 Continuity (G2 Curvature), Side 2 Continuity (G0 Position), Lock Shape Controls,
+  Side 1/2 Shape 1.0, Modify Parameter, Crown Mode, Explicit Control (U Degree 6, Uniform Spans), Flow Control
+  (Start Edge Align, Interior Free, End Edge Align), Modify Range (Side 1/2 Start/End). "Pick input curves or modify the parameters".
+
 ## Pendiente de implementar en Forja
 - Editor de clutch keys (cambiar Shift+Alt, Alt, Ctrl+Alt, Ctrl, Shift+Ctrl).
 - ViewCube.
