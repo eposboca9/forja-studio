@@ -35,7 +35,7 @@ const EVAL_MODES = [
 ];
 // historial de construcción: relaciones entre objetos que se recalculan solas (ver "Historial de construcción")
 const relations = [];
-let nextRelId = 1, propagating = false;
+let nextRelId = 1, propagating = false, toolsReady = false;
 // capas y grupos de la escena (ver más abajo)
 const layers = [{ id: 1, name: 'Predeterminada', visible: true }];
 let activeLayer = 1, nextLayerId = 2;
@@ -828,6 +828,7 @@ function selectionChanged() {
   renderSelectionPanel();
   refreshOutliner();
   updateStatus();
+  if (toolsReady) syncToolWinToSelection();
 }
 
 // Gizmo: se coloca en el centro de lo seleccionado y mueve todos los CVs afectados a la vez
@@ -1198,25 +1199,9 @@ function finishCreate(created, msg) {
   toast(msg);
 }
 const OPS = {
-  loft() {
-    const cs = selCurves();
-    if (cs.length < 2) return toast('Loft: selecciona 2 o más curvas, en el orden en que la superficie debe pasar por ellas.');
-    const o = addSurface(N.loft(cs.map((c) => c.data)), 'Loft');
-    finishCreate([o], `${o.name} creado a partir de ${cs.length} curvas`);
-  },
-  extrude() {
-    const cs = selCurves();
-    if (!cs.length) return toast('Extruir: selecciona una o más curvas.');
-    const h = +$('op-dist').value;
-    const out = cs.map((c) => addSurface(N.extrude(c.data, c.data.plane === 'xy' ? new THREE.Vector3(0, 0, h) : new THREE.Vector3(0, h, 0)), 'Extrusión'));
-    finishCreate(out, `${out.length} ${out.length === 1 ? 'extrusión creada' : 'extrusiones creadas'} (${h.toFixed(1)} dm)`);
-  },
-  revolve() {
-    const cs = selCurves();
-    if (!cs.length) return toast('Revolución: selecciona una curva de perfil. Funciona mejor dibujada en el plano frontal.');
-    const out = cs.map((c) => addSurface(N.revolve(c.data), 'Revolución'));
-    finishCreate(out, 'Revolución creada alrededor del eje Y');
-  },
+  loft: () => loftSelection(),
+  extrude: () => extrudeSelection(),
+  revolve: () => revolveSelection(),
 };
 
 function deleteSelection() {
@@ -1244,7 +1229,7 @@ function howFor(e) {
 renderer.domElement.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); }); // sin autodesplazamiento
 renderer.domElement.addEventListener('pointerdown', (e) => {
   dragPane = paneAt(e.clientX);
-  if (carousel) { down = null; return; }
+  if (carousel || extrudeDrag) { down = null; return; }
   if (navHeld || (e.button !== 0 && !(navStyle === 'alias' && tool === 'select'))) { down = null; return; }
   const canBox = tool === 'select' && !gizmo.axis && (navStyle === 'alias' || e.shiftKey);
   down = { x: e.clientX, y: e.clientY, box: canBox, boxing: false };
@@ -3196,20 +3181,27 @@ buildEvalUI();
 renderLayers();
 updateEvalUI();
 
-// ---------- Historial de construcción ----------
-// Relaciones entre objetos (src/history.js): Align, Blend, Offset y Simetría. Cuando cambia una entrada
-// (por ejemplo, se mueve un CV de la superficie maestra) se recalcula la salida, y en cadena lo que dependa de ella.
+// ---------- Historial de construcción y herramientas de superficies ----------
+// Relaciones entre objetos (src/history.js). Cuando cambia una entrada (p. ej. se mueve un CV de la superficie
+// maestra o de la curva extruida) se recalcula la salida, y en cadena lo que dependa de ella.
 const byId = (id) => objects.find((o) => o.id === id);
-const inputsOf = (r) => (r.type === 'align' ? [r.master] : r.type === 'blend' ? [r.a, r.b] : [r.src]);
+const inputsOf = (r) => (r.type === 'align' ? [r.master] : r.type === 'blend' ? [r.a, r.b] : r.type === 'loft' ? r.srcs : [r.src]);
 const outputOf = (r) => (r.type === 'align' ? r.slave : r.out);
-const REL_NAMES = { align: 'Align', blend: 'Blend', offset: 'Offset', mirror: 'Simetría' };
+const REL_NAMES = { align: 'Align', blend: 'Blend', offset: 'Offset', mirror: 'Simetría', extrude: 'Extruir', revolve: 'Revolución', loft: 'Loft' };
+function relationData(r, ins, out) {
+  if (r.type === 'align') return HX.align(r, ins[0].data, out.data);
+  if (r.type === 'blend') return HX.blendData(r, ins[0].data, ins[1].data);
+  if (r.type === 'offset') return HX.offsetData(ins[0].data, r.dist);
+  if (r.type === 'mirror') return HX.mirrorData(ins[0].data, ins[0].kind, r.plane || 'x');
+  if (r.type === 'extrude') return HX.extrudeData(ins[0].data, r.dist, r.dir, r.both);
+  if (r.type === 'revolve') return N.revolve(ins[0].data);
+  return N.loft(ins.map((c) => c.data));
+}
 function applyRelation(r) {
   const out = byId(outputOf(r)), ins = inputsOf(r).map(byId);
   if (!out || ins.some((o) => !o)) return false;
-  if (r.type === 'align') out.data = HX.align(r, ins[0].data, out.data);
-  else if (r.type === 'blend') out.data = HX.blendData(r, ins[0].data, ins[1].data);
-  else if (r.type === 'offset') out.data = HX.offsetData(ins[0].data, r.dist);
-  else out.data = HX.mirrorData(ins[0].data, ins[0].kind);
+  try { out.data = relationData(r, ins, out); }
+  catch (e) { console.warn(e); toast(`${REL_NAMES[r.type]}: no se pudo recalcular (${e.message})`); return false; }
   const was = propagating;
   propagating = true; updateObject(out); propagating = was;
   return true;
@@ -3240,12 +3232,87 @@ function removeRelation(id) {
   checkpoint();
   const i = relations.findIndex((r) => r.id === id);
   if (i >= 0) relations.splice(i, 1);
-  renderHistory();
+  renderHistory(); TW.hide();
   toast('Historial quitado: la superficie queda como está');
 }
 function addRelation(r) { r.id = nextRelId++; relations.push(r); renderHistory(); return r; }
+// valores que usa cada herramienta la próxima vez (se recuerdan)
+const toolDef = Object.assign({ alignCont: 2, alignTension: 1, blendA: 2, blendB: 2, blendTension: 1, extDir: 'auto', extBoth: false, offsetDist: 0.2, mirrorPlane: 'x' }, prefs.tools || {});
+const saveToolDef = () => { prefs.tools = toolDef; savePrefs(); };
 
-// --- Elegir bordes (Align y Blend): primero el que se ajusta, después el maestro ---
+// --- Ventana de opciones de la herramienta: un desenfoque de lo que hay detrás, sin marco, con los ajustes encima ---
+const TW = {
+  spec: null,
+  show(spec) { this.spec = spec; this.render(); $('toolwin').hidden = false; },
+  hide() { this.spec = null; $('toolwin').hidden = true; },
+  render() {
+    const sp = this.spec;
+    if (!sp) return;
+    $('tw-title').textContent = sp.title;
+    const body = $('tw-body');
+    body.innerHTML = '';
+    if (sp.hint) { const h = document.createElement('p'); h.className = 'tw-hint'; h.textContent = sp.hint(); body.append(h); }
+    for (const f of sp.fields || []) {
+      const row = document.createElement('div');
+      row.className = 'tw-row';
+      if (f.type === 'seg') {
+        row.innerHTML = `<label>${esc(f.label)}</label><div class="tw-seg">${f.opts.map(([v, l]) => `<button data-v="${v}" aria-pressed="${String(f.get() === v)}">${esc(l)}</button>`).join('')}</div>`;
+        row.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+          const v = f.opts.find(([x]) => String(x) === b.dataset.v)[0];
+          f.set(v); this.render();
+        }));
+      } else if (f.type === 'range') {
+        row.innerHTML = `<label>${esc(f.label)}</label><input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${f.get()}"><output>${f.fmt(f.get())}</output>`;
+        const inp = row.querySelector('input'), out = row.querySelector('output');
+        inp.addEventListener('pointerdown', () => f.start?.());
+        inp.addEventListener('input', () => { f.set(+inp.value); out.textContent = f.fmt(+inp.value); });
+      } else if (f.type === 'check') {
+        row.innerHTML = `<label class="tw-check"><input type="checkbox" ${f.get() ? 'checked' : ''}> ${esc(f.label)}</label>`;
+        row.querySelector('input').addEventListener('change', (e) => { f.set(e.target.checked); this.render(); });
+      } else if (f.type === 'html') {
+        row.className = 'tw-diag'; row.innerHTML = f.html();
+        if (f.diagOf) row.dataset.diagOf = f.diagOf;
+      }
+      body.append(row);
+    }
+    if (sp.actions?.length) {
+      const a = document.createElement('div');
+      a.className = 'tw-actions';
+      sp.actions.forEach((x) => { const b = document.createElement('button'); b.className = 'tw-btn' + (x.primary ? ' primary' : ''); b.textContent = x.label; b.addEventListener('click', x.run); a.append(b); });
+      body.append(a);
+    }
+  },
+};
+$('tw-close').addEventListener('click', () => { if (tool !== 'select') setTool('select'); cancelExtrudeDrag(true); TW.hide(); });
+// la ventana se arrastra por su título
+{
+  const h = $('tw-head'); let d = null;
+  h.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) return; const r = $('toolwin').getBoundingClientRect(); d = { dx: e.clientX - r.left, dy: e.clientY - r.top }; h.setPointerCapture(e.pointerId); });
+  h.addEventListener('pointermove', (e) => { if (d) { $('toolwin').style.left = e.clientX - d.dx + 'px'; $('toolwin').style.top = e.clientY - d.dy + 'px'; } });
+  h.addEventListener('pointerup', () => { d = null; });
+}
+
+// --- Elección rápida junto al cursor (G0 · G1 · G2 · G3 al unir superficies) ---
+function quickPick(x, y, title, opts, def) {
+  return new Promise((resolve) => {
+    const el = $('quickpick');
+    el.innerHTML = `<b>${esc(title)}</b><div>${opts.map(([v, l], i) => `<button data-i="${i}" class="${v === def ? 'def' : ''}"><kbd>${i + 1}</kbd>${esc(l)}</button>`).join('')}</div>`;
+    el.style.left = Math.min(innerWidth - 300, x + 14) + 'px'; el.style.top = Math.min(innerHeight - 90, y + 14) + 'px';
+    el.hidden = false;
+    const done = (v) => { el.hidden = true; removeEventListener('keydown', key, true); removeEventListener('pointerdown', out, true); resolve(v); };
+    const key = (e) => {
+      if (/^[1-9]$/.test(e.key) && opts[+e.key - 1]) { e.preventDefault(); e.stopPropagation(); done(opts[+e.key - 1][0]); }
+      else if (e.key === 'Enter') { e.preventDefault(); done(def); } else if (e.key === 'Escape') { e.stopPropagation(); done(null); }
+    };
+    const out = (e) => { if (!el.contains(e.target)) { e.stopPropagation(); e.preventDefault(); done(null); } };
+    el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => done(opts[+b.dataset.i][0])));
+    addEventListener('keydown', key, true);
+    setTimeout(() => addEventListener('pointerdown', out, true), 0);
+  });
+}
+const G_OPTS = (from, to) => [[0, 'G0 posición'], [1, 'G1 tangente'], [2, 'G2 curvatura'], [3, 'G3']].filter(([v]) => v >= from && v <= to);
+
+// --- Elegir bordes (Align y Blend) ---
 let edgeOp = null;
 const edgeMarks = new THREE.Group();
 scene.add(edgeMarks);
@@ -3267,74 +3334,209 @@ function surfaceEdgeAt(e) {
   return { obj: hit.object.userData.obj, edge: HX.nearestEdge(hit.uv.x, hit.uv.y) };
 }
 const EDGE_OPS = {
-  align: { steps: ['Align: clic cerca del borde de la superficie que se va a ajustar (verde)', 'Align: ahora clic en el borde de la superficie maestra (azul)'], done: createAlign },
-  blend: { steps: ['Blend: clic cerca del primer borde', 'Blend: clic cerca del segundo borde'], done: createBlend },
+  align: {
+    title: 'Align', steps: ['1 · Clic cerca del borde de la superficie que se ajusta (verde)', '2 · Clic en el borde de la superficie maestra (azul)'],
+    fields: () => [
+      { type: 'seg', label: 'Continuidad', opts: [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.alignCont, set: (v) => { toolDef.alignCont = v; saveToolDef(); } },
+      { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => toolDef.alignTension, set: (v) => { toolDef.alignTension = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) },
+      { type: 'html', html: () => '<span class="tw-note">Al elegir la maestra sale G0–G3 junto al cursor (o pulsa 1–4).</span>' }],
+    async afterPick(i, p, e) {
+      if (i === 1) {
+        const c = await quickPick(e.clientX, e.clientY, 'Continuidad', G_OPTS(0, 3), toolDef.alignCont);
+        if (c == null) return restartEdgeOp();
+        toolDef.alignCont = c; saveToolDef();
+        createAlign(edgeOp.picks[0], edgeOp.picks[1], c);
+      }
+    },
+  },
+  blend: {
+    title: 'Blend', steps: ['1 · Clic cerca del primer borde', '2 · Clic cerca del segundo borde'],
+    fields: () => [
+      { type: 'seg', label: 'Lado 1', opts: [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.blendA, set: (v) => { toolDef.blendA = v; saveToolDef(); } },
+      { type: 'seg', label: 'Lado 2', opts: [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.blendB, set: (v) => { toolDef.blendB = v; saveToolDef(); } },
+      { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => toolDef.blendTension, set: (v) => { toolDef.blendTension = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) },
+      { type: 'html', html: () => '<span class="tw-note">En cada borde sale la continuidad junto al cursor (o pulsa 1–4).</span>' }],
+    async afterPick(i, p, e) {
+      const c = await quickPick(e.clientX, e.clientY, `Continuidad lado ${i + 1}`, G_OPTS(0, 3), i ? toolDef.blendB : toolDef.blendA);
+      if (c == null) return restartEdgeOp();
+      if (i === 0) toolDef.blendA = c; else toolDef.blendB = c;
+      saveToolDef(); TW.render();
+      if (i === 1) createBlend(edgeOp.picks[0], edgeOp.picks[1], toolDef.blendA, toolDef.blendB);
+    },
+  },
 };
+function edgeSpec() {
+  const op = EDGE_OPS[edgeOp.type];
+  return { title: op.title, hint: () => op.steps[Math.min(edgeOp.picks.length, op.steps.length - 1)], fields: op.fields(), actions: [{ label: 'Terminar', run: () => setTool('select') }] };
+}
 function startEdgeOp(type) {
   setTool('select'); setPickMode('object');
   if (layout === 'render' || layout === 'ai') switchLayout('diag');
-  const op = EDGE_OPS[type];
-  edgeOp = { type, picks: [], hint: () => `${op.steps[edgeOp.picks.length]} · Esc: cancelar` };
+  edgeOp = { type, picks: [], hint: () => `${EDGE_OPS[type].steps[Math.min(edgeOp.picks.length, 1)]} · Esc: terminar` };
   setTool('edge');
+  TW.show(edgeSpec());
 }
-function endEdgeOp() { edgeOp = null; [0, 1, 2].forEach((k) => markEdge(k, null)); }
-function edgeClick(e) {
-  if (!edgeOp || e.button !== 0) return;
+// tras crear (o cancelar) la herramienta sigue activa para la siguiente unión, como en Alias
+function restartEdgeOp() { if (!edgeOp) return; edgeOp.picks = []; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint(); TW.show(edgeSpec()); }
+function endEdgeOp() { edgeOp = null; [0, 1, 2].forEach((k) => markEdge(k, null)); if (TW.spec && !TW.spec.rel) TW.hide(); }
+let edgeBusy = false;
+async function edgeClick(e) {
+  if (!edgeOp || e.button !== 0 || edgeBusy) return;
   const p = surfaceEdgeAt(e);
   if (!p) return toast('Haz clic sobre una superficie, cerca del borde que quieres.');
   if (edgeOp.picks[0]?.obj === p.obj) return toast('Elige un borde de otra superficie.');
-  markEdge(edgeOp.picks.length, p.obj, p.edge);
+  const i = edgeOp.picks.length;
+  markEdge(i, p.obj, p.edge);
   edgeOp.picks.push(p);
-  if (edgeOp.picks.length < 2) { updateHint(); return; }
-  const [a, b] = edgeOp.picks, type = edgeOp.type;
-  setTool('select');
-  EDGE_OPS[type].done(a, b);
+  updateHint(); TW.render();
+  edgeBusy = true;
+  try { await EDGE_OPS[edgeOp.type].afterPick(i, p, e); } finally { edgeBusy = false; }
 }
 renderer.domElement.addEventListener('pointermove', (e) => {
-  if (tool !== 'edge' || e.buttons) return;
+  if (tool !== 'edge' || e.buttons || edgeBusy) return;
   const p = surfaceEdgeAt(e);
   if (p && p.obj !== edgeOp?.picks[0]?.obj) markEdge(2, p.obj, p.edge); else markEdge(2, null);
 });
 
-function createAlign(s, m) {
+function createAlign(s, m, cont = toolDef.alignCont) {
   checkpoint();
-  const r = { type: 'align', slave: s.obj.id, sEdge: s.edge, master: m.obj.id, mEdge: m.edge, cont: 2, tension: 1 };
-  r.rev = HX.reversed(m.obj.data, m.edge, s.obj.data, s.edge);
-  s.obj.data = HX.prepareSlave(s.obj.data, s.edge, m.obj.data, m.edge, r.cont, r.rev);
-  r.lambda0 = HX.naturalLambda(s.obj.data, s.edge, m.obj.data, m.edge, r.rev);
-  addRelation(r);
-  applyRelation(r);
-  finishCreate([s.obj], `Align G2: ${s.obj.name} sigue a ${m.obj.name}. Si mueves ${m.obj.name}, ${s.obj.name} se ajusta sola.`);
-  renderHistory();
+  const r = { type: 'align', slave: s.obj.id, sEdge: s.edge, master: m.obj.id, mEdge: m.edge, cont, tension: toolDef.alignTension };
+  try {
+    r.rev = HX.reversed(m.obj.data, m.edge, s.obj.data, s.edge);
+    s.obj.data = HX.prepareSlave(s.obj.data, s.edge, m.obj.data, m.edge, r.cont, r.rev);
+    r.lambda0 = HX.naturalLambda(s.obj.data, s.edge, m.obj.data, m.edge, r.rev);
+    addRelation(r);
+    applyRelation(r);
+  } catch (err) { console.warn(err); toast(`Align no se pudo hacer: ${err.message}`); return restartEdgeOp(); }
+  toast(`Align G${cont}: ${s.obj.name} sigue a ${m.obj.name}. Si mueves ${m.obj.name}, ${s.obj.name} se ajusta sola.`);
+  restartEdgeOp();
 }
-function createBlend(a, b) {
-  if (!HX.blendCompatible(a.obj.data, a.edge, b.obj.data, b.edge)) {
-    return toast('Blend: los dos bordes deben tener los mismos CVs y grado a lo largo (reconstruye una en el panel Selección).');
-  }
+function createBlend(a, b, cA = toolDef.blendA, cB = toolDef.blendB) {
   checkpoint();
-  const r = { type: 'blend', a: a.obj.id, aEdge: a.edge, b: b.obj.id, bEdge: b.edge, cont: 2, tension: 1, rev: HX.reversed(a.obj.data, a.edge, b.obj.data, b.edge) };
-  const o = addSurface(HX.blendData(r, a.obj.data, b.obj.data), 'Blend');
+  const r = { type: 'blend', a: a.obj.id, aEdge: a.edge, b: b.obj.id, bEdge: b.edge, contA: cA, contB: cB, tension: toolDef.blendTension, rev: HX.reversed(a.obj.data, a.edge, b.obj.data, b.edge) };
+  let o;
+  try { o = addSurface(HX.blendData(r, a.obj.data, b.obj.data), 'Blend'); }
+  catch (err) { console.warn(err); toast(`Blend no se pudo hacer: ${err.message}`); return restartEdgeOp(); }
   r.out = o.id;
   addRelation(r);
-  finishCreate([o], `${o.name} creado (G2 en los dos lados, con historial)`);
+  const exact = HX.blendCompatible(a.obj.data, a.edge, b.obj.data, b.edge);
+  toast(`${o.name}: G${cA} / G${cB}${exact ? '' : ' (bordes distintos: uno se remuestreó, mira el diagnóstico)'}`);
+  restartEdgeOp();
 }
 function offsetSelection() {
   const src = selObjs.filter((o) => o.kind === 'surface');
-  if (!src.length) return toast('Offset: elige una o más superficies.');
+  if (!src.length) return toast('Offset: elige una o más superficies y vuelve a pulsar Offset.');
   checkpoint();
-  const made = src.map((s) => { const r = { type: 'offset', src: s.id, dist: 0.2 }; const o = addSurface(HX.offsetData(s.data, r.dist), 'Offset'); r.out = o.id; addRelation(r); return o; });
-  finishCreate(made, 'Offset a 0.20 dm, con historial (cambia la distancia en Historial)');
+  const made = src.map((s) => { const r = { type: 'offset', src: s.id, dist: toolDef.offsetDist }; const o = addSurface(HX.offsetData(s.data, r.dist), 'Offset'); r.out = o.id; addRelation(r); return o; });
+  finishCreate(made, `Offset a ${toolDef.offsetDist.toFixed(2)} dm, con historial`);
 }
 function mirrorSelection() {
   const src = selObjs.filter((o) => o.kind !== 'mesh');
-  if (!src.length) return toast('Simetría: elige superficies o curvas.');
+  if (!src.length) return toast('Simetría: elige superficies o curvas y vuelve a pulsar Simetría.');
   checkpoint();
   const made = src.map((s) => {
-    const r = { type: 'mirror', src: s.id };
-    const d = HX.mirrorData(s.data, s.kind), o = s.kind === 'curve' ? addCurve(d, s.name + ' sim.') : addSurface(d, s.name + ' sim.');
+    const r = { type: 'mirror', src: s.id, plane: toolDef.mirrorPlane };
+    const d = HX.mirrorData(s.data, s.kind, r.plane), o = s.kind === 'curve' ? addCurve(d, s.name + ' sim.') : addSurface(d, s.name + ' sim.');
     r.out = o.id; addRelation(r); return o;
   });
-  finishCreate(made, 'Simetría en el plano YZ, con historial: la copia sigue al original');
+  finishCreate(made, 'Simetría con historial: la copia sigue al original');
+}
+// --- Revolución y loft con historial ---
+function revolveSelection() {
+  const cs = selCurves();
+  if (!cs.length) return toast('Revolución: elige una curva de perfil (mejor dibujada de frente) y vuelve a pulsar Revolución.');
+  checkpoint();
+  const made = cs.map((c) => { const r = { type: 'revolve', src: c.id }; const o = addSurface(N.revolve(c.data), 'Revolución'); r.out = o.id; addRelation(r); return o; });
+  finishCreate(made, 'Revolución alrededor del eje Y, con historial: sigue a su curva');
+}
+function loftSelection() {
+  const cs = selCurves();
+  if (cs.length < 2) return toast('Loft: elige 2 o más curvas, en orden, y vuelve a pulsar Loft.');
+  checkpoint();
+  const r = { type: 'loft', srcs: cs.map((c) => c.id) };
+  const o = addSurface(N.loft(cs.map((c) => c.data)), 'Loft');
+  r.out = o.id; addRelation(r);
+  finishCreate([o], `${o.name} por ${cs.length} curvas, con historial`);
+}
+// --- Extruir con el ratón: se crea la superficie y la distancia sigue al ratón hasta hacer clic ---
+let extrudeDrag = null;
+function extrudeSelection() {
+  const cs = selCurves();
+  if (!cs.length) return toast('Extruir: elige una o más curvas y vuelve a pulsar Extruir.');
+  checkpoint();
+  const rels = cs.map((c) => {
+    const r = { type: 'extrude', src: c.id, dist: 0.01, dir: toolDef.extDir, both: toolDef.extBoth };
+    const o = addSurface(HX.extrudeData(c.data, r.dist, r.dir, r.both), 'Extrusión');
+    r.out = o.id; addRelation(r); return r;
+  });
+  // la distancia sigue al cursor a lo largo de la dirección de extrusión, medida desde el centro de la curva
+  const c0 = cvCenter(cs[0].data), dirv = HX.extrudeData(cs[0].data, 1, rels[0].dir, false).cvs[1][0];
+  const d0 = HX.extrudeData(cs[0].data, 0, rels[0].dir, false).cvs[1][0];
+  const axis = new THREE.Vector3(dirv.x - d0.x, dirv.y - d0.y, dirv.z - d0.z);
+  extrudeDrag = { rels, c0, axis };
+  TW.show(relSpec(rels[0], rels));
+  toast('Mueve el ratón arriba / abajo para extruir · clic para terminar · Esc: también termina');
+}
+function setExtrudeDist(rels, d) { rels.forEach((r) => { r.dist = d; applyRelation(r); }); }
+function cancelExtrudeDrag(keep) { if (!extrudeDrag) return; const r = extrudeDrag.rels; extrudeDrag = null; if (keep) { finishCreate(r.map((x) => byId(x.out)).filter(Boolean), 'Extrusión terminada (cambia la distancia en su ventana)'); TW.show(relSpec(r[0], r)); } }
+addEventListener('pointermove', (e) => {
+  if (!extrudeDrag) return;
+  const pn = paneAt(e.clientX), r = renderer.domElement.getBoundingClientRect();
+  useAspect(pn);
+  const toScr = (v) => { const q = v.clone().project(camera); return new THREE.Vector2(r.left + pn.x + ((q.x + 1) / 2) * pn.w, r.top + ((1 - q.y) / 2) * pn.h); };
+  const a = toScr(extrudeDrag.c0), b = toScr(extrudeDrag.c0.clone().add(extrudeDrag.axis)), s2 = b.clone().sub(a);
+  const m = new THREE.Vector2(e.clientX, e.clientY).sub(a);
+  const d = Math.round((s2.lengthSq() > 4 ? m.dot(s2) / s2.lengthSq() : (a.y - e.clientY) * 0.01) * 100) / 100 || 0.01;
+  setExtrudeDist(extrudeDrag.rels, d);
+  if (TW.spec?.rel === extrudeDrag.rels[0]) { const o = document.querySelector('#tw-body input[type=range]'); if (o) { o.value = d; o.nextElementSibling.textContent = d.toFixed(2); } }
+});
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!extrudeDrag) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  cancelExtrudeDrag(true);
+}, true);
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && extrudeDrag) cancelExtrudeDrag(true); }, true);
+
+// --- Ventana de opciones de una relación ya creada (al elegir su resultado se abre para modificarla) ---
+function relSpec(r, group = [r]) {
+  const redo = () => { group.forEach((x) => { if (applyRelation(x)) { const out = byId(outputOf(x)); if (out) propagateFrom(out); } }); scheduleHistoryDiag(); renderHistory(); };
+  const set = (k, v) => { checkpoint(); group.forEach((x) => (x[k] = v)); redo(); };
+  const live = (k) => (v) => { group.forEach((x) => (x[k] = v)); redo(); };
+  const G = (from, to) => [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']].filter(([v]) => v >= from && v <= to);
+  const nm = (id) => byId(id)?.name || '¿?';
+  const fields = [];
+  let title = REL_NAMES[r.type];
+  if (r.type === 'align') {
+    title += ` · ${nm(r.slave)} → ${nm(r.master)}`;
+    fields.push({ type: 'seg', label: 'Continuidad', opts: G(0, 3), get: () => r.cont, set: (v) => set('cont', v) },
+      { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) });
+  } else if (r.type === 'blend') {
+    title += ` · ${nm(r.a)} ↔ ${nm(r.b)}`;
+    fields.push({ type: 'seg', label: 'Lado 1', opts: G(0, 3), get: () => r.contA ?? r.cont, set: (v) => set('contA', v) },
+      { type: 'seg', label: 'Lado 2', opts: G(0, 3), get: () => r.contB ?? r.cont, set: (v) => set('contB', v) },
+      { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) });
+  } else if (r.type === 'extrude') {
+    title += group.length > 1 ? ` · ${group.length} curvas` : ` · ${nm(r.src)}`;
+    fields.push({ type: 'range', label: 'Distancia', min: -10, max: 10, step: 0.01, get: () => r.dist, start: checkpoint, set: live('dist'), fmt: (v) => v.toFixed(2) + ' dm' },
+      { type: 'seg', label: 'Dirección', opts: [['auto', 'Normal'], ['x', 'X'], ['y', 'Y'], ['z', 'Z']], get: () => r.dir, set: (v) => { toolDef.extDir = v; saveToolDef(); set('dir', v); } },
+      { type: 'check', label: 'Hacia los dos lados', get: () => r.both, set: (v) => { toolDef.extBoth = v; saveToolDef(); set('both', v); } });
+  } else if (r.type === 'offset') {
+    title += ` · ${nm(r.src)}`;
+    fields.push({ type: 'range', label: 'Distancia', min: -2, max: 2, step: 0.01, get: () => r.dist, start: checkpoint, set: (v) => { toolDef.offsetDist = v; saveToolDef(); live('dist')(v); }, fmt: (v) => v.toFixed(2) + ' dm' });
+  } else if (r.type === 'mirror') {
+    title += ` · ${nm(r.src)}`;
+    fields.push({ type: 'seg', label: 'Plano', opts: [['x', 'YZ'], ['y', 'XZ'], ['z', 'XY']], get: () => r.plane || 'x', set: (v) => { toolDef.mirrorPlane = v; saveToolDef(); set('plane', v); } });
+  } else title += ` · ${r.type === 'loft' ? r.srcs.length + ' curvas' : nm(r.src)}`;
+  if (r.type === 'align' || r.type === 'blend') fields.push({ type: 'html', html: () => relDiag(r), diagOf: r.id });
+  return { title, rel: r, fields, actions: [{ label: 'Quitar historial', run: () => removeRelation(r.id) }, { label: 'Cerrar', primary: true, run: () => TW.hide() }] };
+}
+// al elegir un solo objeto que sale de una relación, su ventana de opciones se abre para modificarla
+function syncToolWinToSelection() {
+  if (tool !== 'select' || extrudeDrag) return;
+  const o = selObjs.length === 1 && pickMode === 'object' ? selObjs[0] : null;
+  const r = o && relations.find((x) => outputOf(x) === o.id);
+  if (r) { if (TW.spec?.rel !== r) TW.show(relSpec(r)); }
+  else if (TW.spec?.rel) TW.hide();
 }
 
 // --- Panel "Historial de construcción" ---
@@ -3345,47 +3547,40 @@ function relDiag(r) {
     const ok = (c) => `<b class="${c ? 'ok' : 'bad'}">${c ? '✓' : '✗'}</b>`;
     return `${ok(d.gap < 1e-3)} hueco ${d.gap.toFixed(4)} dm · ${cont >= 1 ? ok(d.angle < 0.1) : ''} ángulo ${d.angle.toFixed(2)}° · ${cont >= 2 ? ok(d.curv < 0.05) : ''} curvatura ${(d.curv * 100).toFixed(1)}%`;
   };
-  if (r.type === 'align') return fmtD(HX.diagnose(ins[0].data, r.mEdge, out.data, r.sEdge, r.rev), r.cont);
-  if (r.type === 'blend') return `A: ${fmtD(HX.diagnose(ins[0].data, r.aEdge, out.data, 'v0', false), r.cont)}<br>B: ${fmtD(HX.diagnose(ins[1].data, r.bEdge, out.data, 'v1', r.rev), r.cont)}`;
+  try {
+    if (r.type === 'align') return fmtD(HX.diagnose(ins[0].data, r.mEdge, out.data, r.sEdge, r.rev), r.cont);
+    if (r.type === 'blend') return `1: ${fmtD(HX.diagnose(ins[0].data, r.aEdge, out.data, 'v0', false), r.contA ?? r.cont)}<br>2: ${fmtD(HX.diagnose(ins[1].data, r.bEdge, out.data, 'v1', r.rev), r.contB ?? r.cont)}`;
+  } catch (e) { return ''; }
   return '';
 }
 let histDiagT = 0;
 function scheduleHistoryDiag() {
   clearTimeout(histDiagT);
-  histDiagT = setTimeout(() => document.querySelectorAll('#hist-body [data-diag-of]').forEach((el) => { const r = relations.find((x) => x.id === +el.dataset.diagOf); if (r) el.innerHTML = relDiag(r); }), 250);
+  histDiagT = setTimeout(() => document.querySelectorAll('[data-diag-of]').forEach((el) => { const r = relations.find((x) => x.id === +el.dataset.diagOf); if (r) el.innerHTML = relDiag(r); }), 250);
 }
 function renderHistory() {
   const box = $('hist-body');
   if (!box) return;
   if (!relations.length) {
-    box.innerHTML = '<p class="muted">Sin historial. Usa Align, Blend, Offset o Simetría (Puck › Editar, o el menú Superficies): la superficie que crean sigue a las originales.</p>';
+    box.innerHTML = '<p class="muted">Sin historial. Align, Blend, Extruir, Revolución, Loft, Offset y Simetría (menú Superficies o Puck) crean superficies que siguen a las originales.</p>';
     return;
   }
   const nm = (id) => esc(byId(id)?.name || '¿?');
   box.innerHTML = relations.map((r) => {
-    const title = r.type === 'align' ? `${nm(r.slave)} → ${nm(r.master)}` : r.type === 'blend' ? `${nm(r.out)}: ${nm(r.a)} ↔ ${nm(r.b)}` : `${nm(r.out)} ← ${nm(r.src)}`;
-    const conts = r.type === 'align' ? [0, 1, 2, 3] : r.type === 'blend' ? [1, 2] : [];
-    return `<div class="hist-rel" data-rel="${r.id}">
-      <div class="hist-h"><b>${REL_NAMES[r.type]}</b><span>${title}</span><button class="mini" data-del title="Quitar historial (la forma se queda)">×</button></div>
-      ${conts.length ? `<div class="seg small">${conts.map((c) => `<button data-cont="${c}" aria-pressed="${r.cont === c}">G${c}</button>`).join('')}</div>` : ''}
-      ${r.tension != null ? `<div class="row"><label>Tensión</label><input type="range" min="0.2" max="3" step="0.05" value="${r.tension}" data-tension><output>${r.tension.toFixed(2)}</output></div>` : ''}
-      ${r.type === 'offset' ? `<div class="row"><label>Distancia</label><input type="range" min="-1" max="1" step="0.01" value="${r.dist}" data-dist><output>${r.dist.toFixed(2)}</output></div>` : ''}
-      <p class="hist-diag" data-diag-of="${r.id}">${relDiag(r)}</p></div>`;
+    const title = r.type === 'align' ? `${nm(r.slave)} → ${nm(r.master)} · G${r.cont}` : r.type === 'blend' ? `${nm(r.out)} · G${r.contA ?? r.cont}/G${r.contB ?? r.cont}`
+      : r.type === 'loft' ? `${nm(r.out)} ← ${r.srcs.length} curvas` : `${nm(r.out)} ← ${nm(r.src)}`;
+    return `<div class="hist-rel" data-rel="${r.id}"><div class="hist-h"><b>${REL_NAMES[r.type]}</b><span>${title}</span>
+      <button class="mini" data-edit title="Abrir sus opciones">⋯</button><button class="mini" data-del title="Quitar historial (la forma se queda)">×</button></div>
+      ${r.type === 'align' || r.type === 'blend' ? `<p class="hist-diag" data-diag-of="${r.id}">${relDiag(r)}</p>` : ''}</div>`;
   }).join('');
   box.querySelectorAll('.hist-rel').forEach((el) => {
     const r = relations.find((x) => x.id === +el.dataset.rel);
-    const redo = () => { if (applyRelation(r)) { const out = byId(outputOf(r)); if (out) propagateFrom(out); } scheduleHistoryDiag(); };
     el.querySelector('[data-del]').addEventListener('click', () => removeRelation(r.id));
-    el.querySelectorAll('[data-cont]').forEach((b) => b.addEventListener('click', () => { checkpoint(); r.cont = +b.dataset.cont; redo(); renderHistory(); }));
-    const t = el.querySelector('[data-tension]');
-    t?.addEventListener('pointerdown', () => checkpoint());
-    t?.addEventListener('input', () => { r.tension = +t.value; t.nextElementSibling.textContent = r.tension.toFixed(2); redo(); });
-    const dd = el.querySelector('[data-dist]');
-    dd?.addEventListener('pointerdown', () => checkpoint());
-    dd?.addEventListener('input', () => { r.dist = +dd.value; dd.nextElementSibling.textContent = r.dist.toFixed(2); redo(); });
+    el.querySelector('[data-edit]').addEventListener('click', () => TW.show(relSpec(r)));
   });
 }
 renderHistory();
+toolsReady = true;
 
 // ---------- Dibujo de cada cuadro ----------
 function renderPane(p) {

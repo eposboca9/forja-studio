@@ -93,7 +93,10 @@ export function prepareSlave(S, sEdge, M, mEdge, cont, rev) {
 export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev) {
   const mc = cross(M, mEdge), sc = cross(S, sEdge);
   const mRows = [], sRows = [];
-  for (let k = 0; k <= cont; k++) { mRows.push(row(M, mEdge, k)); sRows.push(row(S, sEdge, k)); }
+  // la maestra puede tener menos filas que las que pide la continuidad (p. ej. una extrusión tiene 2): sus derivadas
+  // de orden mayor son cero
+  for (let k = 0; k <= Math.min(cont, mc.n - 1); k++) mRows.push(row(M, mEdge, k));
+  for (let k = 0; k <= cont; k++) sRows.push(row(S, sEdge, k));
   const n = sRows[0].length;
   for (let j = 0; j < n; j++) {
     const jm = rev ? n - 1 - j : j;
@@ -133,15 +136,84 @@ export function align(rel, M, S) {
 }
 
 // ---------- Blend: superficie de unión entre dos bordes ----------
-// Hace falta que los dos bordes tengan la misma estructura (grado, CVs y nudos), como en un Freeform Blend
-// "explícito". La superficie nueva corre en U a lo largo de los bordes y en V los cruza (4 filas G1, 6 filas G2).
+// La superficie nueva corre en U a lo largo de los bordes (con la estructura del borde A) y en V los cruza.
+// Cada lado tiene su continuidad (G0, G1, G2 o G3): filas = contA + contB + 2, grado = filas - 1.
+// Si el borde B no tiene la misma estructura que el A, se usa una copia de B reconstruida con la del A.
+const cloneSurf = (d) => ({ ...d, knotsU: d.knotsU.slice(), knotsV: d.knotsV.slice(), cvs: d.cvs.map((r) => r.map((c) => c.clone())) });
 export function blendCompatible(A, eA, B, eB) {
   const a = along(A, eA), b = along(B, eB), rev = reversed(A, eA, B, eB);
   return a.deg === b.deg && a.n === b.n && sameKnots(a.knots, rev ? reverseKnots(b.knots) : b.knots);
 }
+// Funciones base B-spline (Cox-de Boor) en el parámetro u del vector de nudos K
+function basis(K, p, u) {
+  const n = K.length - p - 1, N0 = [];
+  for (let j = 0; j < K.length - 1; j++) N0.push(u >= K[j] && u < K[j + 1] ? 1 : 0);
+  if (u >= K[K.length - 1]) { for (let j = K.length - 2; j >= 0; j--) if (K[j] < K[j + 1]) { N0[j] = 1; break; } }
+  let Np = N0;
+  for (let d = 1; d <= p; d++) {
+    const nx = [];
+    for (let j = 0; j < K.length - 1 - d; j++) {
+      const a = K[j + d] - K[j], b = K[j + d + 1] - K[j + 1];
+      nx.push((a > 0 ? ((u - K[j]) / a) * Np[j] : 0) + (b > 0 ? ((K[j + d + 1] - u) / b) * Np[j + 1] : 0));
+    }
+    Np = nx;
+  }
+  return Np.slice(0, n);
+}
+function solve(A, B) { // Gauss con pivote; B: vectores
+  const n = A.length, M = A.map((r, i) => [...r, B[i].clone()]);
+  for (let c = 0; c < n; c++) {
+    let piv = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+    [M[c], M[piv]] = [M[piv], M[c]];
+    const d = M[c][c] || 1e-12;
+    for (let r = 0; r < n; r++) {
+      if (r === c) continue;
+      const f = M[r][c] / d;
+      if (!f) continue;
+      for (let k = c; k < n; k++) M[r][k] -= f * M[c][k];
+      M[r][n].addScaledVector(M[c][n], -f);
+    }
+  }
+  return M.map((r, i) => r[n].divideScalar(M[i][i] || 1e-12));
+}
+// Copia de B con otra estructura a lo largo de su borde (grado p, nudos K): cada fila de CVs se interpola en los
+// puntos de Greville de K. rev = recorrerla al revés para que vaya en el mismo sentido que el otro borde.
+export function resampleAlong(B, e, p, K, rev) {
+  const n = K.length - p - 1, g = N.greville(K, p, n), k0 = K[0], k1 = K[K.length - 1];
+  const A = g.map((u) => basis(K, p, u));
+  const curveOfRow = (cvs, deg, knots) => N.curveOf({ deg, knots, cvs });
+  const fit = (crv) => solve(A, g.map((u) => { let t = (u - k0) / (k1 - k0); if (rev) t = 1 - t; return crv.getPoint(Math.min(1, Math.max(0, t))); }))
+    .map((v) => new THREE.Vector4(v.x, v.y, v.z, 1));
+  if (isU(e)) {
+    const cvs = B.cvs.map((r) => fit(curveOfRow(r, B.degV, B.knotsV)));
+    return { degU: B.degU, knotsU: B.knotsU.slice(), degV: p, knotsV: K.slice(), cvs };
+  }
+  const cols = B.cvs[0].map((_, j) => fit(curveOfRow(B.cvs.map((r) => r[j]), B.degU, B.knotsU)));
+  return { degU: p, knotsU: K.slice(), degV: B.degV, knotsV: B.knotsV.slice(), cvs: cols[0].map((_, i) => cols.map((c) => c[i])) };
+}
 export function blendData(rel, A, B) {
-  const a = along(A, rel.aEdge), cont = rel.cont, nv = cont === 2 ? 6 : 4, degV = nv - 1;
-  const r0 = row(A, rel.aEdge, 0), b0 = row(B, rel.bEdge, 0), n = r0.length;
+  const compat = blendCompatible(A, rel.aEdge, B, rel.bEdge);
+  // la estructura a lo largo la pone el borde con más CVs (así un círculo no se aproxima con pocos CVs)
+  const swap = !compat && along(B, rel.bEdge).n > along(A, rel.aEdge).n;
+  const [base, eBase, oth, eOth] = swap ? [B, rel.bEdge, A, rel.aEdge] : [A, rel.aEdge, B, rel.bEdge];
+  const bs = along(base, eBase);
+  const om = compat ? oth : resampleAlong(oth, eOth, bs.deg, bs.knots, rel.rev);
+  const r = swap
+    ? { aEdge: rel.bEdge, bEdge: rel.aEdge, contA: rel.contB ?? rel.cont ?? 2, contB: rel.contA ?? rel.cont ?? 2, tension: rel.tension, rev: false, lambdaA: rel.lambdaB, lambdaB: rel.lambdaA, lambdaN: rel.lambdaN }
+    : { ...rel, rev: compat ? rel.rev : false };
+  const d = blendOn(r, base, om);
+  rel.lambdaN = r.lambdaN;
+  if (!swap) { rel.lambdaA = r.lambdaA; rel.lambdaB = r.lambdaB; return d; }
+  rel.lambdaA = r.lambdaB; rel.lambdaB = r.lambdaA;
+  // se calculó desde B: se da la vuelta para que v0 toque A y U corra como el borde A
+  let cvs = d.cvs.map((col) => col.slice().reverse()), knotsU = d.knotsU;
+  if (rel.rev) { cvs = cvs.reverse(); knotsU = reverseKnots(knotsU); }
+  return { ...d, knotsU, knotsV: reverseKnots(d.knotsV), cvs };
+}
+function blendOn(rel, A, B) {
+  const cA = rel.contA ?? rel.cont ?? 2, cB = rel.contB ?? rel.cont ?? 2, Bm = B;
+  const a = along(A, rel.aEdge), nv = cA + cB + 2, degV = nv - 1;
+  const r0 = row(A, rel.aEdge, 0), b0 = row(Bm, rel.bEdge, 0), n = r0.length;
   const cvs = [];
   for (let i = 0; i < n; i++) {
     const p = r0[i], q = b0[rel.rev ? n - 1 - i : i], col = [];
@@ -149,10 +221,22 @@ export function blendData(rel, A, B) {
     cvs.push(col);
   }
   const d = { degU: a.deg, degV, knotsU: a.knots.slice(), knotsV: N.clampedKnots(nv, degV), cvs };
-  if (rel.lambdaA == null) { rel.lambdaA = naturalLambda(d, 'v0', A, rel.aEdge, false); rel.lambdaB = naturalLambda(d, 'v1', B, rel.bEdge, rel.rev); }
-  alignRows(d, 'v0', A, rel.aEdge, cont, rel.lambdaA * rel.tension, false);
-  alignRows(d, 'v1', B, rel.bEdge, cont, rel.lambdaB * rel.tension, rel.rev);
+  if (rel.lambdaA == null || rel.lambdaN !== nv) {
+    rel.lambdaA = naturalLambda(d, 'v0', A, rel.aEdge, false); rel.lambdaB = naturalLambda(d, 'v1', Bm, rel.bEdge, rel.rev); rel.lambdaN = nv;
+  }
+  alignRows(d, 'v0', A, rel.aEdge, cA, rel.lambdaA * rel.tension, false);
+  alignRows(d, 'v1', Bm, rel.bEdge, cB, rel.lambdaB * rel.tension, rel.rev);
   return d;
+}
+
+// ---------- Extrusión, revolución y loft (con historial: siguen a sus curvas) ----------
+// dirección: 'auto' = perpendicular al plano de la curva; 'x' | 'y' | 'z'. both = hacia los dos lados.
+export function extrudeData(c, dist, dir = 'auto', both = false) {
+  const v = dir === 'x' ? new THREE.Vector3(1, 0, 0) : dir === 'z' ? new THREE.Vector3(0, 0, 1)
+    : dir === 'y' ? new THREE.Vector3(0, 1, 0) : c.plane === 'xy' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+  const a = v.clone().multiplyScalar(both ? -dist : 0), b = v.clone().multiplyScalar(dist);
+  const sh = (p, o) => new THREE.Vector4(p.x + o.x * p.w / p.w, p.y + o.y, p.z + o.z, p.w);
+  return { degU: 1, knotsU: [0, 0, 1, 1], degV: c.deg, knotsV: c.knots.slice(), cvs: [c.cvs.map((p) => sh(p, a)), c.cvs.map((p) => sh(p, b))] };
 }
 
 // ---------- Offset y simetría ----------
@@ -172,9 +256,9 @@ export function offsetData(src, dist) {
     cvs: src.cvs.map((r, i) => r.map((c, j) => { const n = normalAt(s, gu[i], gv[j]); return new THREE.Vector4(c.x + n.x * dist, c.y + n.y * dist, c.z + n.z * dist, c.w); })),
   };
 }
-// Reflejo en x = 0; se invierte el orden en U para que la normal siga apuntando hacia fuera
-export function mirrorData(src, kind) {
-  const m = (c) => new THREE.Vector4(-c.x, c.y, c.z, c.w);
+// Reflejo en x = 0 (o y = 0, z = 0); se invierte el orden en U para que la normal siga apuntando hacia fuera
+export function mirrorData(src, kind, plane = 'x') {
+  const m = (c) => new THREE.Vector4(plane === 'x' ? -c.x : c.x, plane === 'y' ? -c.y : c.y, plane === 'z' ? -c.z : c.z, c.w);
   if (kind === 'curve') return { deg: src.deg, knots: reverseKnots(src.knots), plane: src.plane, cvs: src.cvs.slice().reverse().map(m) };
   return { degU: src.degU, degV: src.degV, knotsU: reverseKnots(src.knotsU), knotsV: src.knotsV.slice(), cvs: src.cvs.slice().reverse().map((r) => r.map(m)) };
 }
@@ -193,17 +277,18 @@ export function diagnose(M, mEdge, S, sEdge, rev) {
     return a.sub(b).cross(c.sub(at(s, e, t, 0))).normalize();
   };
   let gap = 0, ang = 0, curv = 0, kmax = 1e-9;
-  const h = 4e-3;
+  const h = 2e-3;
   for (let k = 1; k <= 9; k++) {
     const t = k / 10, tm = rev ? 1 - t : t;
     const P0 = at(ss, sEdge, t, 0), Q0 = at(sm, mEdge, tm, 0);
     gap = Math.max(gap, P0.distanceTo(Q0));
     const ns = crossNormal(ss, sEdge, t), nm = crossNormal(sm, mEdge, tm);
     ang = Math.max(ang, THREE.MathUtils.radToDeg(Math.acos(Math.min(1, Math.abs(ns.dot(nm))))));
+    // diferencias finitas de un solo lado de 4 puntos (más exactas): f' error h³, f'' error h²
     const kappa = (s, e, tt, n) => {
-      const p0 = at(s, e, tt, 0), p1 = at(s, e, tt, h), p2 = at(s, e, tt, 2 * h);
-      const d1 = p1.clone().multiplyScalar(4).sub(p0.clone().multiplyScalar(3)).sub(p2).divideScalar(2 * h);
-      const d2 = p0.clone().sub(p1.clone().multiplyScalar(2)).add(p2).divideScalar(h * h);
+      const [p0, p1, p2, p3] = [0, 1, 2, 3].map((k) => at(s, e, tt, k * h));
+      const d1 = p0.clone().multiplyScalar(-11).add(p1.clone().multiplyScalar(18)).add(p2.clone().multiplyScalar(-9)).add(p3.clone().multiplyScalar(2)).divideScalar(6 * h);
+      const d2 = p0.clone().multiplyScalar(2).add(p1.clone().multiplyScalar(-5)).add(p2.clone().multiplyScalar(4)).sub(p3).divideScalar(h * h);
       return d2.dot(n) / Math.max(1e-12, d1.lengthSq());
     };
     const ks = kappa(ss, sEdge, t, ns), km = kappa(sm, mEdge, tm, ns);

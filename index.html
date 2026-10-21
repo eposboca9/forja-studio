@@ -533,6 +533,45 @@
   .pk-list .pk-btns button:hover { background: rgba(127,127,127,.18); }
   .pk-add { display: flex; gap: 6px; align-items: center; }
   .pk-add .sel { flex: 1; }
+  /* --- Ventana de opciones de cada herramienta: no es una caja, es un desenfoque de lo que hay detrás con los
+     bordes difuminados (como un filtro de foto) y los ajustes encima --- */
+  .toolwin { position: fixed; left: 84px; top: 96px; z-index: 45; width: 272px; padding: 16px 20px 18px; color: var(--fg); }
+  .toolwin[hidden], .quickpick[hidden] { display: none; }
+  .toolwin::before, .quickpick::before { content: ""; position: absolute; inset: -22px; z-index: -1; pointer-events: none;
+    backdrop-filter: blur(16px) saturate(1.05); -webkit-backdrop-filter: blur(16px) saturate(1.05);
+    background: color-mix(in srgb, var(--bg) 42%, transparent);
+    -webkit-mask-image: radial-gradient(closest-side, #000 72%, transparent 100%); mask-image: radial-gradient(closest-side, #000 72%, transparent 100%);
+    -webkit-mask-size: 100% 100%; mask-size: 100% 100%; }
+  .tw-head { display: flex; align-items: center; gap: 8px; cursor: grab; user-select: none; touch-action: none; margin-bottom: 8px; }
+  .tw-head b { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tw-x { width: 22px; height: 22px; border: 0; background: none; color: var(--fg); font-size: 18px; line-height: 1; cursor: pointer; opacity: .7; }
+  .tw-x:hover { opacity: 1; }
+  .tw-body { display: flex; flex-direction: column; gap: 10px; }
+  .tw-hint { margin: 0; font-size: 12px; line-height: 1.4; color: #2f7bff; font-weight: 500; }
+  .tw-row { display: grid; grid-template-columns: 78px 1fr auto; align-items: center; gap: 8px; font-size: 12px; }
+  .tw-row label { color: var(--muted); }
+  .tw-row output { font-family: var(--font-mono); font-size: 10.5px; min-width: 52px; text-align: right; }
+  .tw-row input[type=range] { width: 100%; }
+  .tw-seg { grid-column: 2 / 4; display: flex; gap: 2px; }
+  .tw-seg button { flex: 1; border: 0; background: rgba(127,127,127,.16); color: var(--fg); font: inherit; font-size: 11.5px; font-weight: 500; padding: 5px 0; cursor: pointer; }
+  .tw-seg button:first-child { border-radius: 5px 0 0 5px; } .tw-seg button:last-child { border-radius: 0 5px 5px 0; }
+  .tw-seg button[aria-pressed="true"] { background: #2f7bff; color: #fff; }
+  .tw-check { grid-column: 1 / 4; color: var(--fg) !important; display: flex; gap: 8px; align-items: center; }
+  .tw-diag { display: block; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.55; color: var(--muted); }
+  .tw-diag .ok { color: #2fb36b; } .tw-diag .bad { color: #e0612b; }
+  .tw-note { font-family: inherit; font-size: 11.5px; }
+  .tw-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 2px; }
+  .tw-btn { border: 0; border-radius: 5px; padding: 6px 12px; font: inherit; font-size: 12px; background: rgba(127,127,127,.18); color: var(--fg); cursor: pointer; }
+  .tw-btn.primary { background: #2f7bff; color: #fff; }
+  /* elección rápida junto al cursor */
+  .quickpick { position: fixed; z-index: 95; padding: 10px 12px; color: var(--fg); }
+  .quickpick b { display: block; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; font-weight: 500; }
+  .quickpick div { display: flex; gap: 4px; }
+  .quickpick button { border: 0; border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px;
+    background: rgba(127,127,127,.2); color: var(--fg); }
+  .quickpick button kbd { font-family: var(--font-mono); font-size: 9px; opacity: .6; }
+  .quickpick button.def { box-shadow: inset 0 0 0 1.5px #2f7bff; }
+  .quickpick button:hover { background: #2f7bff; color: #fff; }
   /* --- Historial de construcción --- */
   .hist-rel { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 8px; background: rgba(127,127,127,.08); margin-bottom: 6px; }
   .hist-h { display: flex; align-items: center; gap: 8px; font-size: 12px; }
@@ -840,8 +879,8 @@
         <button class="btn" id="b-extrude" title="Extruir las curvas seleccionadas">Extruir</button>
         <button class="btn" id="b-revolve" title="Girar la curva alrededor del eje Y">Revolución</button>
       </div>
-      <div class="row"><label for="op-dist">Distancia</label><input id="op-dist" type="range" min="0.2" max="6" step="0.1" value="1.5"><output id="op-dist-o">1.5</output></div>
-      <p class="muted">Selecciona curvas en modo Objetos y pulsa una operación. Para el loft importa el orden de selección.</p>
+      <input id="op-dist" type="hidden" value="1.5"><output id="op-dist-o" hidden></output>
+      <p class="muted">Elige curvas y pulsa una operación. Extruir: mueve el ratón para la distancia y haz clic. Todas siguen a sus curvas (historial).</p>
     </section>
 
     <section class="sec" data-module="render">
@@ -930,6 +969,12 @@
     <span class="tag">v0.11</span>
     </div>
   </header>
+
+  <div class="toolwin" id="toolwin" hidden role="dialog" aria-label="Opciones de la herramienta">
+    <div class="tw-head" id="tw-head"><b id="tw-title"></b><button class="tw-x" id="tw-close" title="Cerrar" aria-label="Cerrar">×</button></div>
+    <div class="tw-body" id="tw-body"></div>
+  </div>
+  <div class="quickpick" id="quickpick" hidden></div>
 
   <div class="float-win" id="layers-win" role="dialog" aria-label="Capas">
     <div class="fw-head" id="layers-head" title="Arrastra para mover">

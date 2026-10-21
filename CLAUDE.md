@@ -252,6 +252,23 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Menú "Superficies" nuevo y Puck › Editar (Align, Blend, Offset) y Duplicar › Simetría ya funcionan. Round sigue pendiente.
 - Pruebas: scratchpad aitest/hist.mjs (matemática), thist.mjs y thist2.mjs (en la app).
 
+## Hecho (v0.14) — herramientas de superficies revisadas
+
+- Fallos arreglados: Align se rompía si la maestra tenía menos filas que la continuidad (extrusión = 2 filas); Blend fallaba
+  con bordes de distinta estructura. Ahora: Align 96/96 casos de prueba; Blend 231/240 (los 9 restantes = curva libre contra
+  círculo exacto, hueco 0.24 mm, lo marca el diagnóstico). Blend usa como base el borde con más CVs y remuestrea el otro
+  (resampleAlong: interpolación exacta en Greville, sistema lineal con funciones base Cox-de Boor). Continuidad por lado
+  (contA/contB, G0–G3; filas = contA + contB + 2). Diagnóstico de curvatura con diferencias finitas de 4 puntos.
+- Ventana de opciones por herramienta (TW, #toolwin): sin caja; ::before con backdrop-filter blur y máscara radial que
+  difumina los bordes. Se arrastra por el título. Cambia con la herramienta. Al elegir un objeto que sale de una relación se
+  abre su ventana para modificarla (relSpec / syncToolWinToSelection). toolDef (prefs.tools) recuerda los valores.
+- Elección rápida junto al cursor (quickPick, #quickpick): Align = al elegir la maestra sale G0/G1/G2/G3 (o teclas 1–4);
+  Blend = en cada borde. La herramienta sigue activa para la siguiente unión (restartEdgeOp); Esc / Terminar la cierra.
+- Extruir con el ratón (extrudeSelection): crea la superficie y la distancia sigue al cursor a lo largo de la dirección
+  (proyección en pantalla desde el centro de la curva) hasta hacer clic. Ventana: distancia, dirección (normal/X/Y/Z), dos lados.
+  Extruir, Revolución y Loft ahora tienen historial (siguen a sus curvas). Simetría con plano YZ/XZ/XY.
+- Pruebas: scratchpad aitest/hist2.mjs (todas las combinaciones), ttools.mjs (extruir, align y blend con el ratón).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

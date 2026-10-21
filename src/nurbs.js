@@ -44,7 +44,7 @@ export function fitCurve(targets, deg, plane) {
   const n = targets.length, d = Math.min(deg, n - 1);
   const knots = clampedKnots(n, d), g = greville(knots, d, n);
   const cvs = targets.map((p) => v4(p));
-  for (let it = 0; it < 12; it++) {
+  for (let it = 0; it < 30; it++) {
     const c = new NURBSCurve(d, knots, cvs);
     for (let i = 1; i < n - 1; i++) {
       const p = c.getPoint(g[i]);
@@ -61,7 +61,7 @@ export function fitSurface(targets, degU, degV) {
   const gu = greville(knotsU, dU, nu), gv = greville(knotsV, dV, nv);
   const cvs = targets.map((row) => row.map((p) => v4(p)));
   const t = new THREE.Vector3();
-  for (let it = 0; it < 12; it++) {
+  for (let it = 0; it < 30; it++) {
     const s = new NURBSSurface(dU, dV, knotsU, knotsV, cvs);
     for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
       s.getPoint(gu[i], gv[j], t);
