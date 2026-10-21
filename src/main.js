@@ -14,6 +14,7 @@ import { applyBackground } from './concrete.js';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
+import * as HX from './history.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { PLYExporter } from 'three/addons/exporters/PLYExporter.js';
@@ -32,6 +33,9 @@ const EVAL_MODES = [
   { k: 'showroom', label: 'Showroom', key: '4' }, { k: 'diffuse', label: 'Difuso', key: '5' }, { k: 'sky', label: 'Shade-Sky', key: '6' },
   { k: 'zebra', label: 'Cebra', key: '1' }, { k: 'curv', label: 'Curvatura', key: '2' }, { k: 'wire', label: 'Malla', key: '3' },
 ];
+// historial de construcción: relaciones entre objetos que se recalculan solas (ver "Historial de construcción")
+const relations = [];
+let nextRelId = 1, propagating = false;
 // capas y grupos de la escena (ver más abajo)
 const layers = [{ id: 1, name: 'Predeterminada', visible: true }];
 let activeLayer = 1, nextLayerId = 2;
@@ -589,6 +593,7 @@ const pickTarget = (o) => (o.kind === 'curve' ? o.parts.pick : o.parts.mesh);
 
 function removeObject(obj) {
   checkpoint();
+  if (!restoring) dropRelations(obj.id);
   for (const o of Object.values(obj.parts)) { o.geometry?.dispose(); scene.remove(o); }
   objects.splice(objects.indexOf(obj), 1);
   selObjs.splice(0, selObjs.length, ...selObjs.filter((o) => o !== obj));
@@ -611,6 +616,7 @@ function updateObject(obj) {
   if (obj.kind === 'surface') updateSurface(obj); else updateCurve(obj);
   rebuildHandles(obj);
   applyVisibility(obj);
+  if (!propagating && !restoring && relations.length) propagateFrom(obj);
 }
 
 function updateSurface(obj) {
@@ -1124,6 +1130,7 @@ const HINTS = {
   plane: 'Clic en el plano de dibujo para colocar una superficie plana · Esc: cancelar',
 };
 function updateHint() {
+  if (tool === 'edge' && edgeOp) { $('hint').textContent = edgeOp.hint(); return; }
   if (HINTS[tool]) { $('hint').textContent = HINTS[tool]; return; }
   if (typeof pivotEdit !== 'undefined' && pivotEdit) { $('hint').textContent = 'Editar pivote: arrastra el gizmo · Ctrl: snap a punto · Ctrl+Alt: a curva · Alt: rejilla · D o Esc: terminar'; return; }
   if (mouseXform) {
@@ -1138,6 +1145,7 @@ function updateHint() {
 }
 function setTool(t) {
   if (tool === 'curve' && t !== 'curve') cancelDraft();
+  if (tool === 'edge' && t !== 'edge') endEdgeOp();
   if (t !== 'select') mouseXform = false;
   tool = t;
   $('t-select').setAttribute('aria-pressed', String(t === 'select'));
@@ -1271,6 +1279,7 @@ addEventListener('pointerup', (e) => {
     if (p) { draft.pts.push(p); draft.hover = null; showDraft(); }
     return;
   }
+  if (tool === 'edge') { edgeClick(e); return; }
   if (tool === 'plane') {
     const p = placePoint(e);
     if (!p) return;
@@ -2584,15 +2593,16 @@ const PUCK_CMDS = {
   surface: { k: 'surf', label: 'Superficie', run: () => setTool('plane'), sub: [
     { k: 'plane', label: 'Plano', run: () => setTool('plane') }, { k: 'revolve', label: 'Revolución', run: () => OPS.revolve() },
     { k: 'loft', label: 'Loft', run: () => OPS.loft() }, { k: 'extrude', label: 'Extruir', run: () => OPS.extrude() }] },
-  edit: { k: 'edit', label: 'Editar', soon: true, sub: [
-    { k: 'align', label: 'Align', soon: true }, { k: 'blend', label: 'Blend', soon: true }, { k: 'round', label: 'Round', soon: true }, { k: 'offset', label: 'Offset', soon: true }] },
+  edit: { k: 'edit', label: 'Editar', run: () => startEdgeOp('align'), sub: [
+    { k: 'align', label: 'Align', run: () => startEdgeOp('align') }, { k: 'blend', label: 'Blend', run: () => startEdgeOp('blend') },
+    { k: 'offset', label: 'Offset', run: offsetSelection }, { k: 'round', label: 'Round', soon: true }] },
   pick: { k: 'arrow', label: 'Elegir', key: 'O', run: () => setPickMode('object'), sub: [
     { k: 'object', label: 'Objeto', run: () => setPickMode('object') }, { k: 'pickCurve', label: 'Curvas', run: () => setPickMode('object', 'curve') },
     { k: 'pickSurf', label: 'Superficies', run: () => setPickMode('object', 'surface') }, { k: 'cv', label: 'CV', run: () => setPickMode('cv') },
     { k: 'nothing', label: 'Nada', run: pickNothing }] },
   xform: { k: 'move', label: 'Transformar', key: 'W', run: mv, sub: [
     { k: 'move', label: 'Mover', run: mv }, { k: 'rotate', label: 'Rotar', run: rot }, { k: 'scale', label: 'Escalar', run: scl }, { k: 'pivot', label: 'Pivote', run: togglePivotEdit }] },
-  dup: { k: 'dup', label: 'Duplicar', run: duplicateSelection, sub: [{ k: 'symm', label: 'Simetría', soon: true }, { k: 'measure', label: 'Distancia', soon: true }] },
+  dup: { k: 'dup', label: 'Duplicar', run: duplicateSelection, sub: [{ k: 'symm', label: 'Simetría', run: mirrorSelection }, { k: 'measure', label: 'Distancia', soon: true }] },
   show: { k: 'show', label: 'Mostrar', run: unhideAll, sub: [
     { k: 'hide', label: 'Ocultar', run: hideSelection }, { k: 'show', label: 'Mostrar todo', run: unhideAll },
     { k: 'frame', label: 'Encuadrar', run: frameSelection }, { k: 'top', label: 'Vista sup.', run: topView }] },
@@ -2895,6 +2905,7 @@ function cloneData(o) {
 function snapshot() {
   return {
     layers: layers.map((l) => ({ ...l })), activeLayer, nextLayerId, groups: groups.map((g) => ({ ...g })), nextGroupId,
+    relations: relations.map((r) => ({ ...r })), nextRelId,
     objects: objects.map((o) => ({ id: o.id, kind: o.kind, name: o.name, mat: o.mat, own: o.ownVisible, layer: o.layer, group: o.group, pivot: o.pivot.clone(), data: cloneData(o) })),
   };
 }
@@ -2913,6 +2924,7 @@ function restore(st) {
   layers.splice(0, layers.length, ...st.layers.map((l) => ({ ...l })));
   groups.splice(0, groups.length, ...st.groups.map((g) => ({ ...g })));
   nextLayerId = st.nextLayerId; nextGroupId = st.nextGroupId;
+  relations.splice(0, relations.length, ...(st.relations || []).map((r) => ({ ...r }))); nextRelId = st.nextRelId || nextRelId;
   const act = st.activeLayer;
   for (const it of st.objects) {
     nextId = it.id; activeLayer = it.layer;
@@ -2924,7 +2936,7 @@ function restore(st) {
   nextId = Math.max(1, ...objects.map((o) => o.id + 1));
   restoring = false;
   objects.forEach(applyVisibility);
-  selectionChanged(); refreshOutliner(); renderLayers();
+  selectionChanged(); refreshOutliner(); renderLayers(); renderHistory();
 }
 function undo() {
   if (!undoStack.length) return toast('Nada que deshacer');
@@ -3012,6 +3024,12 @@ const MENUBAR = [
     { label: 'Rejilla', key: 'Alt', run: () => $('snap-grid').click(), ...chk(() => snapToggles.grid) },
     { label: 'Curva', key: 'Ctrl+Alt', run: () => $('snap-curve').click(), ...chk(() => snapToggles.curve) },
     { label: 'Punto', key: 'Ctrl', run: () => $('snap-point').click(), ...chk(() => snapToggles.point) }]],
+  ['Superficies', [
+    { label: 'Plano', run: () => setTool('plane') }, { label: 'Revolución', run: () => OPS.revolve() }, { label: 'Loft', run: () => OPS.loft() },
+    { label: 'Extruir', run: () => OPS.extrude() }, { sep: true }, { title: 'Con historial' },
+    { label: 'Align (G0 · G1 · G2 · G3)', run: () => startEdgeOp('align') }, { label: 'Blend (G1 · G2)', run: () => startEdgeOp('blend') },
+    { label: 'Offset', run: offsetSelection }, { label: 'Simetría (plano YZ)', run: mirrorSelection },
+    { sep: true }, { label: 'Quitar historial de la selección', run: () => { const ids = new Set(selObjs.map((o) => o.id)); relations.filter((r) => ids.has(outputOf(r))).forEach((r) => removeRelation(r.id)); } }]],
   ['Borrar', [
     { label: 'Borrar selección', key: 'Supr', run: deleteSelection },
     { label: 'Borrar todas las curvas', run: () => { selObjs.splice(0, selObjs.length, ...objects.filter((o) => o.kind === 'curve')); deleteSelection(); } },
@@ -3178,6 +3196,197 @@ buildEvalUI();
 renderLayers();
 updateEvalUI();
 
+// ---------- Historial de construcción ----------
+// Relaciones entre objetos (src/history.js): Align, Blend, Offset y Simetría. Cuando cambia una entrada
+// (por ejemplo, se mueve un CV de la superficie maestra) se recalcula la salida, y en cadena lo que dependa de ella.
+const byId = (id) => objects.find((o) => o.id === id);
+const inputsOf = (r) => (r.type === 'align' ? [r.master] : r.type === 'blend' ? [r.a, r.b] : [r.src]);
+const outputOf = (r) => (r.type === 'align' ? r.slave : r.out);
+const REL_NAMES = { align: 'Align', blend: 'Blend', offset: 'Offset', mirror: 'Simetría' };
+function applyRelation(r) {
+  const out = byId(outputOf(r)), ins = inputsOf(r).map(byId);
+  if (!out || ins.some((o) => !o)) return false;
+  if (r.type === 'align') out.data = HX.align(r, ins[0].data, out.data);
+  else if (r.type === 'blend') out.data = HX.blendData(r, ins[0].data, ins[1].data);
+  else if (r.type === 'offset') out.data = HX.offsetData(ins[0].data, r.dist);
+  else out.data = HX.mirrorData(ins[0].data, ins[0].kind);
+  const was = propagating;
+  propagating = true; updateObject(out); propagating = was;
+  return true;
+}
+function propagateFrom(obj) {
+  propagating = true;
+  const done = new Set(), queue = [obj.id];
+  try {
+    while (queue.length) {
+      const id = queue.shift();
+      for (const r of relations) {
+        if (done.has(r.id)) continue;
+        // un Align también se reaplica si se toca la superficie que se ajusta: sus filas del borde quedan atadas a la maestra
+        const hit = inputsOf(r).includes(id) || (r.type === 'align' && r.slave === id && id === obj.id);
+        if (!hit) continue;
+        done.add(r.id);
+        if (applyRelation(r)) queue.push(outputOf(r));
+      }
+    }
+  } finally { propagating = false; }
+  scheduleHistoryDiag();
+}
+function dropRelations(id) {
+  for (let i = relations.length - 1; i >= 0; i--) if (outputOf(relations[i]) === id || inputsOf(relations[i]).includes(id)) relations.splice(i, 1);
+  renderHistory();
+}
+function removeRelation(id) {
+  checkpoint();
+  const i = relations.findIndex((r) => r.id === id);
+  if (i >= 0) relations.splice(i, 1);
+  renderHistory();
+  toast('Historial quitado: la superficie queda como está');
+}
+function addRelation(r) { r.id = nextRelId++; relations.push(r); renderHistory(); return r; }
+
+// --- Elegir bordes (Align y Blend): primero el que se ajusta, después el maestro ---
+let edgeOp = null;
+const edgeMarks = new THREE.Group();
+scene.add(edgeMarks);
+const EDGE_COLORS = [0x2fb36b, 0x2f7bff, 0xffa31a];
+const edgeLineMats = EDGE_COLORS.map((c) => LM({ color: c, linewidth: 5, depthTest: false }));
+function markEdge(slot, obj, edge) {
+  const old = edgeMarks.children.find((c) => c.userData.slot === slot);
+  if (old) { old.geometry.dispose(); edgeMarks.remove(old); }
+  if (!obj) return;
+  const pts = HX.edgePoints(obj.data, edge).flatMap((p) => [p.x, p.y, p.z]);
+  const l = new Line2(line2Geo(pts), edgeLineMats[slot]);
+  l.userData.slot = slot; l.renderOrder = 20;
+  edgeMarks.add(l);
+}
+function surfaceEdgeAt(e) {
+  setRay(e);
+  const hit = ray.intersectObjects(objects.filter((o) => o.visible && o.kind === 'surface').map((o) => o.parts.mesh), false)[0];
+  if (!hit?.uv) return null;
+  return { obj: hit.object.userData.obj, edge: HX.nearestEdge(hit.uv.x, hit.uv.y) };
+}
+const EDGE_OPS = {
+  align: { steps: ['Align: clic cerca del borde de la superficie que se va a ajustar (verde)', 'Align: ahora clic en el borde de la superficie maestra (azul)'], done: createAlign },
+  blend: { steps: ['Blend: clic cerca del primer borde', 'Blend: clic cerca del segundo borde'], done: createBlend },
+};
+function startEdgeOp(type) {
+  setTool('select'); setPickMode('object');
+  if (layout === 'render' || layout === 'ai') switchLayout('diag');
+  const op = EDGE_OPS[type];
+  edgeOp = { type, picks: [], hint: () => `${op.steps[edgeOp.picks.length]} · Esc: cancelar` };
+  setTool('edge');
+}
+function endEdgeOp() { edgeOp = null; [0, 1, 2].forEach((k) => markEdge(k, null)); }
+function edgeClick(e) {
+  if (!edgeOp || e.button !== 0) return;
+  const p = surfaceEdgeAt(e);
+  if (!p) return toast('Haz clic sobre una superficie, cerca del borde que quieres.');
+  if (edgeOp.picks[0]?.obj === p.obj) return toast('Elige un borde de otra superficie.');
+  markEdge(edgeOp.picks.length, p.obj, p.edge);
+  edgeOp.picks.push(p);
+  if (edgeOp.picks.length < 2) { updateHint(); return; }
+  const [a, b] = edgeOp.picks, type = edgeOp.type;
+  setTool('select');
+  EDGE_OPS[type].done(a, b);
+}
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (tool !== 'edge' || e.buttons) return;
+  const p = surfaceEdgeAt(e);
+  if (p && p.obj !== edgeOp?.picks[0]?.obj) markEdge(2, p.obj, p.edge); else markEdge(2, null);
+});
+
+function createAlign(s, m) {
+  checkpoint();
+  const r = { type: 'align', slave: s.obj.id, sEdge: s.edge, master: m.obj.id, mEdge: m.edge, cont: 2, tension: 1 };
+  r.rev = HX.reversed(m.obj.data, m.edge, s.obj.data, s.edge);
+  s.obj.data = HX.prepareSlave(s.obj.data, s.edge, m.obj.data, m.edge, r.cont, r.rev);
+  r.lambda0 = HX.naturalLambda(s.obj.data, s.edge, m.obj.data, m.edge, r.rev);
+  addRelation(r);
+  applyRelation(r);
+  finishCreate([s.obj], `Align G2: ${s.obj.name} sigue a ${m.obj.name}. Si mueves ${m.obj.name}, ${s.obj.name} se ajusta sola.`);
+  renderHistory();
+}
+function createBlend(a, b) {
+  if (!HX.blendCompatible(a.obj.data, a.edge, b.obj.data, b.edge)) {
+    return toast('Blend: los dos bordes deben tener los mismos CVs y grado a lo largo (reconstruye una en el panel Selección).');
+  }
+  checkpoint();
+  const r = { type: 'blend', a: a.obj.id, aEdge: a.edge, b: b.obj.id, bEdge: b.edge, cont: 2, tension: 1, rev: HX.reversed(a.obj.data, a.edge, b.obj.data, b.edge) };
+  const o = addSurface(HX.blendData(r, a.obj.data, b.obj.data), 'Blend');
+  r.out = o.id;
+  addRelation(r);
+  finishCreate([o], `${o.name} creado (G2 en los dos lados, con historial)`);
+}
+function offsetSelection() {
+  const src = selObjs.filter((o) => o.kind === 'surface');
+  if (!src.length) return toast('Offset: elige una o más superficies.');
+  checkpoint();
+  const made = src.map((s) => { const r = { type: 'offset', src: s.id, dist: 0.2 }; const o = addSurface(HX.offsetData(s.data, r.dist), 'Offset'); r.out = o.id; addRelation(r); return o; });
+  finishCreate(made, 'Offset a 0.20 dm, con historial (cambia la distancia en Historial)');
+}
+function mirrorSelection() {
+  const src = selObjs.filter((o) => o.kind !== 'mesh');
+  if (!src.length) return toast('Simetría: elige superficies o curvas.');
+  checkpoint();
+  const made = src.map((s) => {
+    const r = { type: 'mirror', src: s.id };
+    const d = HX.mirrorData(s.data, s.kind), o = s.kind === 'curve' ? addCurve(d, s.name + ' sim.') : addSurface(d, s.name + ' sim.');
+    r.out = o.id; addRelation(r); return o;
+  });
+  finishCreate(made, 'Simetría en el plano YZ, con historial: la copia sigue al original');
+}
+
+// --- Panel "Historial de construcción" ---
+function relDiag(r) {
+  const out = byId(outputOf(r)), ins = inputsOf(r).map(byId);
+  if (!out || ins.some((o) => !o) || out.kind !== 'surface') return '';
+  const fmtD = (d, cont) => {
+    const ok = (c) => `<b class="${c ? 'ok' : 'bad'}">${c ? '✓' : '✗'}</b>`;
+    return `${ok(d.gap < 1e-3)} hueco ${d.gap.toFixed(4)} dm · ${cont >= 1 ? ok(d.angle < 0.1) : ''} ángulo ${d.angle.toFixed(2)}° · ${cont >= 2 ? ok(d.curv < 0.05) : ''} curvatura ${(d.curv * 100).toFixed(1)}%`;
+  };
+  if (r.type === 'align') return fmtD(HX.diagnose(ins[0].data, r.mEdge, out.data, r.sEdge, r.rev), r.cont);
+  if (r.type === 'blend') return `A: ${fmtD(HX.diagnose(ins[0].data, r.aEdge, out.data, 'v0', false), r.cont)}<br>B: ${fmtD(HX.diagnose(ins[1].data, r.bEdge, out.data, 'v1', r.rev), r.cont)}`;
+  return '';
+}
+let histDiagT = 0;
+function scheduleHistoryDiag() {
+  clearTimeout(histDiagT);
+  histDiagT = setTimeout(() => document.querySelectorAll('#hist-body [data-diag-of]').forEach((el) => { const r = relations.find((x) => x.id === +el.dataset.diagOf); if (r) el.innerHTML = relDiag(r); }), 250);
+}
+function renderHistory() {
+  const box = $('hist-body');
+  if (!box) return;
+  if (!relations.length) {
+    box.innerHTML = '<p class="muted">Sin historial. Usa Align, Blend, Offset o Simetría (Puck › Editar, o el menú Superficies): la superficie que crean sigue a las originales.</p>';
+    return;
+  }
+  const nm = (id) => esc(byId(id)?.name || '¿?');
+  box.innerHTML = relations.map((r) => {
+    const title = r.type === 'align' ? `${nm(r.slave)} → ${nm(r.master)}` : r.type === 'blend' ? `${nm(r.out)}: ${nm(r.a)} ↔ ${nm(r.b)}` : `${nm(r.out)} ← ${nm(r.src)}`;
+    const conts = r.type === 'align' ? [0, 1, 2, 3] : r.type === 'blend' ? [1, 2] : [];
+    return `<div class="hist-rel" data-rel="${r.id}">
+      <div class="hist-h"><b>${REL_NAMES[r.type]}</b><span>${title}</span><button class="mini" data-del title="Quitar historial (la forma se queda)">×</button></div>
+      ${conts.length ? `<div class="seg small">${conts.map((c) => `<button data-cont="${c}" aria-pressed="${r.cont === c}">G${c}</button>`).join('')}</div>` : ''}
+      ${r.tension != null ? `<div class="row"><label>Tensión</label><input type="range" min="0.2" max="3" step="0.05" value="${r.tension}" data-tension><output>${r.tension.toFixed(2)}</output></div>` : ''}
+      ${r.type === 'offset' ? `<div class="row"><label>Distancia</label><input type="range" min="-1" max="1" step="0.01" value="${r.dist}" data-dist><output>${r.dist.toFixed(2)}</output></div>` : ''}
+      <p class="hist-diag" data-diag-of="${r.id}">${relDiag(r)}</p></div>`;
+  }).join('');
+  box.querySelectorAll('.hist-rel').forEach((el) => {
+    const r = relations.find((x) => x.id === +el.dataset.rel);
+    const redo = () => { if (applyRelation(r)) { const out = byId(outputOf(r)); if (out) propagateFrom(out); } scheduleHistoryDiag(); };
+    el.querySelector('[data-del]').addEventListener('click', () => removeRelation(r.id));
+    el.querySelectorAll('[data-cont]').forEach((b) => b.addEventListener('click', () => { checkpoint(); r.cont = +b.dataset.cont; redo(); renderHistory(); }));
+    const t = el.querySelector('[data-tension]');
+    t?.addEventListener('pointerdown', () => checkpoint());
+    t?.addEventListener('input', () => { r.tension = +t.value; t.nextElementSibling.textContent = r.tension.toFixed(2); redo(); });
+    const dd = el.querySelector('[data-dist]');
+    dd?.addEventListener('pointerdown', () => checkpoint());
+    dd?.addEventListener('input', () => { r.dist = +dd.value; dd.nextElementSibling.textContent = r.dist.toFixed(2); redo(); });
+  });
+}
+renderHistory();
+
 // ---------- Dibujo de cada cuadro ----------
 function renderPane(p) {
   renderer.setViewport(p.x, 0, p.w, p.h);
@@ -3308,7 +3517,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI };
+window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, updateObject, undo, HX };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

@@ -30,6 +30,7 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - `src/exporters.js`: IGES 5.3 (128/126, lectura y escritura), STEP AP214 (GEOMETRIC_SET de B-splines), OBJ de cuadriláteros para SubD,
   SVG/DXF 2D (proyección paralela), .zip sin compresión. Validado con occt-import-js (OpenCASCADE) en el scratchpad.
 - `src/logo.js`: logotipo Nodo.
+- `src/history.js`: historial de construcción (Align G0–G3, Blend G1/G2, Offset, Simetría, diagnóstico de unión). Pura matemática.
 - `src/ai.js`: módulo IA: generadores paramétricos (tornillo ISO con rosca, tuerca, arandela, mesa, silla) y parsePrompt (español).
 - `docs/capturas/`: capturas de pantalla de cada versión.
 - `docs/alias-referencia.md`: atajos y comportamiento de Alias (de la hoja oficial que pasó el usuario). Consúltalo.
@@ -232,6 +233,24 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   prefs.puck[mod] = lista de ids. getPuck() rehace el Puck al cambiar de módulo o de personalización (MENUS[0]).
   Editor en Preferencias > Puck (subir/bajar/quitar/añadir, máx. 10, restablecer).
 - Render: Unreal no es código abierto (licencia propia) ni corre en el navegador; plan sigue siendo three-gpu-pathtracer.
+
+## Hecho (v0.13) — historial de construcción
+
+- relations [{id, type: 'align'|'blend'|'offset'|'mirror', ...}] (arriba en main.js). updateObject() llama a propagateFrom(obj):
+  cada relación cuya entrada cambió se recalcula (applyRelation) y sigue en cadena; un Align también se reaplica si se toca la
+  superficie que se ajusta (sus filas del borde quedan atadas). Se guardan en el deshacer (snapshot.relations).
+- Align (history.js alignRows): la superficie que se ajusta toma la estructura de la maestra a lo largo del borde (prepareSlave:
+  rebuild si hace falta y copia nudos) y sus filas 0..cont se resuelven para que las derivadas de cruce sean (-λ)^k · las de la
+  maestra (derivadas de B-spline en el borde, vale con grados/nudos distintos al cruzar). λ0 = naturalLambda (no cambia la forma
+  al crear); "Tensión" lo multiplica. Medido: hueco 0, ángulo ~0.01°, curvatura < 2 %.
+- Blend: superficie nueva entre dos bordes compatibles (mismo grado/CVs/nudos a lo largo), 4 filas G1 o 6 filas G2 (grado 5),
+  alineada a los dos lados con alignRows. Offset: CVs desplazados por la normal en sus puntos de Greville (aproximado).
+  Simetría: reflejo en x = 0 (invierte U para conservar la normal).
+- Elegir bordes: tool 'edge' (startEdgeOp('align'|'blend')): clic cerca de un borde (nearestEdge con el uv del impacto);
+  verde = el que se ajusta, azul = maestro, naranja = el que está bajo el ratón.
+- Panel "Historial de construcción" (diag): cada relación con G0–G3 / G1–G2, tensión, distancia, diagnóstico ✓/✗ y quitar historial.
+  Menú "Superficies" nuevo y Puck › Editar (Align, Blend, Offset) y Duplicar › Simetría ya funcionan. Round sigue pendiente.
+- Pruebas: scratchpad aitest/hist.mjs (matemática), thist.mjs y thist2.mjs (en la app).
 
 ## Siguiente paso
 

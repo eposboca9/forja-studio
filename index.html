@@ -533,6 +533,15 @@
   .pk-list .pk-btns button:hover { background: rgba(127,127,127,.18); }
   .pk-add { display: flex; gap: 6px; align-items: center; }
   .pk-add .sel { flex: 1; }
+  /* --- Historial de construcción --- */
+  .hist-rel { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 8px; background: rgba(127,127,127,.08); margin-bottom: 6px; }
+  .hist-h { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .hist-h b { font-weight: 600; color: #2f7bff; }
+  .hist-h span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist-h .mini { width: 22px; height: 22px; border: 0; border-radius: 4px; background: rgba(127,127,127,.15); color: var(--fg); cursor: pointer; }
+  .hist-rel .seg { margin: 0; align-self: flex-start; }
+  .hist-diag { margin: 0; font-size: 10.5px; color: var(--muted); font-family: var(--font-mono); line-height: 1.5; }
+  .hist-diag .ok { color: #2fb36b; } .hist-diag .bad { color: #e0612b; }
   /* --- Modos de evaluación: 3 opciones --- */
   .app:not([data-evalui="a"]) .eval-a-wrap, .app:not([data-evalui="b"]) .eval-b-wrap, .app:not([data-evalui="c"]) .eval-c-wrap,
   .app:not([data-evalui="c"]) .eval-c-fly { display: none !important; }
@@ -817,6 +826,11 @@
     <section class="sec" data-module="diag">
       <h2>Selección</h2>
       <div id="sel-body"></div>
+    </section>
+
+    <section class="sec" data-module="diag">
+      <h2>Historial de construcción</h2>
+      <div id="hist-body"></div>
     </section>
 
     <section class="sec" data-module="diag">

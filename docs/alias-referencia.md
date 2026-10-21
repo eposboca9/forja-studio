@@ -82,6 +82,6 @@ y de guías de Alias. Sirven para que Forja Studio se comporte como Alias.
 ## Pendiente de implementar en Forja
 - Editor de clutch keys (cambiar Shift+Alt, Alt, Ctrl+Alt, Ctrl, Shift+Ctrl).
 - ViewCube.
-- Un menú radial distinto por botón del ratón.
-- Mover con restricción X/Y/Z según el botón (herramienta Move de Alias, sin gizmo).
+- (Hecho) Un menú radial distinto por botón del ratón.
+- (Hecho) Mover con restricción X/Y/Z según el botón (herramienta Move de Alias, sin gizmo).
 - Snap en espacio de parámetros (UV) y opciones del snap de curva (divisiones, centro).
