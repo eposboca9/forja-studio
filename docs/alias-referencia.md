@@ -85,3 +85,16 @@ y de guías de Alias. Sirven para que Forja Studio se comporte como Alias.
 - (Hecho) Un menú radial distinto por botón del ratón.
 - (Hecho) Mover con restricción X/Y/Z según el botón (herramienta Move de Alias, sin gizmo).
 - Snap en espacio de parámetros (UV) y opciones del snap de curva (divisiones, centro).
+
+### Video 5: Freeform Blend completo (Hecho en v0.16)
+- Opciones: Side 1/2 Continuity, Blend Control Shape, Lock Shape Controls, Side 1/2 Shape, Modify Parameter (Side 1/2 Parameter),
+  Crown Mode, Explicit Control, Flow Control (Start Default / Interior Free / End Edge Align, Modify Range), Surface Structure,
+  Control Options (Trim Type Automatic, Auto Update, Continuity Check), botones Update / Undo All / Next.
+- Etiquetas en la vista: Side 1, Side 2, Start [Default], End [Edge Align].
+- Al final: curvas proyectadas (curve on surface) recortan la superficie y el blend sale de ellas; al mover la curva original
+  (circle) la proyección, el recorte y el blend se actualizan por historial.
+
+### Video 6: Skin (Hecho en v0.16)
+- Skin Control: Crown Mode, Explicit Control, Rebuild, Flow Control (Start / End: Connect Ends o Extend, Modify Range),
+  Surface Structure, Control Options (Auto Update, Create History, Show in canvas locators, Continuity Check, Deviation,
+  Chain Select, Create Metadata). Etiquetas Start [Connect Ends] / End [Connect Ends] / CrownMode [Off]. Skin entre curvas cerradas.

@@ -15,6 +15,7 @@ import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
 import * as HX from './history.js';
+import * as FF from './freeform.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { PLYExporter } from 'three/addons/exporters/PLYExporter.js';
@@ -623,6 +624,8 @@ function removeObject(obj) {
   for (const o of Object.values(obj.parts)) { o.geometry?.dispose(); scene.remove(o); }
   objects.splice(objects.indexOf(obj), 1);
   selObjs.splice(0, selObjs.length, ...selObjs.filter((o) => o !== obj));
+  const host = !restoring && obj.data?.cos && byId(obj.data.cos.surf);
+  if (host) { updateSurface(host); applyVisibility(host); }
   for (const [k, ref] of selCVs) if (ref.obj === obj) selCVs.delete(k);
 }
 
@@ -648,14 +651,26 @@ function updateObject(obj) {
 function updateSurface(obj) {
   const p = obj.parts, d = obj.data;
   const s = N.surfaceOf(d);
-  const geo = new ParametricGeometry((u, v, t) => s.getPoint(u, v, t), res, res);
+  let geo = new ParametricGeometry((u, v, t) => s.getPoint(u, v, t), res, res);
   if (diagMode === 'curv') curvatureColors(geo, res);
+  // recortes: curvas sobre esta superficie con "Recortar" dentro o fuera
+  const trims = objects.filter((c) => c.kind === 'curve' && c.data.cos?.surf === obj.id && c.data.cos.trim && c.data.cos.trim !== 'none')
+    .map((c) => ({ loop: FF.trimLoop(c.data.cos), trim: c.data.cos.trim })).filter((x) => x.loop);
+  const rm = trims.length ? FF.removedFn(trims) : null;
+  obj.removed = rm;
+  if (rm) geo = FF.trimGeometry(geo, res, rm, (u, v) => { const q = new THREE.Vector3(); s.getPoint(u, v, q); return q; });
   setGeo(p.mesh, geo);
-  // Isoparamétricas en los límites de cada span, como en Alias
+  // Isoparamétricas en los límites de cada span, como en Alias (sin lo recortado)
   const iso = [], S = 60, t = new THREE.Vector3();
-  const seg = (fn) => { for (let k = 0; k < S; k++) { fn(k / S, t); iso.push(t.x, t.y, t.z); fn((k + 1) / S, t); iso.push(t.x, t.y, t.z); } };
-  N.uniqueKnots(d.knotsU).forEach((u) => seg((a, tt) => s.getPoint(u, a, tt)));
-  N.uniqueKnots(d.knotsV).forEach((v) => seg((a, tt) => s.getPoint(a, v, tt)));
+  const seg = (uv) => {
+    for (let k = 0; k < S; k++) {
+      const [u0, v0] = uv(k / S), [u1, v1] = uv((k + 1) / S);
+      if (rm && rm((u0 + u1) / 2, (v0 + v1) / 2)) continue;
+      s.getPoint(u0, v0, t); iso.push(t.x, t.y, t.z); s.getPoint(u1, v1, t); iso.push(t.x, t.y, t.z);
+    }
+  };
+  N.uniqueKnots(d.knotsU).forEach((u) => seg((a) => [u, a]));
+  N.uniqueKnots(d.knotsV).forEach((v) => seg((a) => [a, v]));
   { const g = new LineSegmentsGeometry(); g.setPositions(iso); setGeo(p.iso, g); }
   const hull = [], rim = [], nu = d.cvs.length, nv = d.cvs[0].length;
   for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
@@ -681,7 +696,10 @@ function updateSurface(obj) {
 function updateCurve(obj) {
   const p = obj.parts, d = obj.data;
   const crv = N.curveOf(d), pts = [], S = 200;
-  for (let s = 0; s <= S; s++) { const q = crv.getPoint(s / S); pts.push(q.x, q.y, q.z); }
+  const host = d.cos && byId(d.cos.surf);
+  // curva sobre superficie: se dibuja exacta sobre ella (un poco levantada por la normal para que se vea)
+  if (host) FF.cosPoints(host.data, d.cos.uv, 0.004).forEach((q) => pts.push(q.x, q.y, q.z));
+  else for (let s = 0; s <= S; s++) { const q = crv.getPoint(s / S); pts.push(q.x, q.y, q.z); }
   setGeo(p.line, line2Geo(pts));
   setGeo(p.pick, posGeo(pts));
   obj.samples = [];
@@ -690,6 +708,8 @@ function updateCurve(obj) {
   setGeo(p.hull, posGeo(d.cvs.flatMap((q) => [q.x, q.y, q.z])));
   p.hull.computeLineDistances();
   buildComb(p, crv);
+  // la superficie que la lleva se vuelve a recortar
+  if (host && !restoring) { updateSurface(host); applyVisibility(host); }
 }
 
 function buildComb(p, crv) {
@@ -1199,12 +1219,13 @@ function placePoint(e) {
 function setDrawPlane(k) {
   drawPlaneKind = k;
   document.querySelectorAll('[data-plane]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.plane === k)));
-  gridXY.visible = k === 'xy' && (tool === 'curve' || tool === 'plane');
+  gridXY.visible = k === 'xy' && (tool === 'curve' || tool === 'plane' || tool === 'circle');
 }
 
 const HINTS = {
   curve: 'Clic: añadir punto · Enter: terminar · Esc: cancelar · T: vista superior',
   plane: 'Clic en el plano de dibujo para colocar una superficie plana · Esc: cancelar',
+  circle: 'Clic en el plano de dibujo para colocar un círculo (radio 1 dm; luego escálalo con R) · Esc: cancelar',
 };
 function updateHint() {
   if (tool === 'edge' && edgeOp) { $('hint').textContent = edgeOp.hint(); return; }
@@ -1235,6 +1256,15 @@ function setTool(t) {
   attachGizmo();
 }
 
+// Círculo NURBS exacto: grado 2, 9 CVs, pesos √2/2 en las esquinas
+function circleData(c, R, plane = 'xz') {
+  const cvs = [];
+  for (let k = 0; k <= 8; k++) {
+    const a = (k * Math.PI) / 4, f = k % 2 ? Math.SQRT2 : 1, x = Math.cos(a) * R * f, y = Math.sin(a) * R * f;
+    cvs.push(plane === 'xz' ? new THREE.Vector4(c.x + x, c.y, c.z - y, k % 2 ? Math.SQRT1_2 : 1) : new THREE.Vector4(c.x + x, c.y + y, c.z, k % 2 ? Math.SQRT1_2 : 1));
+  }
+  return { deg: 2, knots: [0, 0, 0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1, 1, 1], cvs, plane };
+}
 // Dibujo de curvas
 let draft = null;
 const draftLine = new Line2(new LineGeometry(), draftMat);
@@ -1341,6 +1371,15 @@ addEventListener('pointerup', (e) => {
     return;
   }
   if (tool === 'edge') { edgeClick(e); return; }
+  if (tool === 'circle') {
+    if (e.button !== 0) return;
+    const p = placePoint(e);
+    if (!p) return;
+    const o = addCurve(circleData(p, toolDef.circleR ?? 1, drawPlaneKind), 'Círculo');
+    setTool('select');
+    finishCreate([o], `${o.name} creado (NURBS exacto, grado 2)`);
+    return;
+  }
   if (tool === 'plane') {
     const p = placePoint(e);
     if (!p) return;
@@ -2120,7 +2159,8 @@ function serializeProject() {
       const base = { kind: o.kind, name: o.name, mat: o.mat, visible: o.visible, pivot: o.pivot.toArray() };
       const d = o.data;
       if (o.kind === 'surface') return { ...base, degU: d.degU, degV: d.degV, knotsU: d.knotsU, knotsV: d.knotsV, cvs: d.cvs.map((r) => r.map(v4)) };
-      if (o.kind === 'curve') return { ...base, deg: d.deg, knots: d.knots, plane: d.plane, cvs: d.cvs.map(v4) };
+      if (o.kind === 'curve') return { ...base, deg: d.deg, knots: d.knots, plane: d.plane, cvs: d.cvs.map(v4),
+        ...(d.cos ? { cos: { ...d.cos, surf: objects.findIndex((x) => x.id === d.cos.surf) } } : {}) };
       const g = d.geometry;
       return { ...base, positions: Array.from(g.attributes.position.array), index: g.index ? Array.from(g.index.array) : null };
     }),
@@ -2220,6 +2260,8 @@ async function importFile(file) {
       ob.name = it.name; ob.mat = it.mat || matKey; ob.visible = it.visible !== false; ob.pivot.fromArray(it.pivot || ob.pivot.toArray());
       created.push(ob);
     }
+    // curvas sobre superficie: el índice guardado apunta a su superficie
+    j.objects.forEach((it, i) => { if (it.cos && created[it.cos.surf]) { created[i].data.cos = { ...it.cos, surf: created[it.cos.surf].id }; updateObject(created[i]); } });
     $('file-name').textContent = file.name.replace(/\.json$/, '.forja');
   } else if (ext === 'igs' || ext === 'iges') {
     const r = X.readIGES(await file.text(), o);
@@ -2543,6 +2585,7 @@ addEventListener('keydown', (e) => {
   else if (k === '2') setDiag('curv');
   else if (k === '3') setDiag('wire');
   else if (k === 'enter' && tool === 'curve') finishDraft();
+  else if (k === 'enter' && tool === 'edge' && edgeOp && EDGE_OPS[edgeOp.type].enter) EDGE_OPS[edgeOp.type].enter();
   else if (k === 'escape') {
     if (tool !== 'select') setTool('select'); else if (pivotEdit) togglePivotEdit();
     else if (mouseXform) { mouseXform = false; updateHint(); } else clearSelection();
@@ -2608,7 +2651,7 @@ const IC = {
   curve: 'M3 18C7 4 17 20 21 6', plane: 'M3 16l6-9h12l-6 9z', revolve: 'M12 3v18M4 12a8 3 0 0 0 16 0M15 6c2 2 2 9 0 12',
   loft: 'M4 18c3-4 6-4 9-2s5 1 7-2M4 12c3-4 6-4 9-2s5 1 7-2M4 6c3-4 6-4 9-2s5 1 7-2', extrude: 'M4 18c4-3 8 1 12-2M8 6c4-3 8 1 12-2M4 18l4-12M16 16l4-12',
   dup: 'M9 9h11v11H9zM4 15V4h11', align: 'M4 20V4M8 12c4 0 6-6 12-6M8 12c4 0 6 6 12 6', round: 'M4 20V12a8 8 0 0 1 8-8h8',
-  extend: 'M4 18C8 8 12 6 14 6M16 6h5M19 3l3 3-3 3', offset: 'M3 15c5-6 13-6 18 0M3 20c5-6 13-6 18 0', blend: 'M3 6h6c6 0 6 12 12 12M3 18h6',
+  extend: 'M4 18C8 8 12 6 14 6M16 6h5M19 3l3 3-3 3', circle: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z', project: 'M12 3v9M9 9l3 3 3-3M3 17c5-3 13-3 18 0', offset: 'M3 15c5-6 13-6 18 0M3 20c5-6 13-6 18 0', blend: 'M3 6h6c6 0 6 12 12 12M3 18h6',
   nothing: 'M4 4h4M16 4h4M4 20h4M16 20h4M4 4v4M20 4v4M4 16v4M20 16v4M9 9l6 6M15 9l-6 6', object: 'M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8',
   cv: 'M4 18C8 6 16 18 20 6M3 17h2v2H3zM19 5h2v2h-2zM11 11h2v2h-2z', pickCurve: 'M3 17C7 5 13 19 21 7M17 4l4 3-4 3',
   pickSurf: 'M3 15l5-8h13l-5 8zM6 19h13', move: 'M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3',
@@ -2651,12 +2694,14 @@ const PUCK_CMDS = {
   // Modelado
   curve: { k: 'curve', label: 'Curva', key: 'C', run: () => setTool('curve'), sub: [
     { k: 'ground', label: 'En el suelo', run: () => { setDrawPlane('xz'); setTool('curve'); } },
-    { k: 'front', label: 'De frente', run: () => { setDrawPlane('xy'); setTool('curve'); } }] },
+    { k: 'front', label: 'De frente', run: () => { setDrawPlane('xy'); setTool('curve'); } },
+    { k: 'circle', label: 'Círculo', run: () => setTool('circle') }, { k: 'project', label: 'Proyectar', run: projectSelection }] },
   surface: { k: 'surf', label: 'Superficie', run: () => setTool('plane'), sub: [
     { k: 'plane', label: 'Plano', run: () => setTool('plane') }, { k: 'revolve', label: 'Revolución', run: () => OPS.revolve() },
     { k: 'loft', label: 'Loft', run: () => OPS.loft() }, { k: 'extrude', label: 'Extruir', run: () => OPS.extrude() }] },
   edit: { k: 'edit', label: 'Editar', run: () => startEdgeOp('align'), sub: [
     { k: 'align', label: 'Align', run: () => startEdgeOp('align') }, { k: 'blend', label: 'Blend', run: () => startEdgeOp('blend') },
+    { k: 'loft', label: 'Skin', run: () => startEdgeOp('skin') }, { k: 'extend', label: 'Extender', run: () => startEdgeOp('extend') },
     { k: 'offset', label: 'Offset', run: offsetSelection }, { k: 'round', label: 'Round', soon: true }] },
   pick: { k: 'arrow', label: 'Elegir', key: 'O', run: () => setPickMode('object'), sub: [
     { k: 'object', label: 'Objeto', run: () => setPickMode('object') }, { k: 'pickCurve', label: 'Curvas', run: () => setPickMode('object', 'curve') },
@@ -2975,7 +3020,9 @@ function cloneData(o) {
   const d = o.data ?? o;
   if (o.kind === 'mesh') return { geometry: d.geometry.clone() };
   if (o.kind === 'surface') return { degU: d.degU, degV: d.degV, knotsU: d.knotsU.slice(), knotsV: d.knotsV.slice(), cvs: d.cvs.map((r) => r.map(cloneV4)) };
-  return { deg: d.deg, knots: d.knots.slice(), plane: d.plane, cvs: d.cvs.map(cloneV4) };
+  const c = { deg: d.deg, knots: d.knots.slice(), plane: d.plane, cvs: d.cvs.map(cloneV4) };
+  if (d.cos) c.cos = { ...d.cos, uv: d.cos.uv.map((q) => q.slice()) };
+  return c;
 }
 function snapshot() {
   return {
@@ -3010,6 +3057,8 @@ function restore(st) {
   activeLayer = act;
   nextId = Math.max(1, ...objects.map((o) => o.id + 1));
   restoring = false;
+  // las curvas sobre superficie se crean después de su superficie: se recortan ahora
+  objects.filter((o) => o.kind === 'curve' && o.data.cos).forEach(updateObject);
   objects.forEach(applyVisibility);
   selectionChanged(); refreshOutliner(); renderLayers(); renderHistory();
 }
@@ -3099,11 +3148,17 @@ const MENUBAR = [
     { label: 'Rejilla', key: 'Alt', run: () => $('snap-grid').click(), ...chk(() => snapToggles.grid) },
     { label: 'Curva', key: 'Ctrl+Alt', run: () => $('snap-curve').click(), ...chk(() => snapToggles.curve) },
     { label: 'Punto', key: 'Ctrl', run: () => $('snap-point').click(), ...chk(() => snapToggles.point) }]],
+  ['Curvas', [
+    { label: 'Curva', key: 'C', run: () => setTool('curve') }, { label: 'Círculo', run: () => setTool('circle') },
+    { sep: true }, { label: 'Proyectar en superficie', run: projectSelection }]],
   ['Superficies', [
     { label: 'Plano', run: () => setTool('plane') }, { label: 'Revolución', run: () => OPS.revolve() }, { label: 'Loft', run: () => OPS.loft() },
     { label: 'Extruir', run: () => OPS.extrude() }, { sep: true }, { title: 'Con historial' },
-    { label: 'Align (G0 · G1 · G2 · G3)', run: () => startEdgeOp('align') }, { label: 'Blend (G1 · G2)', run: () => startEdgeOp('blend') },
+    { label: 'Align (G0 · G1 · G2 · G3)', run: () => startEdgeOp('align') }, { label: 'Freeform Blend (bordes y curvas)', run: () => startEdgeOp('blend') },
+    { label: 'Skin (entre curvas)', run: () => startEdgeOp('skin') }, { label: 'Extender', run: () => startEdgeOp('extend') },
     { label: 'Offset', run: offsetSelection }, { label: 'Simetría (plano YZ)', run: mirrorSelection },
+    { sep: true }, { title: 'Curvas sobre superficie' },
+    { label: 'Proyectar curva en superficie', run: projectSelection },
     { sep: true }, { label: 'Quitar historial de la selección', run: () => { const ids = new Set(selObjs.map((o) => o.id)); relations.filter((r) => ids.has(outputOf(r))).forEach((r) => removeRelation(r.id)); } }]],
   ['Borrar', [
     { label: 'Borrar selección', key: 'Supr', run: deleteSelection },
@@ -3136,7 +3191,7 @@ const MENUBAR = [
   ['Utilidades', [
     { label: 'Centrar pivote', run: centerPivots }, { label: 'Punto de interés a la selección', key: 'L', run: pivotToSelection },
     { label: 'Medir distancia', soon: true }]],
-  ['Ayuda', [{ label: 'Atajos de teclado', run: () => openPrefs('help') }, { label: 'Acerca de Forja', run: () => toast('FORJA · modelador NURBS libre (Alias + Plasticity + Blender)') }]],
+  ['Ayuda', [{ label: 'Atajos de teclado', run: () => openPrefs('help') }, { label: 'Ejemplo: Freeform Blend (manija)', run: () => blendDemo() }, { label: 'Acerca de Forja', run: () => toast('FORJA · modelador NURBS libre (Alias + Plasticity + Blender)') }]],
 ];
 function buildMenubar() {
   const bar = $('menubar');
@@ -3285,13 +3340,50 @@ updateEvalUI();
 // ---------- Historial de construcción y herramientas de superficies ----------
 // Relaciones entre objetos (src/history.js). Cuando cambia una entrada (p. ej. se mueve un CV de la superficie
 // maestra o de la curva extruida) se recalcula la salida, y en cadena lo que dependa de ella.
-const byId = (id) => objects.find((o) => o.id === id);
-const inputsOf = (r) => (r.type === 'align' ? [r.master] : r.type === 'blend' ? [r.a, r.b] : r.type === 'loft' ? r.srcs : [r.src]);
+function byId(id) { return objects.find((o) => o.id === id); }
+const inputsOf = (r) => (r.type === 'align' ? [r.master] : r.type === 'blend' || r.type === 'skin' ? [...(r.aIds || [r.a]), ...(r.bIds || [r.b])]
+  : r.type === 'loft' ? r.srcs : r.type === 'project' ? [r.src, r.surf] : [r.src]);
 const outputOf = (r) => (r.type === 'align' ? r.slave : r.out);
-const REL_NAMES = { align: 'Align', blend: 'Blend', offset: 'Offset', mirror: 'Simetría', extrude: 'Extruir', revolve: 'Revolución', loft: 'Loft' };
+const REL_NAMES = { align: 'Align', blend: 'Freeform Blend', skin: 'Skin', offset: 'Offset', mirror: 'Simetría', extrude: 'Extruir', revolve: 'Revolución', loft: 'Loft',
+  project: 'Proyectar', extend: 'Extender' };
+// Lado de un Blend / Skin: borde de superficie, curva sobre superficie o una o varias curvas libres encadenadas
+function sideOf(ids, edge) {
+  const objs = ids.map(byId);
+  if (objs.some((o) => !o)) throw new Error('falta un objeto de entrada');
+  const o = objs[0];
+  if (o.kind === 'surface') return { kind: 'edge', data: o.data, edge };
+  const host = objs.length === 1 && o.data.cos && byId(o.data.cos.surf);
+  if (host) {
+    const c = o.data.cos;
+    return { kind: 'cos', data: host.data, uv: c.uv, closed: c.closed, loop: FF.trimLoop(c), toward: c.trim && c.trim !== 'none' ? c.trim : null };
+  }
+  return { kind: 'curves', curves: objs.map((x) => x.data) };
+}
+const blendSides = (r) => [sideOf(r.aIds || [r.a], r.aEdge), sideOf(r.bIds || [r.b], r.bEdge)];
+// con dos bordes completos y flujo isoparamétrico se usa el Blend exacto de CVs (history.js); si no, el Freeform por estaciones
+const exactBlend = (r) => r.type === 'blend' && byId(r.a)?.kind === 'surface' && byId(r.b)?.kind === 'surface'
+  && !r.explicit && !r.modRange && !r.crown && (r.flowInt ?? 'iso') === 'iso';
+function blendRelData(r) {
+  if (exactBlend(r)) {
+    if (r.lockShape) r.tensionB = r.tensionA ?? r.tension;
+    r.info = { exact: true };
+    return HX.blendData(r, byId(r.a).data, byId(r.b).data);
+  }
+  const [A, B] = blendSides(r);
+  return FF.freeformBlend(r, A, B);
+}
+// Curva sobre superficie a partir de una curva y una superficie (con su recorte)
+function projData(r, c, srf) {
+  const pr = FF.projectCurve(c.data, srf.data, r.mode === 'normal' ? 'normal' : 'dir', r.dir);
+  const d = FF.cosCurveData(srf.data, pr.uv);
+  d.cos = { surf: srf.id, uv: pr.uv, closed: pr.closed, trim: r.trim || 'none' };
+  return d;
+}
 function relationData(r, ins, out) {
   if (r.type === 'align') return HX.align(r, ins[0].data, out.data);
-  if (r.type === 'blend') return HX.blendData(r, ins[0].data, ins[1].data);
+  if (r.type === 'blend' || r.type === 'skin') return blendRelData(r);
+  if (r.type === 'project') return projData(r, ins[0], ins[1]);
+  if (r.type === 'extend') return FF.extendData(ins[0].data, r.edge, r.dist, r.cont);
   if (r.type === 'offset') return HX.offsetData(ins[0].data, r.dist);
   if (r.type === 'mirror') return HX.mirrorData(ins[0].data, ins[0].kind, r.plane || 'x');
   if (r.type === 'extrude') return HX.extrudeData(ins[0].data, r.dist, r.dir, r.both);
@@ -3354,13 +3446,24 @@ const TW = {
     const body = $('tw-body');
     body.innerHTML = '';
     if (sp.hint) { const h = document.createElement('p'); h.className = 'tw-hint'; h.textContent = sp.hint(); body.append(h); }
-    for (const f of sp.fields || []) {
+    const add = (f) => {
+      if (f.show && !f.show()) return;
       const row = document.createElement('div');
       row.className = 'tw-row';
+      if (f.type === 'group') {
+        // sección plegable (como Flow Control / Surface Structure / Control Options de Alias)
+        const open = !!(toolDef.twOpen || {})[f.key];
+        row.className = 'tw-group';
+        row.innerHTML = `<button aria-expanded="${open}">${open ? '▾' : '▸'} ${esc(f.label)}</button>`;
+        row.querySelector('button').addEventListener('click', () => { toolDef.twOpen = { ...(toolDef.twOpen || {}), [f.key]: !open }; saveToolDef(); this.render(); });
+        body.append(row);
+        if (open) f.fields.forEach(add);
+        return;
+      }
       if (f.type === 'seg') {
         row.innerHTML = `<label>${esc(f.label)}</label><div class="tw-seg">${f.opts.map(([v, l]) => `<button data-v="${v}" aria-pressed="${String(f.get() === v)}">${esc(l)}</button>`).join('')}</div>`;
-        row.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
-          const v = f.opts.find(([x]) => String(x) === b.dataset.v)[0];
+        row.querySelectorAll('button').forEach((bt) => bt.addEventListener('click', () => {
+          const v = f.opts.find(([x]) => String(x) === bt.dataset.v)[0];
           f.set(v); this.render();
         }));
       } else if (f.type === 'range') {
@@ -3376,7 +3479,8 @@ const TW = {
         if (f.diagOf) row.dataset.diagOf = f.diagOf;
       }
       body.append(row);
-    }
+    };
+    (sp.fields || []).forEach(add);
     if (sp.actions?.length) {
       const a = document.createElement('div');
       a.className = 'tw-actions';
@@ -3420,14 +3524,27 @@ const edgeMarks = new THREE.Group();
 scene.add(edgeMarks);
 const EDGE_COLORS = [0x2fb36b, 0x2f7bff, 0xffa31a];
 const edgeLineMats = EDGE_COLORS.map((c) => LM({ color: c, linewidth: 5, depthTest: false }));
-function markEdge(slot, obj, edge) {
-  const old = edgeMarks.children.find((c) => c.userData.slot === slot);
-  if (old) { old.geometry.dispose(); edgeMarks.remove(old); }
+// marca un borde de superficie o una curva (o varias, encadenadas) con el color del paso
+function markEdge(slot, obj, edge, more = []) {
+  edgeMarks.children.filter((c) => c.userData.slot === slot).forEach((old) => { old.geometry.dispose(); edgeMarks.remove(old); });
   if (!obj) return;
-  const pts = HX.edgePoints(obj.data, edge).flatMap((p) => [p.x, p.y, p.z]);
-  const l = new Line2(line2Geo(pts), edgeLineMats[slot]);
-  l.userData.slot = slot; l.renderOrder = 20;
-  edgeMarks.add(l);
+  for (const o of [obj, ...more]) {
+    const src = o.kind === 'curve' ? o.samples : HX.edgePoints(o.data, edge);
+    const l = new Line2(line2Geo(src.flatMap((p) => [p.x, p.y, p.z])), edgeLineMats[slot]);
+    l.userData.slot = slot; l.renderOrder = 20;
+    edgeMarks.add(l);
+  }
+}
+function curveAt(e) {
+  setRay(e);
+  ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
+  const hit = ray.intersectObjects(objects.filter((o) => o.visible && o.kind === 'curve').map((o) => o.parts.pick), false)[0];
+  return hit ? { obj: hit.object.userData.obj } : null;
+}
+// lo que se puede elegir con cada herramienta: 'edge' bordes, 'curve' curvas, 'both' (las curvas ganan si están cerca)
+function sideAt(e, kinds = 'edge') {
+  if (kinds !== 'edge') { const c = curveAt(e); if (c || kinds === 'curve') return c; }
+  return surfaceEdgeAt(e);
 }
 function surfaceEdgeAt(e) {
   setRay(e);
@@ -3466,51 +3583,99 @@ const EDGE_OPS = {
     },
   },
   blend: {
-    title: 'Blend', steps: ['1 · Clic cerca del primer borde', '2 · Clic cerca del segundo borde'],
+    title: 'Freeform Blend', pick: 'both',
+    steps: ['1 · Clic en el primer lado: borde de superficie, curva sobre superficie o curva', '2 · Clic en el segundo lado'],
     fields: () => [
       { type: 'seg', label: 'Lado 1', opts: [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.blendA, set: (v) => { toolDef.blendA = v; saveToolDef(); } },
       { type: 'seg', label: 'Lado 2', opts: [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.blendB, set: (v) => { toolDef.blendB = v; saveToolDef(); } },
-      { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => toolDef.blendTension, set: (v) => { toolDef.blendTension = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) },
+      { type: 'range', label: 'Forma', min: 0.2, max: 3, step: 0.05, get: () => toolDef.blendTension, set: (v) => { toolDef.blendTension = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) },
+      { type: 'check', label: 'Recortar automáticamente', get: () => toolDef.autoTrim !== false, set: (v) => { toolDef.autoTrim = v; saveToolDef(); } },
       ...CONTROL_OPTS(),
-      { type: 'html', html: () => '<span class="tw-note">En cada borde sale la continuidad junto al cursor (o pulsa 1–4).</span>' }],
+      { type: 'html', html: () => '<span class="tw-note">Cada lado puede ser un borde, una curva proyectada (Superficies › Proyectar) o una curva libre (G0). En cada lado sale la continuidad junto al cursor (1–4).</span>' }],
     async afterPick(i, p, e) {
-      const c = await quickPick(e.clientX, e.clientY, `Continuidad lado ${i + 1}`, G_OPTS(0, 3), i ? toolDef.blendB : toolDef.blendA);
-      if (c == null) return restartEdgeOp();
-      if (i === 0) toolDef.blendA = c; else toolDef.blendB = c;
-      saveToolDef(); TW.render();
-      if (i === 1) createBlend(edgeOp.picks[0], edgeOp.picks[1], toolDef.blendA, toolDef.blendB);
+      let c = 0;
+      if (p.obj.kind === 'surface' || p.obj.data.cos) {
+        c = await quickPick(e.clientX, e.clientY, `Continuidad lado ${i + 1}`, G_OPTS(0, 3), i ? toolDef.blendB : toolDef.blendA);
+        if (c == null) return restartEdgeOp();
+        if (i === 0) toolDef.blendA = c; else toolDef.blendB = c;
+        saveToolDef(); TW.render();
+      }
+      edgeOp.conts = [...(edgeOp.conts || []).slice(0, i), c];
+      if (i === 1) createBlend(edgeOp.picks[0], edgeOp.picks[1], edgeOp.conts[0], edgeOp.conts[1]);
     },
   },
+  // Skin: superficie entre dos curvas (o dos cadenas de curvas con "Encadenar")
+  skin: {
+    title: 'Skin', pick: 'curve',
+    steps: ['1 · Clic en la primera curva', '2 · Clic en la segunda curva'],
+    chainSteps: ['1 · Clic en las curvas del primer lado · Enter: siguiente lado', '2 · Clic en las curvas del segundo lado · Enter: crear'],
+    fields: () => [
+      { type: 'check', label: 'Encadenar curvas (Chain select)', get: () => !!toolDef.skinChain, set: (v) => { toolDef.skinChain = v; saveToolDef(); restartEdgeOp(); } },
+      { type: 'check', label: 'Reconstruir (Rebuild)', get: () => toolDef.skinRebuild !== false, set: (v) => { toolDef.skinRebuild = v; saveToolDef(); } },
+      ...CONTROL_OPTS()],
+    click(p) {
+      const sd = edgeOp.sides || (edgeOp.sides = [[], []]), cur = edgeOp.cur || 0;
+      if (sd[cur].includes(p.obj) || (cur === 1 && sd[0].includes(p.obj))) return toast('Esa curva ya está elegida.');
+      sd[cur].push(p.obj);
+      markEdge(cur, sd[cur][0], null, sd[cur].slice(1));
+      edgeOp.picks = cur ? [sd[0][0], p] : [p];
+      if (!toolDef.skinChain) { if (cur === 0) edgeOp.cur = 1; else createSkin(sd[0], sd[1]); }
+      updateHint(); TW.render();
+    },
+    enter() {
+      const sd = edgeOp.sides, cur = edgeOp.cur || 0;
+      if (!sd?.[cur]?.length) return;
+      if (cur === 0) { edgeOp.cur = 1; edgeOp.picks = [sd[0][0]]; updateHint(); TW.render(); } else createSkin(sd[0], sd[1]);
+    },
+  },
+  extend: {
+    title: 'Extender', pick: 'edge', steps: ['Clic cerca del borde que quieres alargar'],
+    fields: () => [
+      { type: 'range', label: 'Distancia', min: 0.05, max: 6, step: 0.05, get: () => toolDef.extendDist ?? 1, set: (v) => { toolDef.extendDist = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) + ' dm' },
+      { type: 'seg', label: 'Continuidad', opts: [[1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.extendCont ?? 2, set: (v) => { toolDef.extendCont = v; saveToolDef(); } },
+      ...CONTROL_OPTS()],
+    afterPick(i, p) { createExtend(p); },
+  },
+};
+const opStep = () => {
+  const op = EDGE_OPS[edgeOp.type];
+  if (edgeOp.type === 'skin') return (toolDef.skinChain ? op.chainSteps : op.steps)[edgeOp.cur || 0];
+  return op.steps[Math.min(edgeOp.picks.length, op.steps.length - 1)];
 };
 function edgeSpec() {
   const op = EDGE_OPS[edgeOp.type];
-  return { title: op.title, hint: () => op.steps[Math.min(edgeOp.picks.length, op.steps.length - 1)], fields: op.fields(), actions: [{ label: 'Terminar', run: () => setTool('select') }] };
+  const actions = [{ label: 'Terminar', run: () => setTool('select') }];
+  if (op.enter) actions.unshift({ label: 'Siguiente lado / Crear', primary: true, run: () => op.enter() });
+  return { title: op.title, hint: opStep, fields: op.fields(), actions };
 }
 function startEdgeOp(type) {
   setTool('select'); setPickMode('object');
   if (layout === 'render' || layout === 'ai') switchLayout('diag');
-  edgeOp = { type, picks: [], hint: () => `${EDGE_OPS[type].steps[Math.min(edgeOp.picks.length, 1)]} · Esc: terminar` };
+  edgeOp = { type, picks: [], hint: () => `${opStep()} · Esc: terminar` };
   setTool('edge');
   TW.show(edgeSpec());
 }
 // tras crear (o cancelar) la herramienta sigue activa para la siguiente unión, como en Alias
-function restartEdgeOp() { if (!edgeOp) return; edgeOp.picks = []; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint(); TW.show(edgeSpec()); }
+function restartEdgeOp() { if (!edgeOp) return; edgeOp.picks = []; edgeOp.sides = null; edgeOp.cur = 0; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint(); TW.show(edgeSpec()); }
 // tras crear: se ve la ventana de lo creado (con sus flechas) y la herramienta sigue lista para la siguiente unión
 function continueEdgeOp(r) {
   if (!edgeOp) return;
-  edgeOp.picks = []; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint();
+  edgeOp.picks = []; edgeOp.sides = null; edgeOp.cur = 0; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint();
   const sp = relSpec(r);
   sp.actions = [{ label: 'Quitar historial', run: () => removeRelation(r.id) }, { label: 'Terminar', primary: true, run: () => { setTool('select'); TW.hide(); } }];
-  sp.hint = () => 'Arrastra las flechas: azul = tensión, naranja = forma · clic en otro borde = nueva unión';
+  sp.hint = () => (r.type === 'skin' ? 'Cambia sus opciones aquí · clic en otra curva = nuevo Skin' : r.type === 'extend' ? 'Arrastra la flecha verde (distancia) · clic en otro borde = otra extensión'
+    : 'Arrastra las flechas: azul = forma, naranja = curvatura · clic en otro borde = nueva unión');
   TW.show(sp);
 }
 function endEdgeOp() { edgeOp = null; [0, 1, 2].forEach((k) => markEdge(k, null)); if (TW.spec && !TW.spec.rel) TW.hide(); }
 let edgeBusy = false;
 async function edgeClick(e) {
   if (!edgeOp || e.button !== 0 || edgeBusy) return;
-  const p = surfaceEdgeAt(e);
-  if (!p) return toast('Haz clic sobre una superficie, cerca del borde que quieres.');
-  if (edgeOp.picks[0]?.obj === p.obj) return toast('Elige un borde de otra superficie.');
+  const op = EDGE_OPS[edgeOp.type], p = sideAt(e, op.pick);
+  if (!p) return toast(op.pick === 'curve' ? 'Haz clic sobre una curva.' : op.pick === 'both' ? 'Haz clic cerca de un borde de superficie o sobre una curva.' : 'Haz clic sobre una superficie, cerca del borde que quieres.');
+  if (op.click) { if (TW.spec?.rel) TW.show(edgeSpec()); op.click(p, e); return; }
+  const p0 = edgeOp.picks[0];
+  if (p0 && p0.obj === p.obj && (p.obj.kind === 'curve' || p0.edge === p.edge)) return toast('Elige otro borde u otra curva.');
   const i = edgeOp.picks.length;
   if (i === 0 && TW.spec?.rel) TW.show(edgeSpec());
   markEdge(i, p.obj, p.edge);
@@ -3521,8 +3686,8 @@ async function edgeClick(e) {
 }
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (tool !== 'edge' || e.buttons || edgeBusy) return;
-  const p = surfaceEdgeAt(e);
-  if (p && p.obj !== edgeOp?.picks[0]?.obj) markEdge(2, p.obj, p.edge); else markEdge(2, null);
+  const p = edgeOp && sideAt(e, EDGE_OPS[edgeOp.type].pick);
+  if (p) markEdge(2, p.obj, p.edge); else markEdge(2, null);
 });
 
 function createAlign(s, m, cont = toolDef.alignCont) {
@@ -3541,17 +3706,75 @@ function createAlign(s, m, cont = toolDef.alignCont) {
 }
 function createBlend(a, b, cA = toolDef.blendA, cB = toolDef.blendB) {
   checkpoint();
-  const r = { type: 'blend', a: a.obj.id, aEdge: a.edge, b: b.obj.id, bEdge: b.edge, contA: cA, contB: cB, tension: toolDef.blendTension, rev: HX.reversed(a.obj.data, a.edge, b.obj.data, b.edge) };
+  const edges = a.obj.kind === 'surface' && b.obj.kind === 'surface', t = toolDef.blendTension;
+  const r = { type: 'blend', a: a.obj.id, aEdge: a.edge || null, b: b.obj.id, bEdge: b.edge || null, contA: cA, contB: cB,
+    tension: t, tensionA: t, tensionB: t, lockShape: true, flowInt: edges ? 'iso' : 'free', flowStart: 'default', flowEnd: 'default' };
+  if (edges) r.rev = HX.reversed(a.obj.data, a.edge, b.obj.data, b.edge);
   let o;
-  try { o = addSurface(HX.blendData(r, a.obj.data, b.obj.data), 'Blend'); }
+  try { o = addSurface(blendRelData(r), 'Blend'); }
   catch (err) { console.warn(err); toast(`Blend no se pudo hacer: ${err.message}`); return restartEdgeOp(); }
   r.out = o.id;
   addRelation(r);
-  const exact = HX.blendCompatible(a.obj.data, a.edge, b.obj.data, b.edge);
+  autoTrim(r);
   if (maybeDropHistory(r)) { toast(`${o.name}: G${cA} / G${cB}, sin historial`); return restartEdgeOp(); }
-  toast(`${o.name}: G${cA} / G${cB}${exact ? '' : ' (bordes distintos: uno se remuestreó, mira el diagnóstico)'} · ajusta con las flechas`);
+  toast(`${o.name}: G${cA} / G${cB} · ajusta con las flechas o en su ventana (flujo, rango, corona...)`);
   continueEdgeOp(r);
 }
+// "Trim Type: Automatic" de Alias: una curva cerrada (o de borde a borde) sobre superficie recorta el lado hacia el que entra el blend
+function autoTrim(r) {
+  if (toolDef.autoTrim === false || !r.info) return;
+  [[r.a, r.info.towardA], [r.b, r.info.towardB]].forEach(([id, toward]) => {
+    const c = byId(id);
+    if (!c?.data.cos || !toward || (c.data.cos.trim && c.data.cos.trim !== 'none')) return;
+    c.data.cos.trim = toward;
+    const pr = relations.find((x) => x.type === 'project' && x.out === c.id);
+    if (pr) pr.trim = toward;
+    updateObject(c);
+    toast(`${byId(c.data.cos.surf)?.name || 'Superficie'} recortada ${toward === 'inside' ? 'por dentro' : 'por fuera'} de ${c.name}`);
+  });
+}
+function createSkin(sa, sb) {
+  if (!sa.length || !sb.length) return;
+  checkpoint();
+  const r = { type: 'skin', a: sa[0].id, b: sb[0].id, aIds: sa.map((o) => o.id), bIds: sb.map((o) => o.id), contA: 0, contB: 0,
+    rebuild: toolDef.skinRebuild !== false, flowStart: 'default', flowEnd: 'default' };
+  let o;
+  try { o = addSurface(blendRelData(r), 'Skin'); }
+  catch (err) { console.warn(err); toast(`Skin no se pudo hacer: ${err.message}`); return restartEdgeOp(); }
+  r.out = o.id;
+  addRelation(r);
+  if (maybeDropHistory(r)) { toast(`${o.name} creada, sin historial`); return restartEdgeOp(); }
+  toast(`${o.name}: sigue a sus curvas · Inicio / Fin: unir extremos o extender · clic en otra curva para otro Skin`);
+  continueEdgeOp(r);
+}
+function createExtend(p) {
+  checkpoint();
+  const r = { type: 'extend', src: p.obj.id, edge: p.edge, dist: toolDef.extendDist ?? 1, cont: toolDef.extendCont ?? 2 };
+  let o;
+  try { o = addSurface(FF.extendData(p.obj.data, r.edge, r.dist, r.cont), 'Extensión'); }
+  catch (err) { console.warn(err); toast(`Extender no se pudo hacer: ${err.message}`); return restartEdgeOp(); }
+  r.out = o.id;
+  addRelation(r);
+  if (maybeDropHistory(r)) { toast(`${o.name} creada, sin historial`); return restartEdgeOp(); }
+  toast(`${o.name}: G${r.cont} con ${p.obj.name} · arrastra la flecha verde para la distancia`);
+  continueEdgeOp(r);
+}
+// Proyectar curvas sobre una superficie (curvas sobre superficie con historial: si mueves la curva, la proyección la sigue)
+function projectSelection() {
+  const cs = selCurves().filter((c) => !c.data.cos), srf = selObjs.find((o) => o.kind === 'surface');
+  if (!cs.length || !srf) return toast('Proyectar: elige una o más curvas y la superficie (Shift + clic para añadir) y vuelve a pulsar Proyectar.');
+  checkpoint();
+  const mode = toolDef.projMode || 'view', dir = projDir(mode);
+  const rels = [], made = [];
+  for (const c of cs) {
+    const r = { type: 'project', src: c.id, surf: srf.id, mode, dir, trim: toolDef.projTrim || 'none' };
+    const o = addCurve(projData(r, c, srf), 'Proyección');
+    r.out = o.id; addRelation(r); rels.push(r); made.push(o);
+  }
+  finishCreate(made, `${made.length} ${made.length === 1 ? 'curva proyectada' : 'curvas proyectadas'} en ${srf.name}, con historial`);
+  TW.show(relSpec(rels[0], rels));
+}
+const projDir = (mode) => (mode === 'y' ? [0, -1, 0] : mode === 'normal' ? null : camera.getWorldDirection(new THREE.Vector3()).toArray());
 function offsetSelection() {
   const src = selObjs.filter((o) => o.kind === 'surface');
   if (!src.length) return toast('Offset: elige una o más superficies y vuelve a pulsar Offset.');
@@ -3641,11 +3864,49 @@ function relSpec(r, group = [r]) {
     title += ` · ${nm(r.slave)} → ${nm(r.master)}`;
     fields.push({ type: 'seg', label: 'Continuidad', opts: G(0, 3), get: () => r.cont, set: (v) => set('cont', v) },
       { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) });
-  } else if (r.type === 'blend') {
-    title += ` · ${nm(r.a)} ↔ ${nm(r.b)}`;
-    fields.push({ type: 'seg', label: 'Lado 1', opts: G(0, 3), get: () => r.contA ?? r.cont, set: (v) => set('contA', v) },
-      { type: 'seg', label: 'Lado 2', opts: G(0, 3), get: () => r.contB ?? r.cont, set: (v) => set('contB', v) },
-      { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) });
+  } else if (r.type === 'blend' || r.type === 'skin') {
+    const sk = r.type === 'skin', ids = (x) => x.map(nm).join(' + ');
+    title += ` · ${ids(r.aIds || [r.a])} ↔ ${ids(r.bIds || [r.b])}`;
+    const freeA = byId(r.a)?.kind === 'curve' && !byId(r.a)?.data.cos, freeB = byId(r.b)?.kind === 'curve' && !byId(r.b)?.data.cos;
+    if (!sk) {
+      fields.push({ type: 'seg', label: 'Lado 1', opts: G(0, freeA ? 0 : 3), get: () => r.contA ?? r.cont, set: (v) => set('contA', v) },
+        { type: 'seg', label: 'Lado 2', opts: G(0, freeB ? 0 : 3), get: () => r.contB ?? r.cont, set: (v) => set('contB', v) },
+        { type: 'range', label: 'Forma lado 1', min: 0.2, max: 3, step: 0.05, get: () => r.tensionA ?? r.tension, start: checkpoint,
+          set: (v) => { r.tensionA = v; if (r.lockShape) r.tensionB = v; redo(); }, fmt: (v) => v.toFixed(2) },
+        { type: 'range', label: 'Forma lado 2', min: 0.2, max: 3, step: 0.05, show: () => !r.lockShape, get: () => r.tensionB ?? r.tension, start: checkpoint, set: live('tensionB'), fmt: (v) => v.toFixed(2) },
+        { type: 'check', label: 'Bloquear formas (Lock Shape Controls)', get: () => !!r.lockShape, set: (v) => { r.lockShape = v; if (v) { r.tensionB = r.tensionA ?? r.tension; redo(); } } });
+    }
+    fields.push({ type: 'range', label: 'Corona (Crown)', min: -1, max: 1, step: 0.02, get: () => r.crown || 0, start: checkpoint, set: live('crown'), fmt: (v) => (v ? v.toFixed(2) : 'no') },
+      { type: 'check', label: 'Modificar parámetro (curvas cerradas)', get: () => !!r.modParam, set: (v) => set('modParam', v) },
+      { type: 'range', label: 'Inicio lado 1', min: 0, max: 1, step: 0.005, show: () => !!r.modParam, get: () => r.pA || 0, start: checkpoint, set: live('pA'), fmt: (v) => v.toFixed(3) },
+      { type: 'range', label: 'Giro lado 2', min: -0.5, max: 0.5, step: 0.005, show: () => !!r.modParam, get: () => r.pB || 0, start: checkpoint, set: live('pB'), fmt: (v) => v.toFixed(3) });
+    const ends = sk ? [['default', 'Unir extremos'], ['extend', 'Extender']] : [['default', 'Defecto'], ['edge', 'Alinear al borde']];
+    fields.push({ type: 'group', key: 'explicit', label: 'Control explícito', fields: [
+      { type: 'check', label: 'Control explícito', get: () => !!r.explicit, set: (v) => set('explicit', v) },
+      { type: 'seg', label: 'Grado U', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], show: () => !!r.explicit, get: () => r.degU ?? 3, set: (v) => set('degU', v) },
+      { type: 'range', label: 'Spans U', min: 1, max: 32, step: 1, show: () => !!r.explicit, get: () => r.spansU ?? 8, start: checkpoint, set: live('spansU'), fmt: (v) => String(v) },
+      ...(sk ? [{ type: 'check', label: 'Reconstruir (Rebuild)', get: () => r.rebuild !== false, set: (v) => set('rebuild', v) }] : [])] },
+    { type: 'group', key: 'flow', label: 'Control de flujo', fields: [
+      { type: 'seg', label: 'Inicio', opts: ends, get: () => r.flowStart || 'default', set: (v) => set('flowStart', v) },
+      ...(sk ? [] : [{ type: 'seg', label: 'Interior', opts: [['free', 'Libre'], ['iso', 'Isoparam.']], get: () => r.flowInt || 'free', set: (v) => set('flowInt', v) }]),
+      { type: 'seg', label: 'Fin', opts: ends, get: () => r.flowEnd || 'default', set: (v) => set('flowEnd', v) },
+      { type: 'check', label: 'Modificar rango', get: () => !!r.modRange, set: (v) => set('modRange', v) },
+      ...[['rA0', 'Lado 1 inicio', 0], ['rA1', 'Lado 1 fin', 1], ['rB0', 'Lado 2 inicio', 0], ['rB1', 'Lado 2 fin', 1]].map(([k, l, d]) => (
+        { type: 'range', label: l, min: 0, max: 1, step: 0.005, show: () => !!r.modRange, get: () => r[k] ?? d, start: checkpoint, set: live(k), fmt: (v) => v.toFixed(3) }))] },
+    { type: 'group', key: 'ctrl', label: 'Opciones de control', fields: [
+      ...(sk ? [] : [{ type: 'check', label: 'Recortar automáticamente', get: () => toolDef.autoTrim !== false, set: (v) => { toolDef.autoTrim = v; saveToolDef(); if (v) autoTrim(r); } }]),
+      { type: 'check', label: 'Comprobar continuidad', get: () => toolDef.contCheck !== false, set: (v) => { toolDef.contCheck = v; saveToolDef(); TW.show(relSpec(r, group)); } }] });
+  } else if (r.type === 'project') {
+    title += group.length > 1 ? ` · ${group.length} curvas → ${nm(r.surf)}` : ` · ${nm(r.src)} → ${nm(r.surf)}`;
+    fields.push({ type: 'seg', label: 'Dirección', opts: [['view', 'Vista'], ['y', 'Y'], ['normal', 'Normal']], get: () => r.mode,
+      set: (v) => { toolDef.projMode = v; saveToolDef(); checkpoint(); const d = projDir(v); group.forEach((x) => { x.mode = v; x.dir = d; }); redo(); } },
+    { type: 'seg', label: 'Recortar', opts: [['none', 'No'], ['inside', 'Dentro'], ['outside', 'Fuera']], get: () => r.trim || 'none',
+      set: (v) => { toolDef.projTrim = v; saveToolDef(); set('trim', v); } },
+    { type: 'html', html: () => '<span class="tw-note">Recortar necesita una curva cerrada o que vaya de borde a borde. Mueve la curva original y la proyección, el recorte y los blends la siguen.</span>' });
+  } else if (r.type === 'extend') {
+    title += ` · ${nm(r.src)}`;
+    fields.push({ type: 'range', label: 'Distancia', min: 0.05, max: 6, step: 0.05, get: () => r.dist, start: checkpoint, set: (v) => { toolDef.extendDist = v; saveToolDef(); live('dist')(v); }, fmt: (v) => v.toFixed(2) + ' dm' },
+      { type: 'seg', label: 'Continuidad', opts: [[1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => r.cont, set: (v) => { toolDef.extendCont = v; saveToolDef(); set('cont', v); } });
   } else if (r.type === 'extrude') {
     title += group.length > 1 ? ` · ${group.length} curvas` : ` · ${nm(r.src)}`;
     fields.push({ type: 'range', label: 'Distancia', min: -10, max: 10, step: 0.01, get: () => r.dist, start: checkpoint, set: live('dist'), fmt: (v) => v.toFixed(2) + ' dm' },
@@ -3658,10 +3919,15 @@ function relSpec(r, group = [r]) {
     title += ` · ${nm(r.src)}`;
     fields.push({ type: 'seg', label: 'Plano', opts: [['x', 'YZ'], ['y', 'XZ'], ['z', 'XY']], get: () => r.plane || 'x', set: (v) => { toolDef.mirrorPlane = v; saveToolDef(); set('plane', v); } });
   } else title += ` · ${r.type === 'loft' ? r.srcs.length + ' curvas' : nm(r.src)}`;
-  if ((r.type === 'align' || r.type === 'blend') && toolDef.contCheck !== false) fields.push({ type: 'html', html: () => relDiag(r), diagOf: r.id });
+  if (['align', 'blend', 'skin', 'extend'].includes(r.type) && toolDef.contCheck !== false) fields.push({ type: 'html', html: () => relDiag(r), diagOf: r.id });
   fields.push({ type: 'check', label: 'Actualizar al momento', get: () => r.auto !== false, set: (v) => { group.forEach((x) => (x.auto = v)); if (v && r.pending) apply(); } });
   const actions = [{ label: 'Quitar historial', run: () => removeRelation(r.id) }, { label: 'Cerrar', primary: true, run: () => TW.hide() }];
   if (r.auto === false) actions.splice(1, 0, { label: r.pending ? 'Actualizar •' : 'Actualizar', primary: !!r.pending, run: () => { apply(); TW.render(); } });
+  if (['blend', 'skin', 'extend'].includes(r.type)) {
+    // Undo All (borra lo creado) y Next (lo deja y sigue con otro), como en Alias
+    actions.unshift({ label: 'Deshacer todo', run: () => { const o = byId(r.out); checkpoint(); if (o) removeObject(o); selectionChanged(); refreshOutliner(); renderHistory(); TW.hide(); if (edgeOp) restartEdgeOp(); } },
+      { label: 'Siguiente', run: () => { if (edgeOp?.type === r.type) restartEdgeOp(); else startEdgeOp(r.type); } });
+  }
   return { title, rel: r, fields, actions };
 }
 // --- Flechas para manipular cada herramienta en la vista (como los manipuladores de Alias) ---
@@ -3701,7 +3967,14 @@ function relHandles(r) {
     }
   };
   if (r.type === 'align') rows(r.sEdge, r.cont, 'tension', 'shape');
-  else if (r.type === 'blend') { rows('v0', r.contA ?? r.cont, 'tensionA', 'shapeA'); rows('v1', r.contB ?? r.cont, 'tensionB', 'shapeB'); }
+  else if (r.type === 'blend') {
+    // con "Bloquear formas" las dos flechas azules mueven la misma forma
+    rows('v0', r.contA ?? r.cont, 'tensionA', 'shapeA');
+    rows('v1', r.contB ?? r.cont, r.lockShape ? 'tensionA' : 'tensionB', 'shapeB');
+  } else if (r.type === 'extend') {
+    const p0 = v3(mid(HX.row(d, 'v0', 0))), p = v3(mid(HX.row(d, 'v1', 0))), dir = p.clone().sub(p0).normalize();
+    H.push({ pos: p, dir: dir.lengthSq() ? dir : new THREE.Vector3(0, 1, 0), kind: 'd', label: 'distancia', start: () => r.dist, drag: (delta, s0) => { r.dist = Math.max(0.01, Math.round((s0 + delta) * 100) / 100); } });
+  }
   else if (r.type === 'extrude') {
     const top = d.cvs[1], bot = d.cvs[0], p = v3(mid(top)), dir = p.clone().sub(v3(mid(bot))).normalize();
     const sgn = Math.sign(r.dist) || 1;
@@ -3729,6 +4002,37 @@ function updateRelArrows() {
     a.position.copy(h.pos);
     a.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), h.dir);
     a.userData.h = h;
+  });
+  updateRelLabels();
+}
+// Etiquetas en la vista (Lado 1, Lado 2, Inicio [..], Fin [..], Corona), como las de Alias
+const relLabelBox = document.createElement('div');
+relLabelBox.id = 'rel-labels';
+document.body.append(relLabelBox);
+let relLabelPts = [];
+function updateRelLabels() {
+  const r = arrowsFor, out = r && ['blend', 'skin'].includes(r.type) && byId(r.out);
+  relLabelPts = [];
+  if (!out) { relLabelBox.innerHTML = ''; return; }
+  const O = FF.surfEval(out.data);
+  const fl = (v) => ({ default: r.type === 'skin' ? 'Unir extremos' : 'Defecto', edge: 'Alinear al borde', extend: 'Extender' })[v || 'default'];
+  // en lados cerrados el inicio y el fin coinciden: una sola etiqueta en la costura
+  const closed = O(0, 0.5).distanceTo(O(1, 0.5)) < 1e-3;
+  relLabelPts = [[O(0.5, 0), 'Lado 1'], [O(0.5, 1), 'Lado 2'], [O(0.25, 0.5), `Corona [${r.crown ? r.crown.toFixed(2) : 'no'}]`],
+    ...(closed ? [[O(0, 0.5), 'Costura (Modificar parámetro)']] : [[O(0, 0.5), `Inicio [${fl(r.flowStart)}]`], [O(1, 0.5), `Fin [${fl(r.flowEnd)}]`]])];
+  relLabelBox.innerHTML = relLabelPts.map(([, t]) => `<span class="rel-label">${esc(t)}</span>`).join('');
+}
+function placeRelLabels() {
+  relLabelBox.hidden = !relLabelPts.length || !!carousel || layout === 'render' || layout === 'ai';
+  if (relLabelBox.hidden) return;
+  const pn = panes().find((p) => p.kind !== 'render') || panes()[0], rc = renderer.domElement.getBoundingClientRect();
+  useAspect(pn);
+  relLabelPts.forEach(([p], i) => {
+    const el = relLabelBox.children[i], q = p.clone().project(camera);
+    if (!el) return;
+    el.style.display = q.z < 1 ? '' : 'none';
+    el.style.left = rc.left + pn.x + ((q.x + 1) / 2) * pn.w + 'px';
+    el.style.top = rc.top + ((1 - q.y) / 2) * pn.h + 'px';
   });
 }
 function scaleRelArrows() {
@@ -3815,7 +4119,12 @@ function relDiag(r) {
   };
   try {
     if (r.type === 'align') return fmtD(HX.diagnose(ins[0].data, r.mEdge, out.data, r.sEdge, r.rev), r.cont);
-    if (r.type === 'blend') return `1: ${fmtD(HX.diagnose(ins[0].data, r.aEdge, out.data, 'v0', false), r.contA ?? r.cont)}<br>2: ${fmtD(HX.diagnose(ins[1].data, r.bEdge, out.data, 'v1', r.rev), r.contB ?? r.cont)}`;
+    if (r.type === 'blend' && exactBlend(r)) return `1: ${fmtD(HX.diagnose(ins[0].data, r.aEdge, out.data, 'v0', false), r.contA ?? r.cont)}<br>2: ${fmtD(HX.diagnose(ins[1].data, r.bEdge, out.data, 'v1', r.rev), r.contB ?? r.cont)}`;
+    if (r.type === 'blend' || r.type === 'skin') {
+      const [A, B] = blendSides(r), [dA, dB] = FF.diagnoseBlend(r, A, B, out.data);
+      return `1: ${fmtD(dA, A.kind === 'curves' ? 0 : r.contA ?? 2)}<br>2: ${fmtD(dB, B.kind === 'curves' ? 0 : r.contB ?? 2)}`;
+    }
+    if (r.type === 'extend') return fmtD(HX.diagnose(ins[0].data, r.edge, out.data, 'v0', false), r.cont);
   } catch (e) { return ''; }
   return '';
 }
@@ -3835,10 +4144,11 @@ function renderHistory() {
   const nm = (id) => esc(byId(id)?.name || '¿?');
   box.innerHTML = relations.map((r) => {
     const title = r.type === 'align' ? `${nm(r.slave)} → ${nm(r.master)} · G${r.cont}` : r.type === 'blend' ? `${nm(r.out)} · G${r.contA ?? r.cont}/G${r.contB ?? r.cont}`
+      : r.type === 'skin' ? `${nm(r.out)} ← ${(r.aIds || [r.a]).length + (r.bIds || [r.b]).length} curvas` : r.type === 'project' ? `${nm(r.out)} ← ${nm(r.src)} en ${nm(r.surf)}`
       : r.type === 'loft' ? `${nm(r.out)} ← ${r.srcs.length} curvas` : `${nm(r.out)} ← ${nm(r.src)}`;
     return `<div class="hist-rel" data-rel="${r.id}"><div class="hist-h"><b>${REL_NAMES[r.type]}</b><span>${title}</span>
       <button class="mini" data-edit title="Abrir sus opciones">⋯</button><button class="mini" data-del title="Quitar historial (la forma se queda)">×</button></div>
-      ${r.type === 'align' || r.type === 'blend' ? `<p class="hist-diag" data-diag-of="${r.id}">${relDiag(r)}</p>` : ''}</div>`;
+      ${['align', 'blend', 'skin', 'extend'].includes(r.type) ? `<p class="hist-diag" data-diag-of="${r.id}">${relDiag(r)}</p>` : ''}</div>`;
   }).join('');
   box.querySelectorAll('.hist-rel').forEach((el) => {
     const r = relations.find((x) => x.id === +el.dataset.rel);
@@ -3848,6 +4158,27 @@ function renderHistory() {
 }
 renderHistory();
 toolsReady = true;
+
+// Ejemplo del video de Alias: hueco de manija en una puerta. Dos círculos proyectados (con historial) recortan la puerta
+// y el fondo, y un Freeform Blend G2 / G1 los une. Mueve un círculo y todo se recalcula.
+function blendDemo() {
+  checkpoint();
+  const door = N.planeData(new THREE.Vector3(0, 0, 0), 'xz', 6, 4);
+  door.cvs.forEach((row, i) => row.forEach((c, j) => { c.y += 0.35 * Math.sin((i / 3) * Math.PI) + 0.12 * (j - 1.5); }));
+  const floor = N.planeData(new THREE.Vector3(0, -0.75, 0), 'xz', 2.6, 2.2);
+  floor.cvs.forEach((row) => row.forEach((c) => { c.y += 0.08 * c.x; }));
+  const dObj = addSurface(door, 'Puerta'), fObj = addSurface(floor, 'Fondo');
+  const c1 = addCurve(circleData(new THREE.Vector3(0, 1.4, 0), 0.95), 'Círculo'), c2 = addCurve(circleData(new THREE.Vector3(0, 1.4, 0), 0.5), 'Círculo');
+  const proj = (c, srf, trim) => {
+    const r = { type: 'project', src: c.id, surf: srf.id, mode: 'y', dir: [0, -1, 0], trim };
+    const o = addCurve(projData(r, c, srf), 'Proyección');
+    r.out = o.id; addRelation(r); return o;
+  };
+  const p1 = proj(c1, dObj, 'inside'), p2 = proj(c2, fObj, 'outside');
+  createBlend({ obj: p1 }, { obj: p2 }, 2, 1);
+  frameObjects([]);
+  return { door: dObj, floor: fObj, c1, c2, p1, p2 };
+}
 
 // ---------- Nudge (Alias): las flechas del teclado mueven, giran o escalan lo elegido un poquito ----------
 // El paso depende de lo cerca que esté la cámara (acercarse = pasos más finos). Shift = 10 veces más.
@@ -3913,7 +4244,7 @@ function updateXfPrompt() {
 // Color del texto de los menús según lo que tiene detrás: se leen los píxeles de la vista bajo cada rótulo
 // (donde no hay objeto se ve el muro) y el texto pasa entero a negro o a blanco.
 let inkT = 0;
-const INK_SEL = '.top .brand, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
+const INK_SEL = '#rel-labels:not([hidden]) .rel-label, .top .brand, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
 function adaptInk(now) {
   if (now - inkT < 250) return;
   inkT = now;
@@ -3947,6 +4278,7 @@ function renderFrame(now) {
   syncPivotMarkers();
   scaleHandles();
   if (relArrows.children.length) scaleRelArrows();
+  placeRelLabels();
   renderer.shadowMap.needsUpdate = true;
   if (carousel) renderCarousel(now); else panes().forEach(renderPane);
   scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
@@ -3995,6 +4327,7 @@ if (new URLSearchParams(location.search).get('demo') === 'capo') {
   for (const [name, pts] of parts) addSurface(N.revolve(P(pts)), name).name = name;
 }
 refreshOutliner();
+if (new URLSearchParams(location.search).get('demo') === 'asa') { objects.slice().forEach(removeObject); blendDemo(); }
 clearHistory();
 camera.position.set(8, 6.4, 10.5);
 camera.lookAt(0, 0.6, 0.6);
@@ -4009,7 +4342,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, updateObject, undo, HX, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

@@ -30,6 +30,7 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - `src/exporters.js`: IGES 5.3 (128/126, lectura y escritura), STEP AP214 (GEOMETRIC_SET de B-splines), OBJ de cuadriláteros para SubD,
   SVG/DXF 2D (proyección paralela), .zip sin compresión. Validado con occt-import-js (OpenCASCADE) en el scratchpad.
 - `src/logo.js`: logotipo Nodo.
+- `src/freeform.js`: Freeform Blend / Skin por estaciones, curvas sobre superficie (proyectar), recortes (trimGeometry) y Extender. Pura matemática.
 - `src/history.js`: historial de construcción (Align G0–G3, Blend G1/G2, Offset, Simetría, diagnóstico de unión). Pura matemática.
 - `src/ai.js`: módulo IA: generadores paramétricos (tornillo ISO con rosca, tuerca, arandela, mesa, silla) y parsePrompt (español).
 - `docs/capturas/`: capturas de pantalla de cada versión.
@@ -288,6 +289,27 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   permite retocar la superficie de un Align); "Actualizar al momento" por relación (apagado = botón Actualizar);
   Opciones de control: Crear historial, Comprobar continuidad; Preferencias: actualizar durante el arrastre (prefs.histLive).
 - Pruebas: tarrow.mjs, tnudge.mjs, thist3.mjs.
+
+## Hecho (v0.16) — Freeform Blend, Skin, curvas sobre superficie, recortes, Extender (videos 5 y 6 de Alias)
+
+- Lados de un blend (FF.prepSide): borde de superficie, curva sobre superficie (cos) o curvas libres encadenadas.
+  FF.freeformBlend: en cada estación (Greville de la estructura U) una Bézier que cruza con las derivadas de cada lado
+  (E_k = derivadas de S(uv + t·w) hacia fuera; G0–G3, forma = λ·tensión, flecha naranja mu = (p−1)·shape·λ) y cada fila se
+  interpola en U. Con dos bordes completos y flujo isoparamétrico se sigue usando el Blend exacto de history.js (exactBlend).
+- Opciones como Alias: Lado 1/2 G0–G3, Forma lado 1/2 + Bloquear formas, Corona, Modificar parámetro (costura/giro de lados
+  cerrados), Control explícito (grado y spans U), Control de flujo (Inicio/Fin: Defecto | Alinear al borde; Interior: Libre |
+  Isoparam.; Modificar rango por lado), Recortar automáticamente, Deshacer todo, Siguiente. Grupos plegables en TW (type 'group',
+  campos con show()). Etiquetas en la vista (#rel-labels: Lado 1, Lado 2, Inicio/Fin o Costura, Corona).
+- Curvas sobre superficie: relación 'project' {src, surf, mode view|y|normal, dir, trim}. data.cos = {surf, uv[], closed, trim};
+  se dibujan exactas sobre la superficie. Recorte: trim 'inside'/'outside' con un lazo cerrado o de borde a borde (FF.trimLoop);
+  updateSurface recorta la malla (marching squares con cruce exacto por bisección) y las isoparamétricas. Mover la curva original
+  -> proyección -> recorte -> blend, todo en cadena (como al final del video).
+- Skin (relación 'skin', aIds/bIds): entre curvas, con Encadenar (Enter = siguiente lado), Reconstruir (sin él y misma
+  estructura = reglada exacta), Inicio/Fin: Unir extremos | Extender (recorta el lado que pasa de largo, a escuadra).
+- Extender (relación 'extend'): superficie nueva desde un borde con Taylor G1–G3, flecha verde de distancia.
+- Curvas › Círculo (NURBS exacto). Menús Curvas y Superficies, Puck › Curva / Editar. Ayuda › Ejemplo: Freeform Blend
+  (?demo=asa: puerta + fondo recortados por círculos proyectados y unidos G2/G1).
+- Pruebas: scratchpad aitest/ff.mjs (matemática), tff.mjs (ejemplo e historial), tff3.mjs (Skin, Proyectar y Extender con clics).
 
 ## Siguiente paso
 

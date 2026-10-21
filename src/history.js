@@ -22,7 +22,7 @@ export function row(d, e, k) {
 }
 // dirección a lo largo del borde y dirección que lo cruza
 export const along = (d, e) => (isU(e) ? { deg: d.degV, knots: d.knotsV, n: sizes(d).nv } : { deg: d.degU, knots: d.knotsU, n: sizes(d).nu });
-const reverseKnots = (k) => { const a = k[0], b = k[k.length - 1]; return k.slice().reverse().map((t) => a + b - t); };
+export const reverseKnots = (k) => { const a = k[0], b = k[k.length - 1]; return k.slice().reverse().map((t) => a + b - t); };
 export function cross(d, e) {
   const c = isU(e) ? { deg: d.degU, knots: d.knotsU, n: sizes(d).nu } : { deg: d.degV, knots: d.knotsV, n: sizes(d).nv };
   return { ...c, knots: atEnd(e) ? reverseKnots(c.knots) : c.knots }; // nudos vistos desde el borde
@@ -150,7 +150,7 @@ export function blendCompatible(A, eA, B, eB) {
   return a.deg === b.deg && a.n === b.n && sameKnots(a.knots, rev ? reverseKnots(b.knots) : b.knots);
 }
 // Funciones base B-spline (Cox-de Boor) en el parámetro u del vector de nudos K
-function basis(K, p, u) {
+export function basis(K, p, u) {
   const n = K.length - p - 1, N0 = [];
   for (let j = 0; j < K.length - 1; j++) N0.push(u >= K[j] && u < K[j + 1] ? 1 : 0);
   if (u >= K[K.length - 1]) { for (let j = K.length - 2; j >= 0; j--) if (K[j] < K[j + 1]) { N0[j] = 1; break; } }
@@ -165,7 +165,7 @@ function basis(K, p, u) {
   }
   return Np.slice(0, n);
 }
-function solve(A, B) { // Gauss con pivote; B: vectores
+export function solve(A, B) { // Gauss con pivote; B: vectores
   const n = A.length, M = A.map((r, i) => [...r, B[i].clone()]);
   for (let c = 0; c < n; c++) {
     let piv = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
