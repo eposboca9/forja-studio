@@ -404,6 +404,25 @@
   /* Logotipo "Nodo": FORJA en un marco de construcción fino; las líneas paran antes del + azul de la esquina */
   .brand { color: var(--fg); }
   .brand svg { height: 40px; width: auto; display: block; overflow: visible; }
+
+  /* Panel Archivo: losa sin marcos sobre el fondo, arriba a la izquierda */
+  .filebtn { font: inherit; font-size: 11px; letter-spacing: .18em; color: var(--fg); background: none; border: 0; padding: 6px 8px 5px; cursor: pointer; text-shadow: 0 1px 0 var(--engrave-light); }
+  .filebtn[aria-expanded="true"] { box-shadow: inset 0 -1.5px 0 var(--steel); }
+  .filepanel { position: fixed; top: 58px; left: 24px; width: min(560px, calc(100vw - 48px)); max-height: calc(100vh - 110px); overflow-y: auto; z-index: 40;
+    background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); box-shadow: 0 24px 50px -20px rgba(0,0,0,.6); }
+  .fp-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 12px 6px 18px; }
+  .fp-head span { letter-spacing: .3em; text-transform: uppercase; font-size: 11px; }
+  .fp-head .iconbtn { border: 0; font-size: 18px; }
+  .fp-sec { padding: 10px 18px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .fp-sec h3 { margin: 0; font-weight: 500; font-size: 10px; letter-spacing: .22em; text-transform: uppercase; color: var(--muted); }
+  .fp-sec .btn.primary { align-self: flex-start; background: #2f7bff; border-color: #2f7bff; color: #fff; }
+  .fp-grid { display: grid; grid-template-columns: 74px 1fr; gap: 8px 12px; align-items: center; }
+  .fp-lab { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .fp-btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .fp-btns .sel { width: auto; }
+  .fp-opts .row { grid-template-columns: 96px 1fr 0; }
+  .app.dropping::after { content: "Suelta los archivos para importarlos"; position: fixed; inset: 16px; display: grid; place-items: center; z-index: 60;
+    border: 2px dashed #2f7bff; color: var(--fg); letter-spacing: .2em; text-transform: uppercase; font-size: 12px; background: color-mix(in srgb, var(--bg) 70%, transparent); pointer-events: none; }
 </style>
 </head>
 <body>
@@ -411,7 +430,8 @@
   <header class="top">
     <div class="brand"><svg id="logo" role="img" aria-label="FORJA"></svg></div>
     <div class="reveal-top" id="reveal-top">
-    <span class="file">vaso_concepto.forja</span>
+    <button class="filebtn" id="file-btn" aria-expanded="false" aria-controls="filepanel" title="Importar y exportar (Ctrl+E)">ARCHIVO</button>
+    <span class="file" id="file-name">vaso_concepto.forja</span>
     <span class="lbl">Seleccionar</span>
     <div class="seg pick" role="group" aria-label="Qué seleccionar">
       <button id="pick-object" data-pick="object" aria-pressed="true" title="Seleccionar objetos completos (O)">Objetos</button>
@@ -511,6 +531,39 @@
     <button class="glyph dot" data-goto="sec-mat" title="Materiales"></button>
     <button class="glyph dot" data-goto="sec-analysis" title="Análisis"></button>
   </div>
+
+  <section class="filepanel" id="filepanel" aria-label="Archivo" hidden>
+    <div class="fp-head"><span>Archivo</span><button class="iconbtn" id="file-close" title="Cerrar" aria-label="Cerrar">×</button></div>
+    <div class="fp-sec">
+      <h3>Importar</h3>
+      <button class="btn primary" id="io-import">Importar archivo…</button>
+      <p class="muted">IGES (NURBS) · STEP · OBJ · STL · GLB/glTF · PLY · .forja. También puedes arrastrar archivos a la ventana. Se añaden a la escena.</p>
+      <input type="file" id="io-file" multiple accept=".igs,.iges,.step,.stp,.obj,.stl,.glb,.gltf,.ply,.forja,.json" hidden>
+    </div>
+    <div class="fp-sec">
+      <h3>Exportar</h3>
+      <div class="fp-grid">
+        <span class="fp-lab">NURBS</span>
+        <div class="fp-btns"><button class="btn" data-export="igs">IGES</button><button class="btn" data-export="step">STEP</button></div>
+        <span class="fp-lab">Malla</span>
+        <div class="fp-btns"><button class="btn" data-export="obj">OBJ</button><button class="btn" data-export="stl">STL</button><button class="btn" data-export="glb">GLB · Blender</button><button class="btn" data-export="ply">PLY</button></div>
+        <span class="fp-lab">SubD</span>
+        <div class="fp-btns"><button class="btn" data-export="subd">OBJ cuadriláteros</button></div>
+        <span class="fp-lab">2D</span>
+        <div class="fp-btns"><button class="btn" data-export="svg">SVG</button><button class="btn" data-export="dxf">DXF</button>
+          <select id="io-view" class="sel" aria-label="Vista para 2D"><option value="current">Vista actual</option><option value="top">Superior</option><option value="front">Frontal</option><option value="side">Lateral</option></select></div>
+        <span class="fp-lab">Proyecto</span>
+        <div class="fp-btns"><button class="btn" data-export="forja">Guardar .forja</button></div>
+      </div>
+      <p class="muted">Parasolid (.x_t) y .blend son formatos cerrados que no se pueden escribir desde el navegador: usa STEP para Plasticity, SolidWorks o CATIA, y GLB para Blender (lleva los materiales). La malla de cuadriláteros se convierte en SubD aplicando Subdivisión en Blender o Plasticity.</p>
+    </div>
+    <div class="fp-sec fp-opts">
+      <div class="row"><label for="io-unit">Unidades</label><select id="io-unit" class="sel"><option value="auto">Automático</option><option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option></select><span></span></div>
+      <div class="row"><label for="io-axis">Eje vertical</label><select id="io-axis" class="sel"><option value="auto">Automático</option><option value="z">Z arriba</option><option value="y">Y arriba</option></select><span></span></div>
+      <label class="check"><input type="checkbox" id="io-selonly"> Exportar solo la selección</label>
+      <p class="muted">Automático: formatos CAD (IGES, STEP, STL, PLY) en mm con Z arriba, como Alias; OBJ y GLB en metros con Y arriba, como Blender.</p>
+    </div>
+  </section>
 
   <aside class="panel" id="panel" aria-label="Propiedades">
     <div class="panel-head">

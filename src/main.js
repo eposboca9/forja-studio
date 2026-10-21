@@ -10,6 +10,15 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import * as N from './nurbs.js';
 import { applyBackground } from './concrete.js';
 import { drawLogo } from './logo.js';
+import * as X from './exporters.js';
+import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
+import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+import { PLYExporter } from 'three/addons/exporters/PLYExporter.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 drawLogo(document.getElementById('logo'));
 
@@ -154,7 +163,7 @@ function twist(dx) {
 function geometryPointAt(e) {
   setRay(e);
   ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
-  const hit = ray.intersectObjects(objects.filter((o) => o.visible).map((o) => (o.kind === 'surface' ? o.parts.mesh : o.parts.pick)), false)[0];
+  const hit = ray.intersectObjects(objects.filter((o) => o.visible).map((o) => pickTarget(o)), false)[0];
   return hit ? hit.point : null;
 }
 function navModeFor(e) {
@@ -409,6 +418,30 @@ function addCurve(data, base = 'Curva') {
   return obj;
 }
 
+// Malla importada (OBJ, STL, GLB, PLY): se ve, se evalúa con los shaders y se exporta, pero no tiene CVs.
+function addMesh(geometry, base = 'Malla') {
+  geometry.computeBoundingBox();
+  if (!geometry.attributes.normal) geometry.computeVertexNormals();
+  if (!geometry.attributes.color) {
+    // color blanco para el mapa de curvatura (que en las mallas no se calcula)
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(geometry.attributes.position.count * 3).fill(1), 3));
+  }
+  const obj = { id: nextId++, kind: 'mesh', name: nameFor(base), data: { geometry }, mat: matKey, visible: true, parts: {},
+    pivot: geometry.boundingBox.getCenter(new THREE.Vector3()) };
+  const p = obj.parts;
+  p.mesh = new THREE.Mesh(geometry, materials[obj.mat]);
+  p.mesh.castShadow = true;
+  p.mesh.userData.obj = obj;
+  p.hull = new THREE.LineSegments(new THREE.BufferGeometry(), hullMat);
+  p.handles = new THREE.Group();
+  scene.add(p.mesh, p.hull, p.handles);
+  objects.push(obj);
+  applyVisibility(obj);
+  refreshOutliner();
+  return obj;
+}
+const pickTarget = (o) => (o.kind === 'curve' ? o.parts.pick : o.parts.mesh);
+
 function removeObject(obj) {
   for (const o of Object.values(obj.parts)) { o.geometry?.dispose(); scene.remove(o); }
   objects.splice(objects.indexOf(obj), 1);
@@ -428,6 +461,7 @@ const posGeo = (pts) => { const g = new THREE.BufferGeometry(); g.setAttribute('
 const line2Geo = (pts) => { const g = new LineGeometry(); g.setPositions(pts); return g; };
 
 function updateObject(obj) {
+  if (obj.kind === 'mesh') { applyVisibility(obj); return; }
   if (obj.kind === 'surface') updateSurface(obj); else updateCurve(obj);
   rebuildHandles(obj);
   applyVisibility(obj);
@@ -534,6 +568,7 @@ const cvKey = (obj, i, j) => (obj.kind === 'surface' ? `${obj.id}:${i}:${j}` : `
 function cvRef(ref) { return ref.obj.kind === 'surface' ? ref.obj.data.cvs[ref.i][ref.j] : ref.obj.data.cvs[ref.i]; }
 function allCVRefs(obj) {
   const out = [];
+  if (obj.kind === 'mesh') return out;
   if (obj.kind === 'surface') obj.data.cvs.forEach((row, i) => row.forEach((_, j) => out.push({ obj, i, j, key: cvKey(obj, i, j) })));
   else obj.data.cvs.forEach((_, i) => out.push({ obj, i, key: cvKey(obj, i) }));
   return out;
@@ -554,7 +589,9 @@ function rebuildHandles(obj) {
 function applyVisibility(obj) {
   const p = obj.parts, vis = obj.visible, sel = selObjs.includes(obj), cvMode = pickMode === 'cv';
   p.handles.visible = p.hull.visible = vis && cvMode;
-  if (obj.kind === 'surface') {
+  if (obj.kind === 'mesh') {
+    p.mesh.visible = vis;
+  } else if (obj.kind === 'surface') {
     p.mesh.visible = vis;
     p.iso.visible = vis && $('show-iso').checked && diagMode !== 'wire';
     p.iso.material = sel ? isoSelMat : isoMat;
@@ -644,7 +681,7 @@ function togglePivotEdit() {
   toast('Editar pivote: mueve el pivote. Ctrl = pegarlo a un punto, Ctrl+Alt = a una curva, Alt = a la rejilla.');
 }
 function centerPivots() {
-  selObjs.forEach((o) => (o.pivot = cvCenter(o.data)));
+  selObjs.forEach((o) => (o.pivot = o.kind === 'mesh' ? o.data.geometry.boundingBox.getCenter(new THREE.Vector3()) : cvCenter(o.data)));
   attachGizmo(); renderSelectionPanel();
 }
 function updateXformButtons() {
@@ -748,13 +785,13 @@ function pointCandidates(ex) {
     if (!o.visible || ex.full?.has(o)) continue;
     if (!ex.pivots?.has(o)) out.push(o.pivot);
     allCVRefs(o).forEach((r) => { const v = cvRef(r); if (!ex.cvs?.has(v)) out.push(new THREE.Vector3(v.x, v.y, v.z)); });
-    if (!ex.partial?.has(o)) (o.kind === 'curve' ? o.editPts : o.corners).forEach((v) => out.push(v));
+    if (!ex.partial?.has(o)) ((o.kind === 'curve' ? o.editPts : o.corners) || []).forEach((v) => out.push(v));
   }
   return out;
 }
 // Para el snap de curva: curvas y bordes de superficies, como polilíneas
 function curvePolylines(ex) {
-  return objects.filter((o) => o.visible && !ex.full?.has(o) && !ex.partial?.has(o)).map((o) => (o.kind === 'curve' ? o.samples : o.edgePts));
+  return objects.filter((o) => o.visible && o.kind !== 'mesh' && !ex.full?.has(o) && !ex.partial?.has(o)).map((o) => (o.kind === 'curve' ? o.samples : o.edgePts));
 }
 function findSnap(x, y, modes, ex = {}) {
   if (!modes.point && !modes.curve) return null;
@@ -850,7 +887,7 @@ function pickAt(e) {
     return hit ? { cv: hit.object.userData } : null;
   }
   ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
-  const hit = ray.intersectObjects(live.map((o) => (o.kind === 'surface' ? o.parts.mesh : o.parts.pick)), false)[0];
+  const hit = ray.intersectObjects(live.map((o) => pickTarget(o)), false)[0];
   return hit ? { obj: hit.object.userData.obj, point: hit.point } : null;
 }
 
@@ -1052,8 +1089,8 @@ function boxSelect(d, e, how) {
     items = live.flatMap(allCVRefs).filter((ref) => { const q = cvRef(ref); return inside(q.x, q.y, q.z); });
   } else {
     items = live.filter((o) => {
-      const a = (o.kind === 'surface' ? o.parts.mesh : o.parts.pick).geometry.attributes.position;
-      const step = o.kind === 'surface' ? 5 : 3;
+      const a = pickTarget(o).geometry.attributes.position;
+      const step = o.kind === 'curve' ? 3 : 5;
       for (let i = 0; i < a.count; i += step) if (inside(a.getX(i), a.getY(i), a.getZ(i))) return true;
       return false;
     });
@@ -1066,7 +1103,7 @@ renderer.domElement.addEventListener('dblclick', (e) => {
   setRay(e);
   const live = objects.filter((o) => o.visible);
   ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
-  const hit = ray.intersectObjects(live.map((o) => (o.kind === 'surface' ? o.parts.mesh : o.parts.pick)), false)[0];
+  const hit = ray.intersectObjects(live.map((o) => pickTarget(o)), false)[0];
   const pt = hit ? hit.point : ray.ray.intersectPlane(drawPlanes.xz, new THREE.Vector3());
   if (pt) setPivot(pt);
 });
@@ -1075,7 +1112,7 @@ renderer.domElement.addEventListener('dblclick', (e) => {
 function boundsOf(list) {
   const box = new THREE.Box3();
   list.forEach((o) => {
-    const g = (o.kind === 'surface' ? o.parts.mesh : o.parts.pick).geometry;
+    const g = pickTarget(o).geometry;
     g.computeBoundingBox(); box.union(g.boundingBox);
   });
   return box;
@@ -1148,7 +1185,7 @@ function refreshOutliner() {
   for (const o of objects) {
     const li = document.createElement('li');
     li.className = 'ol-item' + (selObjs.includes(o) ? ' sel' : '') + (o.visible ? '' : ' off');
-    li.innerHTML = `<button class="ol-name" title="Seleccionar (Shift: añadir)"><span class="ol-ico">${o.kind === 'surface' ? '◩' : '∿'}</span>${o.name}</button><button class="ol-eye" aria-pressed="${o.visible}" title="${o.visible ? 'Ocultar' : 'Mostrar'}">${EYE}</button>`;
+    li.innerHTML = `<button class="ol-name" title="Seleccionar (Shift: añadir)"><span class="ol-ico">${{ surface: '◩', curve: '∿', mesh: '△' }[o.kind]}</span>${o.name}</button><button class="ol-eye" aria-pressed="${o.visible}" title="${o.visible ? 'Ocultar' : 'Mostrar'}">${EYE}</button>`;
     li.querySelector('.ol-name').addEventListener('click', (e) => { setPickMode('object'); applySelection([o], e.shiftKey ? 'toggle' : 'replace'); });
     li.querySelector('.ol-eye').addEventListener('click', () => {
       o.visible = !o.visible;
@@ -1197,6 +1234,12 @@ function renderSelectionBody() {
   }
   if (selObjs.length === 1) {
     const o = selObjs[0], d = o.data;
+    if (o.kind === 'mesh') {
+      const g = d.geometry, tris = (g.index ? g.index.count : g.attributes.position.count) / 3;
+      box.innerHTML = `<p class="muted"><b>${o.name}</b> · malla importada · ${Math.round(tris).toLocaleString('es')} triángulos</p>
+        <p class="muted">Las mallas se ven, se evalúan con los shaders y se exportan. Para editarlas como NURBS habrá que reconstruirlas (próximamente).</p>`;
+      return;
+    }
     if (o.kind === 'surface') {
       const nu = d.cvs.length, nv = d.cvs[0].length;
       box.innerHTML = `
@@ -1268,12 +1311,14 @@ function updateStatus() {
   const what = pickMode === 'cv' ? (n === 1 ? 'CV' : 'CVs') : (n === 1 ? 'objeto' : 'objetos');
   $('st-sel').textContent = n ? `Selección: ${n} ${what}` : 'Nada seleccionado';
   const ns = objects.filter((o) => o.kind === 'surface').length;
-  $('st-scene').textContent = `Unidades: dm · Escena: ${ns} ${ns === 1 ? 'superficie' : 'superficies'} · ${objects.length - ns} ${objects.length - ns === 1 ? 'curva' : 'curvas'}`;
+  const nc = objects.filter((o) => o.kind === 'curve').length, nm = objects.filter((o) => o.kind === 'mesh').length;
+  const plural = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+  $('st-scene').textContent = `Unidades: dm · Escena: ${plural(ns, 'superficie', 'superficies')} · ${plural(nc, 'curva', 'curvas')}${nm ? ' · ' + plural(nm, 'malla', 'mallas') : ''}`;
   // Información de la vista (arriba a la derecha)
-  const cvs = objects.reduce((s, o) => s + o.data.cvs.flat().length, 0);
+  const cvs = objects.reduce((s, o) => s + (o.data.cvs ? o.data.cvs.flat().length : 0), 0);
   const patches = objects.filter((o) => o.kind === 'surface')
     .reduce((s, o) => s + (N.uniqueKnots(o.data.knotsU).length - 1) * (N.uniqueKnots(o.data.knotsV).length - 1), 0);
-  $('vi-objs').textContent = `${ns} SUPERFICIES · ${patches} PARCHES`;
+  $('vi-objs').textContent = `${ns} SUPERFICIES · ${patches} PARCHES` + (nm ? ` · ${nm} MALLAS` : '');
   $('vi-cvs').textContent = `${cvs} CVS`;
   const last = selObjs[selObjs.length - 1];
   $('vi-sel').textContent = pickMode === 'cv' && selCVs.size ? `${selCVs.size} CVS SELECCIONADOS`
@@ -1309,8 +1354,8 @@ document.querySelectorAll('[data-plane]').forEach((b) => b.addEventListener('cli
 // El material se aplica a las superficies seleccionadas; si no hay ninguna, a todas.
 function setMaterial(k) {
   matKey = k;
-  const sel = selObjs.filter((o) => o.kind === 'surface');
-  (sel.length ? sel : objects.filter((o) => o.kind === 'surface')).forEach((o) => (o.mat = k));
+  const sel = selObjs.filter((o) => o.kind !== 'curve');
+  (sel.length ? sel : objects.filter((o) => o.kind !== 'curve')).forEach((o) => (o.mat = k));
   document.querySelectorAll('.mat').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.mat === k)));
   $('rough').value = materials[k].roughness;
   $('rough-o').textContent = (+materials[k].roughness).toFixed(2);
@@ -1392,6 +1437,276 @@ function toast(msg) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => (t.hidden = true), 2800);
 }
+
+// ---------- Archivo: exportar e importar ----------
+// NURBS exactas: IGES y STEP. Malla: OBJ, STL, GLB (para Blender, con materiales), PLY.
+// SubD: malla de cuadriláteros OBJ. 2D: SVG y DXF. Proyecto: .forja (JSON).
+const FORMATS = {
+  igs: { label: 'IGES', ext: 'igs', group: 'nurbs', axis: 'z', unit: 'mm' },
+  step: { label: 'STEP', ext: 'step', group: 'nurbs', axis: 'z', unit: 'mm' },
+  obj: { label: 'OBJ', ext: 'obj', group: 'mesh', axis: 'y', unit: 'm' },
+  stl: { label: 'STL', ext: 'stl', group: 'mesh', axis: 'z', unit: 'mm' },
+  glb: { label: 'GLB · Blender', ext: 'glb', group: 'mesh', axis: 'y', unit: 'm' },
+  ply: { label: 'PLY', ext: 'ply', group: 'mesh', axis: 'z', unit: 'mm' },
+  subd: { label: 'OBJ cuadriláteros', ext: 'obj', group: 'subd', axis: 'y', unit: 'm', suffix: '-subd' },
+  svg: { label: 'SVG', ext: 'svg', group: '2d', unit: 'mm' },
+  dxf: { label: 'DXF', ext: 'dxf', group: '2d', unit: 'mm' },
+  forja: { label: 'Proyecto .forja', ext: 'forja', group: 'project' },
+};
+// Lo que la página de Claude deja descargar tal cual; el resto se entrega dentro de un .zip
+const ARTIFACT_EXTS = new Set(['json', 'svg', 'zip', 'txt', 'md', 'csv', 'html', 'pdf', 'png']);
+
+function exportOptions(fmt) {
+  const F = FORMATS[fmt], unitSel = $('io-unit').value, axisSel = $('io-axis').value;
+  const unit = unitSel === 'auto' ? F.unit || 'mm' : unitSel;
+  const zUp = (axisSel === 'auto' ? F.axis : axisSel) === 'z';
+  return { unit, zUp };
+}
+function exportTargets() {
+  const list = $('io-selonly').checked && selObjs.length ? selObjs : objects;
+  return list.filter((o) => o.visible);
+}
+function baseName() { return ($('file-name').textContent || 'forja').replace(/\.forja$/, '') || 'forja'; }
+
+async function saveFile(name, data) {
+  const blob = data instanceof Blob ? data : new Blob([data]);
+  const ext = name.split('.').pop().toLowerCase();
+  // Dentro de la página de Claude la descarga pasa por el permiso "downloads"; en GitHub Pages es una descarga normal
+  const dl = window.claude?.use ? await window.claude.use('downloads').catch(() => null) : null;
+  if (dl) {
+    const req = ARTIFACT_EXTS.has(ext) ? { filename: name, data: blob }
+      : { filename: name + '.zip', data: X.makeZip([{ name, data: new Uint8Array(await blob.arrayBuffer()) }]) };
+    try {
+      await dl.save(req);
+      toast(req.filename.endsWith('.zip') && !name.endsWith('.zip') ? `${name} guardado dentro de un .zip` : `${name} guardado`);
+    } catch (e) {
+      if (e?.code !== 'declined') toast(`No se pudo guardar ${name} aquí. Prueba desde el enlace de GitHub Pages.`);
+    }
+    return;
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast(`${name} descargado`);
+}
+
+// Escena temporal con las mallas a exportar, ya en las unidades y el eje del formato
+function meshExportScene(targets, o) {
+  const root = new THREE.Group(), s = X.UNITS[o.unit];
+  root.scale.setScalar(s);
+  if (o.zUp) root.rotation.x = Math.PI / 2;
+  for (const t of targets) {
+    if (t.kind === 'curve') continue;
+    const m = new THREE.Mesh(t.parts.mesh.geometry, materials[t.mat]);
+    m.name = t.name;
+    root.add(m);
+  }
+  const sc = new THREE.Scene(); sc.add(root); sc.updateMatrixWorld(true);
+  return sc;
+}
+
+function polylines2D(targets) {
+  const out = [], t = new THREE.Vector3();
+  for (const o of targets) {
+    if (o.kind === 'surface') {
+      const s = N.surfaceOf(o.data), S = 60;
+      const line = (fn) => { const pts = []; for (let k = 0; k <= S; k++) { fn(k / S, t); pts.push(t.clone()); } return pts; };
+      for (const u of N.uniqueKnots(o.data.knotsU)) out.push({ layer: u === 0 || u === 1 ? 'BORDES' : 'PARCHES', pts: line((a, v) => s.getPoint(u, a, v)) });
+      for (const v of N.uniqueKnots(o.data.knotsV)) out.push({ layer: v === 0 || v === 1 ? 'BORDES' : 'PARCHES', pts: line((a, w) => s.getPoint(a, v, w)) });
+    } else if (o.kind === 'curve') {
+      out.push({ layer: 'CURVAS', pts: o.samples.map((p) => p.clone()) });
+    }
+  }
+  return out;
+}
+function view2DAxes() {
+  const v = $('io-view').value;
+  if (v === 'top') return [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1)];
+  if (v === 'front') return [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)];
+  if (v === 'side') return [new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0)];
+  return [new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion), new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)];
+}
+
+function serializeProject() {
+  const v4 = (q) => [q.x, q.y, q.z, q.w];
+  return JSON.stringify({
+    format: 'forja', version: 1, units: 'dm', up: 'y',
+    objects: objects.map((o) => {
+      const base = { kind: o.kind, name: o.name, mat: o.mat, visible: o.visible, pivot: o.pivot.toArray() };
+      const d = o.data;
+      if (o.kind === 'surface') return { ...base, degU: d.degU, degV: d.degV, knotsU: d.knotsU, knotsV: d.knotsV, cvs: d.cvs.map((r) => r.map(v4)) };
+      if (o.kind === 'curve') return { ...base, deg: d.deg, knots: d.knots, plane: d.plane, cvs: d.cvs.map(v4) };
+      const g = d.geometry;
+      return { ...base, positions: Array.from(g.attributes.position.array), index: g.index ? Array.from(g.index.array) : null };
+    }),
+  });
+}
+
+async function doExport(fmt) {
+  const F = FORMATS[fmt], targets = exportTargets(), o = exportOptions(fmt);
+  const name = `${baseName()}${F.suffix || ''}.${F.ext}`;
+  const nurbs = targets.filter((t) => t.kind !== 'mesh');
+  if (!targets.length) return toast('No hay nada visible que exportar.');
+  try {
+    if (fmt === 'igs' || fmt === 'step') {
+      if (!nurbs.length) return toast(`${F.label} guarda NURBS: las mallas importadas no se incluyen.`);
+      await saveFile(name, fmt === 'igs' ? X.writeIGES(nurbs, o, name) : X.writeSTEP(nurbs, o, name));
+    } else if (fmt === 'subd') {
+      const ev = (d) => { const s = N.surfaceOf(d); return (u, v) => { const t = new THREE.Vector3(); s.getPoint(u, v, t); return t; }; };
+      await saveFile(name, X.writeSubDOBJ(targets, ev, N.uniqueKnots, o));
+    } else if (fmt === 'svg' || fmt === 'dxf') {
+      const [right, up] = view2DAxes();
+      const lines = X.project2D(polylines2D(targets), right, up, o);
+      if (!lines.length) return toast('Para 2D hacen falta superficies o curvas visibles.');
+      await saveFile(name, fmt === 'svg' ? X.writeSVG(lines, o) : X.writeDXF(lines));
+    } else if (fmt === 'forja') {
+      await saveFile(name, serializeProject());
+    } else {
+      const sc = meshExportScene(targets, o);
+      if (fmt === 'obj') await saveFile(name, new OBJExporter().parse(sc));
+      else if (fmt === 'stl') await saveFile(name, new Blob([new STLExporter().parse(sc, { binary: true })]));
+      else if (fmt === 'ply') await saveFile(name, new Blob([await new Promise((res) => new PLYExporter().parse(sc, res, { binary: true }))]));
+      else if (fmt === 'glb') {
+        const buf = await new Promise((res, rej) => new GLTFExporter().parse(sc, res, rej, { binary: true }));
+        await saveFile(name, new Blob([buf]));
+      }
+    }
+  } catch (e) {
+    console.error(e);
+    toast(`No se pudo exportar ${F.label}: ${e.message || e}`);
+  }
+}
+
+// ---------- Importar ----------
+const IMPORT_DEFAULTS = { igs: ['mm', 'z'], iges: ['mm', 'z'], step: ['mm', 'z'], stp: ['mm', 'z'], stl: ['mm', 'z'], ply: ['mm', 'z'], obj: ['m', 'y'], glb: ['m', 'y'], gltf: ['m', 'y'] };
+function importOptions(ext) {
+  const [du, da] = IMPORT_DEFAULTS[ext] || ['mm', 'z'];
+  const u = $('io-unit').value, a = $('io-axis').value;
+  return { unit: u === 'auto' ? du : u, zUp: (a === 'auto' ? da : a) === 'z' };
+}
+function cadMatrix(o) {
+  // del sistema del archivo al de Forja (dm, Y arriba)
+  const m = new THREE.Matrix4().makeScale(1 / X.UNITS[o.unit], 1 / X.UNITS[o.unit], 1 / X.UNITS[o.unit]);
+  if (o.zUp) m.multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+  return m;
+}
+function meshesFrom(object3d, o, base) {
+  const out = [], m = cadMatrix(o);
+  object3d.updateMatrixWorld(true);
+  object3d.traverse((c) => {
+    if (!c.isMesh) return;
+    const g = c.geometry.clone();
+    g.applyMatrix4(c.matrixWorld).applyMatrix4(m);
+    out.push(addMesh(g, c.name || base));
+  });
+  return out;
+}
+let occtPromise = null;
+function loadOCCT() {
+  // OpenCASCADE (WebAssembly) para leer STEP. Se carga solo cuando hace falta.
+  occtPromise ||= new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdn.jsdelivr.net/npm/occt-import-js@0.0.22/dist/occt-import-js.js';
+    sc.onload = () => window.occtimportjs({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/occt-import-js@0.0.22/dist/${f}` }).then(res, rej);
+    sc.onerror = () => rej(new Error('no se pudo cargar OpenCASCADE'));
+    document.head.append(sc);
+  });
+  return occtPromise;
+}
+
+async function importFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase(), base = file.name.replace(/\.[^.]+$/, '');
+  const o = importOptions(ext);
+  let created = [];
+  if (ext === 'forja' || ext === 'json') {
+    const j = JSON.parse(await file.text());
+    if (j.format !== 'forja') throw new Error('no es un proyecto de Forja');
+    const V4 = (a) => new THREE.Vector4(...a);
+    for (const it of j.objects) {
+      let ob;
+      if (it.kind === 'surface') ob = addSurface({ degU: it.degU, degV: it.degV, knotsU: it.knotsU, knotsV: it.knotsV, cvs: it.cvs.map((r) => r.map(V4)) }, it.name);
+      else if (it.kind === 'curve') ob = addCurve({ deg: it.deg, knots: it.knots, plane: it.plane, cvs: it.cvs.map(V4) }, it.name);
+      else {
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.Float32BufferAttribute(it.positions, 3));
+        if (it.index) g.setIndex(it.index);
+        ob = addMesh(g, it.name);
+      }
+      ob.name = it.name; ob.mat = it.mat || matKey; ob.visible = it.visible !== false; ob.pivot.fromArray(it.pivot || ob.pivot.toArray());
+      created.push(ob);
+    }
+    $('file-name').textContent = file.name.replace(/\.json$/, '.forja');
+  } else if (ext === 'igs' || ext === 'iges') {
+    const r = X.readIGES(await file.text(), o);
+    const V4 = (q) => new THREE.Vector4(q.x, q.y, q.z, q.w);
+    r.surfaces.forEach((d, k) => created.push(addSurface({ degU: d.degU, degV: d.degV, knotsU: d.knotsU, knotsV: d.knotsV, cvs: d.cvs.map((row) => row.map(V4)) }, d.label || `${base} ${k + 1}`)));
+    r.curves.forEach((d, k) => created.push(addCurve({ deg: d.deg, knots: d.knots, plane: 'xz', cvs: d.cvs.map(V4) }, d.label || `${base} curva ${k + 1}`)));
+    const skipped = Object.entries(r.skipped).map(([t, n]) => `${n}× tipo ${t}`).join(', ');
+    if (skipped) toast(`IGES: importadas las superficies y curvas NURBS. Sin soporte todavía: ${skipped}.`);
+  } else if (ext === 'step' || ext === 'stp') {
+    toast('Cargando OpenCASCADE para leer STEP…');
+    const occt = await loadOCCT();
+    const r = occt.ReadStepFile(new Uint8Array(await file.arrayBuffer()), null);
+    if (!r.success) throw new Error('OpenCASCADE no pudo leer el archivo');
+    const grp = new THREE.Group();
+    r.meshes.forEach((mm, k) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(mm.attributes.position.array, 3));
+      if (mm.attributes.normal) g.setAttribute('normal', new THREE.Float32BufferAttribute(mm.attributes.normal.array, 3));
+      g.setIndex(Array.from(mm.index.array));
+      const me = new THREE.Mesh(g); me.name = mm.name || `${base} ${k + 1}`; grp.add(me);
+    });
+    created = meshesFrom(grp, o, base);
+  } else if (ext === 'obj') {
+    created = meshesFrom(new OBJLoader().parse(await file.text()), o, base);
+  } else if (ext === 'stl') {
+    created = meshesFrom(new THREE.Mesh(new STLLoader().parse(await file.arrayBuffer())), o, base);
+  } else if (ext === 'ply') {
+    created = meshesFrom(new THREE.Mesh(new PLYLoader().parse(await file.arrayBuffer())), o, base);
+  } else if (ext === 'glb' || ext === 'gltf') {
+    const data = ext === 'glb' ? await file.arrayBuffer() : await file.text();
+    const gl = await new Promise((res, rej) => new GLTFLoader().parse(data, '', res, rej));
+    created = meshesFrom(gl.scene, o, base);
+  } else if (ext === 'x_t' || ext === 'x_b' || ext === 'blend' || ext === '3dm' || ext === 'wire') {
+    throw new Error(`.${ext} es un formato cerrado: expórtalo como STEP o IGES desde su programa`);
+  } else {
+    throw new Error(`formato .${ext} no reconocido`);
+  }
+  if (created.length) {
+    setPickMode('object');
+    applySelection(created, 'replace');
+    frameObjects(created);
+    toast(`${file.name}: ${created.length} ${created.length === 1 ? 'objeto importado' : 'objetos importados'}`);
+  }
+}
+async function importFiles(files) {
+  for (const f of files) {
+    try { await importFile(f); } catch (e) { console.error(e); toast(`No se pudo importar ${f.name}: ${e.message || e}`); }
+  }
+}
+
+// Panel Archivo
+function toggleFilePanel(force) {
+  const p = $('filepanel'), open = force ?? p.hidden;
+  p.hidden = !open;
+  $('file-btn').setAttribute('aria-expanded', String(open));
+}
+$('file-btn').addEventListener('click', () => toggleFilePanel());
+$('file-close').addEventListener('click', () => toggleFilePanel(false));
+document.querySelectorAll('[data-export]').forEach((b) => b.addEventListener('click', () => doExport(b.dataset.export)));
+$('io-import').addEventListener('click', () => $('io-file').click());
+$('io-file').addEventListener('change', async (e) => { await importFiles([...e.target.files]); e.target.value = ''; });
+addEventListener('dragover', (e) => { if (e.dataTransfer?.types?.includes('Files')) { e.preventDefault(); app.classList.add('dropping'); } });
+addEventListener('dragleave', (e) => { if (e.target === document.documentElement || !e.relatedTarget) app.classList.remove('dropping'); });
+addEventListener('drop', (e) => { if (!e.dataTransfer?.files?.length) return; e.preventDefault(); app.classList.remove('dropping'); importFiles([...e.dataTransfer.files]); });
+addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 's') { e.preventDefault(); doExport('forja'); }
+  else if (k === 'o') { e.preventDefault(); $('io-file').click(); }
+  else if (k === 'e') { e.preventDefault(); toggleFilePanel(); }
+});
 
 // ---------- Atajos de teclado ----------
 addEventListener('keydown', (e) => {
@@ -1515,7 +1830,7 @@ function renderPane(p) {
   useAspect(p);
   const diag = p.kind === 'diag';
   const dm = diagMaterial();
-  objects.forEach((o) => { if (o.kind === 'surface') o.parts.mesh.material = diag ? dm : materials[o.mat]; });
+  objects.forEach((o) => { if (o.kind !== 'curve') o.parts.mesh.material = diag ? dm : materials[o.mat]; });
   scene.background = null;
   camera.layers.set(0);
   if (diag) camera.layers.enable(DIAG);
