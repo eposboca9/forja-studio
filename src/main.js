@@ -256,6 +256,75 @@ const zebraMat = new THREE.ShaderMaterial({
     }`,
 });
 zebraMat.extensions = { derivatives: true };
+// Entornos de evaluación (Map Type de Alias), generados en el shader a partir del reflejo o de la normal.
+// 1 = Showroom (paneles de techo, tiras laterales, horizonte), 2 = Difuso (mate), 3 = Shade-Sky (cielo y tierra).
+// uLink = luz ligada a la cámara: el entorno gira con la vista, como "Link Light to Camera" en Alias.
+const envDiagMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  uniforms: { uMode: { value: 1 }, uLink: { value: 1 } },
+  vertexShader: `
+    varying vec3 vWN; varying vec3 vWP;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWP = wp.xyz;
+      vWN = normalize(mat3(modelMatrix) * normal);
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: `
+    uniform int uMode; uniform int uLink;
+    varying vec3 vWN; varying vec3 vWP;
+    vec3 toEnv(vec3 d) { return uLink == 1 ? normalize((viewMatrix * vec4(d, 0.0)).xyz) : d; }
+    float box(vec2 p, vec2 c, vec2 h, float soft) {
+      vec2 q = abs(p - c) - h;
+      return 1.0 - smoothstep(0.0, soft, max(q.x, q.y));
+    }
+    vec3 showroom(vec3 d) {
+      float y = d.y;
+      // Paredes grises claras, suelo medio, techo algo más claro
+      vec3 col = mix(vec3(0.34), vec3(0.56, 0.565, 0.57), smoothstep(-0.35, 0.05, y));
+      col = mix(col, vec3(0.66, 0.665, 0.67), smoothstep(0.1, 0.9, y));
+      col += vec3(0.35) * exp(-pow(y * 18.0, 2.0));                 // horizonte
+      if (y > 0.2) {                                                 // paneles de luz del techo
+        vec2 p = vec2(d.x, d.z) / y;
+        float l = box(p, vec2(-1.0, 0.0), vec2(0.22, 1.8), 0.06) + box(p, vec2(0.0, 0.0), vec2(0.22, 1.8), 0.06) + box(p, vec2(1.0, 0.0), vec2(0.22, 1.8), 0.06);
+        col += vec3(1.1) * l * smoothstep(0.2, 0.35, y);
+      }
+      float a = atan(d.x, d.z);                                      // tiras verticales a los lados
+      col += vec3(1.0) * (1.0 - smoothstep(0.03, 0.06, abs(abs(a) - 1.35))) * (1.0 - smoothstep(0.45, 0.6, abs(y)));
+      // panel grande y suave detrás de la cámara (luz principal)
+      col += vec3(0.35) * smoothstep(0.55, 0.95, d.z) * smoothstep(-0.3, 0.2, y);
+      // suelo oscuro de exposición: una franja negra que marca bien el horizonte en los reflejos
+      col *= mix(0.35, 1.0, smoothstep(-0.45, -0.15, y));
+      return col;
+    }
+    void main() {
+      vec3 n = normalize(vWN);
+      if (!gl_FrontFacing) n = -n;
+      vec3 v = normalize(vWP - cameraPosition);
+      vec3 r = toEnv(reflect(v, n));
+      vec3 ne = toEnv(n);
+      vec3 col;
+      if (uMode == 1) {
+        float fres = 0.85 + 0.15 * pow(1.0 - max(dot(-v, n), 0.0), 3.0);
+        col = vec3(0.04) + showroom(r) * fres;
+      } else if (uMode == 2) {
+        vec3 L = normalize(vec3(-0.35, 0.65, 0.68));                 // luz arriba a la izquierda de la cámara
+        float dif = max(dot(ne, L), 0.0);
+        float hemi = 0.5 + 0.5 * ne.y;
+        col = vec3(0.78, 0.77, 0.75) * (0.18 + 0.62 * dif + 0.22 * hemi);
+      } else {
+        float t = 0.75 * ne.y + 0.25 * r.y;                          // sobre todo la normal: cielo arriba, tierra abajo
+        vec3 sky = vec3(0.42, 0.52, 0.86), horizon = vec3(0.92, 0.91, 0.86), ground = vec3(0.86, 0.82, 0.68), deep = vec3(0.5, 0.46, 0.37);
+        col = mix(horizon, sky, smoothstep(0.2, 0.85, t));
+        col = mix(col, ground, smoothstep(0.2, -0.15, t));
+        col = mix(col, deep, smoothstep(-0.2, -0.9, t));
+        col *= 0.75 + 0.25 * max(dot(ne, normalize(vec3(0.0, 0.6, 0.8))), 0.0);
+      }
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+});
+const ENV_MODES = { showroom: 1, diffuse: 2, sky: 3 };
+const DIAG_NAMES = { showroom: 'SHOWROOM', diffuse: 'DIFUSO', sky: 'SHADE-SKY', zebra: 'CEBRA', curv: 'CURVATURA', wire: 'MALLA' };
 const curvMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
 const wireMat = new THREE.MeshBasicMaterial({ color: '#2d6aa8', wireframe: true, transparent: true, opacity: 0.55, side: THREE.DoubleSide });
 
@@ -295,7 +364,7 @@ function setTheme(t) {
 }
 document.querySelectorAll('[data-theme-btn]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeBtn)));
 
-let diagMode = 'zebra', layout = 'diag', matKey = 'paint', res = 90, combScale = 0.8;
+let diagMode = 'showroom', layout = 'diag', matKey = 'paint', res = 90, combScale = 0.8;
 
 // ---------- Objetos de la escena ----------
 const objects = [];
@@ -1212,7 +1281,7 @@ function updateStatus() {
 // ---------- Panel: modos, materiales, análisis ----------
 function setDiag(m) {
   diagMode = m;
-  $('vi-shader').textContent = { zebra: 'CEBRA', curv: 'CURVATURA', wire: 'MALLA' }[m];
+  $('vi-shader').textContent = DIAG_NAMES[m];
   document.querySelectorAll('[data-diag]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.diag === m)));
   if (layout === 'render') setLayout('split');
   $('legend').hidden = m !== 'curv';
@@ -1284,6 +1353,7 @@ $('zfreq').addEventListener('input', (e) => {
   if (diagMode !== 'zebra') setDiag('zebra');
 });
 $('res').addEventListener('input', (e) => { res = +e.target.value; $('res-o').textContent = res; objects.forEach(updateObject); });
+$('link-light').addEventListener('change', (e) => { envDiagMat.uniforms.uLink.value = e.target.checked ? 1 : 0; });
 $('show-iso').addEventListener('change', () => objects.forEach(applyVisibility));
 $('show-comb').addEventListener('change', () => objects.forEach(applyVisibility));
 $('comb').addEventListener('input', (e) => {
@@ -1335,6 +1405,9 @@ addEventListener('keydown', (e) => {
   else if (k === 'v') cycleLayout();
   else if (k === 'o') setPickMode('object');
   else if (k === 'p') setPickMode('cv');
+  else if (k === '4') setDiag('showroom');
+  else if (k === '5') setDiag('diffuse');
+  else if (k === '6') setDiag('sky');
   else if (k === '1') setDiag('zebra');
   else if (k === '2') setDiag('curv');
   else if (k === '3') setDiag('wire');
@@ -1445,7 +1518,10 @@ function renderPane(p) {
   if (diag) camera.layers.enable(DIAG);
   renderer.render(scene, camera);
 }
-function diagMaterial() { return diagMode === 'curv' ? curvMat : diagMode === 'wire' ? wireMat : zebraMat; }
+function diagMaterial() {
+  if (ENV_MODES[diagMode]) { envDiagMat.uniforms.uMode.value = ENV_MODES[diagMode]; return envDiagMat; }
+  return diagMode === 'curv' ? curvMat : diagMode === 'wire' ? wireMat : zebraMat;
+}
 function renderFrame(now) {
   pivotMarker.position.copy(pivot);
   pivotMarker.scale.setScalar(camera.position.distanceTo(pivot) * 0.06);
