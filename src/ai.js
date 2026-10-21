@@ -156,6 +156,16 @@ export function vase({ h = 10, d = 8, forma = 'recto', t = 0.3 }) {
     [R - t / 2, h + t * 0.6], [R - t, h], [R - t, h * 0.92], [rm - t, h * 0.5], [rb - t, b + h * 0.06], [(rb - t) * 0.6, b], [0, b]];
   return { surfaces: [{ data: revolveProfile(pts), name: 'Vaso' }], name: `Vaso ${h} cm` };
 }
+// Taza con asa: el cuerpo es el vaso NURBS y el asa un tubo curvo pegado al costado
+export function mug({ h = 9, d = 8, forma = 'recto' }) {
+  const body = vase({ h, d, forma });
+  const R = d / 2, x0 = R * (forma === 'abombado' ? 1.05 : 0.98), a = h * 0.78, b = h * 0.25, out = Math.max(2.4, h * 0.32);
+  const path = [[x0 - 0.3, a, 0], [x0 + out * 0.6, a + 0.5, 0], [x0 + out, (a + b) / 2 + 0.4, 0], [x0 + out * 0.75, b + 0.3, 0], [x0 - 0.3, b, 0]]
+    .map(([x, y, z]) => new THREE.Vector3(x, y, z));
+  const g = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(path), 64, Math.max(0.35, h * 0.045), 20, false);
+  g.scale(CM, CM, CM);
+  return { surfaces: [{ data: body.surfaces[0].data, name: 'Cuerpo' }], meshes: [{ geometry: finish([g], 1), name: 'Asa' }], name: `Taza ${h} cm` };
+}
 export function bowl({ d = 15, h = 7, t = 0.4 }) {
   const R = d / 2, rb = R * 0.42;
   const pts = [[0, 0], [rb * 0.7, 0], [rb, 0], [rb, h * 0.08], [R * 0.82, h * 0.25], [R * 0.98, h * 0.7], [R, h],
@@ -236,7 +246,7 @@ export function buildParts(spec) {
 // Generador "custom": un objeto libre descrito por piezas
 export const custom = (params) => buildParts(params);
 
-export const GENERATORS = { bolt, nut, washer, table, chair, vase, bowl, bottle, custom };
+export const GENERATORS = { bolt, nut, washer, table, chair, mug, vase, bowl, bottle, custom };
 
 // ---------- Intérprete de pedidos en español, con preguntas ----------
 // Cada tipo tiene sus parámetros en orden de importancia. Lo que el pedido no diga se pregunta
@@ -286,8 +296,16 @@ export const CATALOG = {
       { key: 'n', q: '¿Cuántas?', options: [1, 2, 4, 6].map((v) => opt(String(v), v)), def: 1, answer: num },
     ],
   },
+  mug: {
+    label: 'taza', plural: 'tazas', match: /taza|tarro|mug\b|jarra/,
+    params: [
+      { key: 'forma', q: '¿Qué forma de taza?', options: [opt('Recta', 'recto'), opt('Abombada', 'abombado'), opt('Cónica', 'conico')], def: 'recto', answer: (t) => (/abomb|barril|panzon/.test(t) ? 'abombado' : /conic/.test(t) ? 'conico' : /rect/.test(t) ? 'recto' : undefined) },
+      { key: 'h', q: '¿Qué tamaño?', options: [opt('Espresso (6 cm)', 6), opt('Normal (9 cm)', 9), opt('Grande (11 cm)', 11)], def: 9, answer: num },
+      { key: 'd', q: '¿Qué diámetro de boca?', options: [5, 7, 8, 9].map((v) => opt(v + ' cm', v)), def: 8, answer: num },
+    ],
+  },
   vase: {
-    label: 'vaso', plural: 'vasos', match: /vaso|taza|copa|jarron|florero|maceta/,
+    label: 'vaso', plural: 'vasos', match: /vaso|copa|jarron|florero|maceta/,
     params: [
       { key: 'forma', q: '¿Qué forma?', options: [opt('Recto', 'recto'), opt('Abombado', 'abombado'), opt('Cónico', 'conico')], def: 'recto', answer: (t) => (/abomb|barril|panzon/.test(t) ? 'abombado' : /conic/.test(t) ? 'conico' : /rect/.test(t) ? 'recto' : undefined) },
       { key: 'h', q: '¿Qué altura?', options: [8, 10, 12, 15, 20].map((v) => opt(v + ' cm', v)), def: 10, answer: num },
@@ -355,7 +373,7 @@ function extract(type, t) {
     const d = t.match(/(?:diametro|ancho|boca)\s*(?:de)?\s*(\d+(?:\.\d+)?)/); if (d) p.d = +d[1];
     const cms = [...t.matchAll(/(\d+(?:\.\d+)?)\s*cm/g)].map((m) => +m[1]).filter((v) => v !== p.h && v !== p.d);
     for (const v of cms) { if (type === 'bowl' ? p.d === undefined : p.h === undefined) type === 'bowl' ? (p.d = v) : (p.h = v); else if (type === 'bowl' ? p.h === undefined : p.d === undefined) type === 'bowl' ? (p.h = v) : (p.d = v); }
-    if (type === 'vase') { const a = CATALOG.vase.params[0].answer(t); if (a) p.forma = a; }
+    if (type === 'vase' || type === 'mug') { const a = CATALOG.vase.params[0].answer(t); if (a) p.forma = a; }
   }
   return p;
 }
@@ -365,7 +383,8 @@ export function parsePrompt(text) {
   const t = normalize(text);
   const nouns = Object.values(CATALOG).map((c) => c.match.source).join('|');
   const re = new RegExp(`(?:${COUNT}\\s+(?:\\w+\\s+)?)?(?:${nouns})`, 'g');
-  const hits = [...t.matchAll(re)];
+  // "lámpara de escritorio", "funda para silla": el objeto conocido solo describe a otro, así que no cuenta
+  const hits = [...t.matchAll(re)].filter((m) => m[1] || !/\b(?:de|para|del)\s+$/.test(t.slice(0, m.index)));
   if (!hits.length) return null;
   const out = [];
   hits.forEach((m, i) => {
@@ -412,6 +431,7 @@ export function describe(cmd) {
   if (cmd.type === 'nut' || cmd.type === 'washer') return `${n}${name} M${p.d}`;
   if (cmd.type === 'table') return `${n}${name} ${p.shape === 'redonda' ? 'redonda ⌀' + p.w : p.w + '×' + p.dep} cm, ${p.h} cm de alto, patas ${p.legs === 'conica' ? 'cónicas' : p.legs === 'redonda' ? 'redondas' : 'rectas'}`;
   if (cmd.type === 'chair') return `${n}${name} con asiento a ${p.seat} cm`;
+  if (cmd.type === 'mug') return `${name} ${p.forma === 'conico' ? 'cónica' : p.forma === 'abombado' ? 'abombada' : 'recta'} con asa, ${p.h} cm de alto`;
   if (cmd.type === 'vase') return `${name} ${p.forma === 'conico' ? 'cónico' : p.forma}, ${p.h} cm de alto y ${p.d} cm de boca`;
   return `${name} de ${p.d} cm de diámetro`;
 }
@@ -430,7 +450,7 @@ export const CLAUDE_INSTRUCTIONS = `Eres el módulo IA de Forja, un modelador 3D
 Tipos de la biblioteca (úsalos si encajan exactamente):
  bolt {d: métrica ISO mm (3,4,5,6,8,10,12,16,20), L: largo mm, head: "hex"|"allen"}; nut {d}; washer {d};
  table {w, dep, h cm, legs: "recta"|"conica"|"redonda", shape: "rect"|"redonda"}; chair {seat, back cm};
- vase {h, d cm, forma: "recto"|"abombado"|"conico"}; bowl {d, h cm}; bottle {h, d cm}.
+ vase {h, d cm, forma: "recto"|"abombado"|"conico"}; mug (taza con asa) {h, d cm, forma}; bowl {d, h cm}; bottle {h, d cm}.
 
 Para CUALQUIER otro objeto usa "custom" y constrúyelo con piezas (nunca digas que no se puede):
  {"type":"custom","params":{"name":"Lápiz","parts":[ ...piezas... ]}}

@@ -184,15 +184,20 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - Carrusel con V mantenida (holdCarousel/releaseCarousel/pickModule): la cámara sube y se queda arriba; el módulo bajo el
   ratón se levanta (c.lift) y su etiqueta se aclara; clic = el anillo lo gira al frente y baja; soltar V sin elegir = cancela.
   Los botones de la cabecera y los menús siguen haciendo el giro automático (c.auto). ringSetup() calcula el anillo.
-- Marking menus estilo Alias (makeMarking, planos, 8 direcciones + lista extra): Ctrl+Shift+izq = Selección (Objeto, Curvas,
-  Superficies, CV, Nada...), +medio = Transformar (Mover, Rotar, Escalar, Pivote...), +der = Visualización; Espacio = Visualización.
-  El Puck (Tab) sigue siendo el anillo 3D de esferas (makeRadial). MENUS = [puck, pickMenu, xformMenu, disp].
+- Menús (v0.10.1): TODOS son anillos de esferas 3D (makeRadial(items, {r, title})); el usuario NO quiere menús planos.
+  Esferas con brillo especular, sombra y el icono "grabado" (trazo oscuro + borde claro). Cada esfera del anillo puede tener
+  `sub`: al pasar por encima salen esferas más pequeñas en un arco hacia fuera (submenú). Contenido distinto por menú:
+  Puck (Tab) = PUCK (herramientas: Curva, Superficie, Editar, Elegir, Transformar, Duplicar, Mostrar, Borrar);
+  Ctrl+Shift+izq = PICK_MM (selección), +medio = XFORM_MM (transformar), +der o Espacio = DISPLAY_MM (visualización).
+  MENUS = [puck, pickMenu, xformMenu, disp].
 - Etiqueta junto al cursor (.xf-prompt) cuando mover/rotar/escalar con los 3 botones está activo.
 - IA libre: tipo "custom" con piezas (ai.js buildParts: revolve/sphere -> NURBS; extrude/box/torus/tube -> malla; position,
   rotation en grados, material). Claude (sample) primero pregunta (tier quick) y luego construye (tier default).
   "Crear ya" fuerza items sin preguntas. Fotos: botón "Añadir fotos" -> sample con images (capacidad {sample:{images:true}}).
   Pedidos de biblioteca con detalles extra (EXTRA: "con asa", "marca"...) van a Claude si está disponible.
-  Prueba con Claude simulado: scratchpad taic.mjs (addInitScript define window.claude).
+  Prueba con Claude simulado: scratchpad taic.mjs y taierr.mjs (addInitScript define window.claude).
+  Errores de Claude: askClaude rescata el JSON de una respuesta invalid_json (looseJSON); claudeError muestra el código y "Reintentar".
+  Taza con asa (mug) local: cuerpo NURBS + asa de tubo. Un objeto conocido tras "de/para" ("lámpara de escritorio") no cuenta.
 - Publicar el Artifact con capabilities {sample: {images: true}, downloads: true}.
 
 ## Siguiente paso

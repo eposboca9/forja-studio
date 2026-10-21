@@ -2129,9 +2129,42 @@ async function askClaude(text, answers, images = [], force = false) {
   const done = force && !answers.length ? '\n\nNo hagas preguntas: devuelve items ya, con suposiciones razonables.' : answers.length ? `\n\nRespuestas del usuario a tus preguntas:\n${answers.map((a) => `- ${a.q} → ${a.a}`).join('\n')}\nYa no preguntes más: devuelve items.` : '';
   const pics = images.length ? `\n\nEl usuario adjunta ${images.length} foto(s) del mismo objeto desde distintos ángulos: modélalo lo más fiel posible.` : '';
   // primero (preguntas) basta el modelo rápido; para construir la pieza se usa el normal, que piensa mejor la forma
-  const r = await cap.json(`${AI.CLAUDE_INSTRUCTIONS}\n\nPedido: ${text}${pics}${done}`,
-    { modelTier: answers.length || images.length || force ? 'default' : 'quick', ...(images.length ? { images } : {}) });
+  const prompt = `${AI.CLAUDE_INSTRUCTIONS}\n\nPedido: ${text}${pics}${done}`;
+  const opts = { modelTier: answers.length || images.length || force ? 'default' : 'quick', ...(images.length ? { images } : {}) };
+  let r;
+  try { r = await cap.json(prompt, opts); }
+  catch (e) {
+    // si Claude escribió algo más que el JSON (o lo cortó), se intenta rescatar el JSON del texto
+    if (e?.code !== 'invalid_json' || !(r = looseJSON(e.text))) throw e;
+  }
   return r && (Array.isArray(r.items) || Array.isArray(r.questions)) ? r : null;
+}
+function looseJSON(t) {
+  if (!t) return null;
+  t = String(t).replace(/```(?:json)?/g, '');
+  const a = t.indexOf('{'), b = t.lastIndexOf('}');
+  if (a < 0 || b <= a) return null;
+  try { return JSON.parse(t.slice(a, b + 1)); } catch { return null; }
+}
+// Mensaje claro según el código de error de Claude, con botón para reintentar
+const CLAUDE_ERRORS = {
+  not_granted: 'No hay permiso para usar Claude en esta página. Ábrelo desde el menú de permisos del artifact y permite "Claude".',
+  sampling_disabled: 'Claude no está disponible para esta cuenta.',
+  rate_limited: 'Demasiadas peticiones seguidas o se acabó el uso disponible. Espera un poco y reintenta.',
+  session_expired: 'Tu sesión de Claude caducó: vuelve a iniciar sesión.',
+  images_unavailable: 'Esta vista no puede enviar fotos a Claude.',
+  image_rejected: 'Alguna foto no sirve (formato o tamaño). Prueba con JPG o PNG más pequeños.',
+  refused: 'Claude no quiso responder a ese pedido. Prueba a describirlo de otra forma.',
+  empty_completion: 'Claude no respondió nada. Prueba a describirlo más corto.',
+  invalid_json: 'Claude respondió sin el formato que entiende Forja.',
+  prompt_too_large: 'El pedido es demasiado largo.',
+};
+function claudeError(e, retry) {
+  console.warn(e);
+  const code = e?.code || 'upstream_error';
+  const el = aiSay(`${esc(CLAUDE_ERRORS[code] || 'No pude hablar con Claude ahora (fallo de conexión).')} <small>(${esc(code)})</small>
+    ${retry ? '<div class="ai-chips"><button class="chip">Reintentar</button></div>' : ''}`);
+  if (retry) el.querySelector('.chip').addEventListener('click', (ev) => { markChosen(ev.target); retry(); }, { once: true });
 }
 // Coloca lo generado en fila a la derecha de la escena. Mallas (tornillería, muebles) o superficies NURBS (vasos…)
 function placeGenerated(cmds) {
@@ -2231,7 +2264,7 @@ async function aiNext() {
   if (c.claude) {
     $('ai-status').textContent = 'Modelando… (puede tardar hasta un minuto)';
     try { const r = await askClaude(c.text, c.answers, c.images || [], !!c.forced); if (r?.items?.length) return aiCreate(c.text, r.items, r.note); aiSay(esc(r?.note || 'No pude hacerlo.')); }
-    catch (e) { aiSay('No pude hablar con Claude ahora. Prueba de nuevo en un momento.'); console.warn(e); }
+    catch (e) { claudeError(e, () => { aiConv = c; aiNext(); }); }
     $('ai-status').textContent = '';
     return;
   }
@@ -2267,7 +2300,7 @@ $('ai-photo-in').addEventListener('change', async (e) => {
   $('ai-status').textContent = 'Escribe qué es (y una medida real si la sabes) y pulsa Crear.';
 });
 // Un pedido "sencillo" de la biblioteca se resuelve aquí mismo; uno con detalles extra (marca, "con asa"...) va a Claude si está
-const EXTRA = /\bcon (?!patas|asiento|respaldo|cabeza|sus tuercas|tuercas|arandelas)|\bmarca\b|\bestilo\b|\bcomo (?:el|la|un|una)\b|\bpara\b|\bde (?:madera|metal|vidrio|plastico|plástico)\b/i;
+const EXTRA = /\bcon (?!asa|oreja|patas|asiento|respaldo|cabeza|sus tuercas|tuercas|arandelas)|\bmarca\b|\bestilo\b|\bcomo (?:el|la|un|una)\b|\bpara\b|\bde (?:madera|metal|vidrio|plastico|plástico)\b/i;
 async function runAI(text) {
   text = text.trim();
   const photos = aiPhotos.slice();
@@ -2298,7 +2331,7 @@ async function runAI(text) {
   $('ai-status').textContent = 'Pensando…';
   let r = null;
   try { r = await askClaude(shown, [], photos); }
-  catch (e) { console.warn(e); aiSay(e?.code === 'not_granted' ? 'Sin permiso para usar Claude en esta página.' : 'No pude hablar con Claude ahora. Prueba otra vez en un momento.'); }
+  catch (e) { claudeError(e, () => { aiPhotos = photos; runAI(text); }); }
   $('ai-status').textContent = '';
   if (r?.questions?.length) {
     aiConv = { text: shown, claude: true, queue: r.questions.slice(0, 2), answers: [], images: photos };
@@ -2413,180 +2446,154 @@ const IC = {
 };
 const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="${IC[k]}"/></svg>`;
 
-// Puck (Tab): anillo interior = crear y superficies; anillo exterior = elegir, transformar y mostrar.
+Object.assign(IC, {
+  arrow: 'M6 3l12 8-5.5 1.5L9.5 19z', surf: 'M3 14c4-6 14-6 18 0M3 14l3 6h12l3-6', edit: 'M4 18c4-8 12-8 16 0M12 3v7M8.5 6.5h7',
+  sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2',
+  cloud: 'M7 18h10a4 4 0 0 0 0-8 6 6 0 0 0-11.5 1.5A3.3 3.3 0 0 0 7 18z', sunset: 'M3 17h18M7 17a5 5 0 0 1 10 0M12 5v4M5 9l2 2M19 9l-2 2',
+  studio: 'M4 20V9l8-5 8 5v11M8 20v-6h8v6', zebra: 'M4 4h16v16H4zM4 10l6-6M4 16L16 4M10 20L20 10M16 20l4-4',
+  curvz: 'M3 18c5-12 13-12 18 0M7 11v7M12 8v10M17 11v7', wire: 'M4 4h16v16H4zM4 12h16M12 4v16M4 4l16 16', screen: 'M3 5h18v12H3zM8 21h8M12 17v4',
+  ground: 'M3 18h18M5 18l4-8 3 5 2-3 5 6', front: 'M5 4h14v16H5zM9 9c2 6 4-4 6 2',
+});
+// Menús radiales en 3D: un anillo de esferas visto desde arriba (elipse), más grandes delante y crecen junto al
+// ratón. Cada esfera del anillo puede tener un submenú: al pasar sobre ella salen esferas más pequeñas hacia fuera.
+const mv = () => { setTool('select'); setXform('translate'); }, rot = () => { setTool('select'); setXform('rotate'); }, scl = () => { setTool('select'); setXform('scale'); };
+const env = (k) => () => { document.querySelector(`[data-env="${k}"]`)?.click(); if (layout !== 'render') switchLayout('render'); };
+// Puck (Tab): la caja de herramientas: crear, editar, elegir, transformar y mostrar
 const PUCK = [
-  [
-    { k: 'curve', label: 'Curva', key: 'C', run: () => setTool('curve') },
-    { k: 'plane', label: 'Plano', run: () => setTool('plane') },
-    { k: 'revolve', label: 'Revolución', run: () => OPS.revolve() },
-    { k: 'loft', label: 'Loft', run: () => OPS.loft() },
-    { k: 'extrude', label: 'Extruir', run: () => OPS.extrude() },
-    { k: 'dup', label: 'Duplicar', run: duplicateSelection },
-    { k: 'align', label: 'Align', soon: true },
-    { k: 'blend', label: 'Blend', soon: true },
-    { k: 'round', label: 'Round', soon: true },
-    { k: 'offset', label: 'Offset', soon: true },
-    { k: 'symm', label: 'Simetría', soon: true },
-    { k: 'measure', label: 'Distancia', soon: true },
-  ],
-  [
-    { k: 'nothing', label: 'Nada', run: pickNothing },
-    { k: 'object', label: 'Objeto', key: 'O', run: () => setPickMode('object') },
-    { k: 'pickCurve', label: 'Curvas', run: () => setPickMode('object', 'curve') },
-    { k: 'pickSurf', label: 'Superficies', run: () => setPickMode('object', 'surface') },
-    { k: 'cv', label: 'CV', key: 'P', run: () => setPickMode('cv') },
-    { k: 'move', label: 'Mover', key: 'W', run: () => { setTool('select'); setXform('translate'); } },
-    { k: 'rotate', label: 'Rotar', key: 'E', run: () => { setTool('select'); setXform('rotate'); } },
-    { k: 'scale', label: 'Escalar', key: 'R', run: () => { setTool('select'); setXform('scale'); } },
-    { k: 'pivot', label: 'Pivote', key: 'D', run: togglePivotEdit },
-    { k: 'frame', label: 'Encuadrar', key: 'F', run: frameSelection },
-    { k: 'top', label: 'Vista sup.', key: 'T', run: topView },
-    { k: 'hide', label: 'Ocultar', run: hideSelection },
-    { k: 'show', label: 'Mostrar todo', run: unhideAll },
-    { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
-  ],
+  { k: 'curve', label: 'Curva', key: 'C', run: () => setTool('curve'), sub: [
+    { k: 'ground', label: 'En el suelo', run: () => { setDrawPlane('xz'); setTool('curve'); } },
+    { k: 'front', label: 'De frente', run: () => { setDrawPlane('xy'); setTool('curve'); } }] },
+  { k: 'surf', label: 'Superficie', run: () => setTool('plane'), sub: [
+    { k: 'plane', label: 'Plano', run: () => setTool('plane') }, { k: 'revolve', label: 'Revolución', run: () => OPS.revolve() },
+    { k: 'loft', label: 'Loft', run: () => OPS.loft() }, { k: 'extrude', label: 'Extruir', run: () => OPS.extrude() }] },
+  { k: 'edit', label: 'Editar', soon: true, sub: [
+    { k: 'align', label: 'Align', soon: true }, { k: 'blend', label: 'Blend', soon: true }, { k: 'round', label: 'Round', soon: true }, { k: 'offset', label: 'Offset', soon: true }] },
+  { k: 'arrow', label: 'Elegir', key: 'O', run: () => setPickMode('object'), sub: [
+    { k: 'object', label: 'Objeto', run: () => setPickMode('object') }, { k: 'pickCurve', label: 'Curvas', run: () => setPickMode('object', 'curve') },
+    { k: 'pickSurf', label: 'Superficies', run: () => setPickMode('object', 'surface') }, { k: 'cv', label: 'CV', run: () => setPickMode('cv') },
+    { k: 'nothing', label: 'Nada', run: pickNothing }] },
+  { k: 'move', label: 'Transformar', key: 'W', run: mv, sub: [
+    { k: 'move', label: 'Mover', run: mv }, { k: 'rotate', label: 'Rotar', run: rot }, { k: 'scale', label: 'Escalar', run: scl }, { k: 'pivot', label: 'Pivote', run: togglePivotEdit }] },
+  { k: 'dup', label: 'Duplicar', run: duplicateSelection, sub: [{ k: 'symm', label: 'Simetría', soon: true }, { k: 'measure', label: 'Distancia', soon: true }] },
+  { k: 'show', label: 'Mostrar', run: unhideAll, sub: [
+    { k: 'hide', label: 'Ocultar', run: hideSelection }, { k: 'show', label: 'Mostrar todo', run: unhideAll },
+    { k: 'frame', label: 'Encuadrar', run: frameSelection }, { k: 'top', label: 'Vista sup.', run: topView }] },
+  { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
 ];
-// Menú de visualización (Espacio o Ctrl+Shift+clic), como el marking menu de Alias
-const DISPLAY = [[
-  { k: 'info', label: 'Información', run: () => { $('panel').classList.add('show'); } },
-  { k: 'shade', label: 'Modelado', key: 'V', run: () => switchLayout('diag') },
-  { k: 'visu', label: 'Visu', key: 'V', run: () => switchLayout('render') },
+// Marking menus (Ctrl+Shift + botón del ratón), con la misma forma pero otra información
+const PICK_MM = [
+  { k: 'object', label: 'Objeto', key: 'O', run: () => setPickMode('object'), sub: [
+    { k: 'pickCurve', label: 'Curvas', run: () => setPickMode('object', 'curve') }, { k: 'pickSurf', label: 'Superficies', run: () => setPickMode('object', 'surface') }] },
+  { k: 'cv', label: 'CV', key: 'P', run: () => setPickMode('cv') },
+  { k: 'frame', label: 'Encuadrar', key: 'F', run: frameSelection, sub: [{ k: 'frame', label: 'Todo', run: () => frameObjects([]) }, { k: 'top', label: 'Vista sup.', run: topView }] },
+  { k: 'hide', label: 'Ocultar', run: hideSelection, sub: [{ k: 'show', label: 'Mostrar todo', run: unhideAll }] },
+  { k: 'pivot', label: 'Punto de interés', key: 'L', run: pivotToSelection },
+  { k: 'nothing', label: 'Nada', run: pickNothing },
+];
+const XFORM_MM = [
+  { k: 'move', label: 'Mover', key: 'W', run: mv },
+  { k: 'rotate', label: 'Rotar', key: 'E', run: rot },
+  { k: 'scale', label: 'Escalar', key: 'R', run: scl },
+  { k: 'pivot', label: 'Pivote', key: 'D', run: togglePivotEdit, sub: [{ k: 'pivot', label: 'Centrar pivote', run: centerPivots }, { k: 'frame', label: 'Punto de interés', run: pivotToSelection }] },
+  { k: 'dup', label: 'Duplicar', run: duplicateSelection },
+  { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
+];
+const DISPLAY_MM = [
+  { k: 'shade', label: 'Modelado', run: () => switchLayout('diag'), sub: [
+    { k: 'studio', label: 'Showroom', run: () => setDiag('showroom') }, { k: 'shade', label: 'Difuso', run: () => setDiag('diffuse') },
+    { k: 'sun', label: 'Shade-Sky', run: () => setDiag('sky') }, { k: 'zebra', label: 'Cebra', run: () => setDiag('zebra') },
+    { k: 'curvz', label: 'Curvatura', run: () => setDiag('curv') }, { k: 'wire', label: 'Malla', run: () => setDiag('wire') }] },
+  { k: 'visu', label: 'Visu', run: () => switchLayout('render'), sub: [
+    { k: 'studio', label: 'Estudio', run: env('studio') }, { k: 'sun', label: 'Exterior', run: env('sun') },
+    { k: 'sunset', label: 'Atardecer', run: env('sunset') }, { k: 'cloud', label: 'Nublado', run: env('overcast') }] },
   { k: 'ai', label: 'IA', run: () => switchLayout('ai') },
-  { k: 'ctrlOn', label: 'Controls ON', run: () => setPickMode('cv') },
-  { k: 'full', label: 'Pantalla completa', run: fullscreen },
-  { k: 'panel', label: 'Panel', run: () => setPinned(!pinned) },
-  { k: 'split', label: 'Dividida', run: () => switchLayout('split') },
-  { k: 'ctrlOff', label: 'Controls OFF', run: () => setPickMode('object') },
-  { k: 'grid', label: 'Toggle Grid', run: toggleGrid },
   { k: 'model', label: 'Toggle Model', run: toggleModel },
-]];
+  { k: 'grid', label: 'Toggle Grid', run: toggleGrid },
+  { k: 'ctrlOn', label: 'Controls', run: () => setPickMode(pickMode === 'cv' ? 'object' : 'cv'), sub: [
+    { k: 'ctrlOn', label: 'Controls ON', run: () => setPickMode('cv') }, { k: 'ctrlOff', label: 'Controls OFF', run: () => setPickMode('object') }] },
+  { k: 'screen', label: 'Pantalla', run: fullscreen, sub: [
+    { k: 'full', label: 'Completa', run: fullscreen }, { k: 'panel', label: 'Panel', run: () => setPinned(!pinned) }, { k: 'split', label: 'Dividida', run: () => switchLayout('split') }] },
+  { k: 'info', label: 'Información', run: () => $('panel').classList.add('show') },
+];
 
-// Los menús radiales se ven como un carrusel en 3D: un anillo de esferas visto desde arriba (elipse),
-// las de delante más grandes que las de atrás, y las que están cerca del ratón crecen.
 const RADIAL_TILT = 0.6;   // achatamiento vertical del anillo (vista elevada)
-function makeRadial(rings, radii) {
+function makeRadial(items, { r = 140, title = '' } = {}) {
+  const K = RADIAL_TILT, r2 = r + 78, R = r2 + 46;
   const el = document.createElement('div');
   el.className = 'puck'; el.hidden = true;
-  const R = radii[radii.length - 1] + 48, K = RADIAL_TILT;
   el.innerHTML = `<svg class="puck-lines" viewBox="${-R} ${-R} ${2 * R} ${2 * R}" width="${2 * R}" height="${2 * R}" style="left:${-R}px;top:${-R}px">
-      ${radii.map((r) => `<ellipse rx="${r}" ry="${r * K}" />`).join('')}<line x1="0" y1="0" x2="0" y2="0" /></svg>
+      <ellipse rx="${r}" ry="${r * K}" /><ellipse class="outer" rx="${r2}" ry="${r2 * K}" /><line x1="0" y1="0" x2="0" y2="0" /></svg>
     <div class="puck-center"><b></b><span></span></div>`;
   document.body.append(el);
   const line = el.querySelector('line'), cName = el.querySelector('.puck-center b'), cHint = el.querySelector('.puck-center span');
-  const items = [];
-  rings.forEach((ring, ri) => ring.forEach((it, n) => {
-    const a = -Math.PI / 2 + (n / ring.length) * Math.PI * 2, r = radii[ri];
+  const mains = [], all = [];
+  const button = (it, x, y, depth, cls) => {
     const b = document.createElement('button');
-    b.className = 'puck-item' + (it.soon ? ' soon' : '');
-    b.innerHTML = `<i>${icon(it.k)}</i><span>${it.label}</span>`;
-    const x = Math.cos(a) * r, y = Math.sin(a) * r * K, depth = (Math.sin(a) + 1) / 2;   // 1 = delante (abajo)
+    b.className = 'puck-item ' + cls + (it.soon ? ' soon' : '');
+    b.innerHTML = `<i>${icon(it.k)}</i><span>${esc(it.label)}</span>`;
     b.style.left = x + 'px'; b.style.top = y + 'px';
-    b.style.zIndex = String(10 + Math.round(depth * 80));
+    b.style.zIndex = String((cls === 'sub' ? 120 : 10) + Math.round(depth * 80));
     b.setAttribute('aria-label', it.label);
     el.append(b);
-    items.push({ it, b, a, ri, x, y, base: 0.74 + 0.34 * depth });
-  }));
-  const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, sticky: false };
-  const magnify = (mx, my) => items.forEach((x) => {
+    return b;
+  };
+  items.forEach((it, n) => {
+    const a = -Math.PI / 2 + (n / items.length) * Math.PI * 2, depth = (Math.sin(a) + 1) / 2;
+    const x = Math.cos(a) * r, y = Math.sin(a) * r * K;
+    const m = { it, a, x, y, base: 0.76 + 0.34 * depth, subs: [] };
+    m.b = button(it, x, y, depth, 'main');
+    // submenú: esferas pequeñas en un arco hacia fuera, centrado en la dirección de su esfera
+    const subs = it.sub || [], step = 44 / r2;
+    subs.forEach((sit, j) => {
+      const sa = a + (j - (subs.length - 1) / 2) * step, sd = (Math.sin(sa) + 1) / 2;
+      const sx = Math.cos(sa) * r2, sy = Math.sin(sa) * r2 * K;
+      const sm = { it: sit, a: sa, x: sx, y: sy, base: 0.62 + 0.24 * sd, parent: m, sub: true };
+      sm.b = button(sit, sx, sy, sd, 'sub');
+      m.subs.push(sm); all.push(sm);
+    });
+    mains.push(m); all.push(m);
+  });
+  const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, active: null, sticky: false };
+  const magnify = (mx, my) => all.forEach((x) => {
     const d = mx == null ? 1e9 : Math.hypot(x.x - mx, x.y - my);
-    const s = x.base * (1 + 0.4 * Math.exp(-(d * d) / (2 * 45 * 45))) * (x === st.hover ? 1.12 : 1);
+    const s = x.base * (1 + 0.35 * Math.exp(-(d * d) / (2 * 42 * 42))) * (x === st.hover ? 1.12 : 1);
     x.b.style.setProperty('--s', s.toFixed(3));
   });
   st.highlight = (h) => {
     st.hover = h;
-    items.forEach((x) => x.b.classList.toggle('on', x === h));
+    if (h) st.active = h.sub ? h.parent : h;
+    mains.forEach((m) => m.subs.forEach((x) => x.b.classList.toggle('open', m === st.active)));
+    all.forEach((x) => { x.b.classList.toggle('on', x === h); x.b.classList.toggle('parent', !!h?.sub && x === h.parent); });
     line.setAttribute('x2', h ? h.x : 0); line.setAttribute('y2', h ? h.y : 0);
-    cName.textContent = h ? h.it.label : '';
-    cHint.textContent = h ? (h.it.soon ? 'próximamente' : h.it.key || '') : 'suelta sobre una opción';
+    cName.textContent = h ? h.it.label : title;
+    cHint.textContent = h ? (h.it.soon ? 'próximamente' : h.it.key || (h.subs?.length ? 'más opciones afuera' : '')) : 'suelta sobre una opción';
+  };
+  const nearest = (list, ang) => {
+    let best = null, bd = 1e9;
+    for (const x of list) { const da = Math.abs(Math.atan2(Math.sin(ang - x.a), Math.cos(ang - x.a))); if (da < bd) { bd = da; best = x; } }
+    return [best, bd];
   };
   st.pickAt = (x, y) => {
-    const dx = x - st.at.x, dy = y - st.at.y, d = Math.hypot(dx, dy / K);   // distancia "desachatada"
-    if (d < 42) { st.highlight(null); magnify(dx, dy); return; }
-    const ri = radii.length === 1 || d < (radii[0] + radii[1]) / 2 ? 0 : 1;
-    const ring = items.filter((x) => x.ri === ri), ang = Math.atan2(dy / K, dx);
-    let best = null, bd = 1e9;
-    for (const x of ring) { const da = Math.abs(Math.atan2(Math.sin(ang - x.a), Math.cos(ang - x.a))); if (da < bd) { bd = da; best = x; } }
-    st.highlight(best);
+    const dx = x - st.at.x, dy = y - st.at.y, d = Math.hypot(dx, dy / K), ang = Math.atan2(dy / K, dx);
+    if (d < 44) { st.highlight(null); st.active = null; magnify(dx, dy); return; }
+    if (d < r + 38 || !st.active?.subs.length) st.highlight(nearest(mains, ang)[0]);
+    else {
+      const [sub, da] = nearest(st.active.subs, ang);
+      st.highlight(da < 44 / r2 + 0.12 ? sub : st.active);
+    }
     magnify(dx, dy);
   };
   st.show = (x, y) => {
-    const m = R * 0.9;
-    st.at = { x: Math.min(innerWidth - m, Math.max(m, x)), y: Math.min(innerHeight - m * K - 30, Math.max(m * K + 30, y)) };
+    const m = R * 0.92;
+    st.at = { x: Math.min(innerWidth - m, Math.max(m, x)), y: Math.min(innerHeight - m * K - 40, Math.max(m * K + 40, y)) };
     el.style.left = st.at.x + 'px'; el.style.top = st.at.y + 'px';
-    el.hidden = false; st.open = true; st.sticky = false; st.highlight(null); magnify(null);
+    el.hidden = false; st.open = true; st.sticky = false; st.active = null; st.highlight(null); magnify(null); st.t0 = performance.now();
   };
   st.close = (run) => {
     if (!st.open) return;
     st.open = false; el.hidden = true;
     const h = st.hover;
-    if (run && h) (h.it.soon ? soon(h.it.label) : h.it.run)();
-  };
-  items.forEach((x) => {
-    x.b.addEventListener('pointerenter', () => st.highlight(x));
-    x.b.addEventListener('click', () => { st.highlight(x); st.close(true); });
-  });
-  return st;
-}
-const puck = makeRadial(PUCK, [112, 232]);
-// Marking menus como los de Alias: planos, con 8 opciones en las direcciones de la brújula (y una lista
-// extra debajo). Ctrl+Shift + botón izquierdo = selección, medio = transformar, derecho = visualización.
-// Se arrastra hacia la opción y se suelta; un clic rápido sin mover lo deja abierto. Espacio = visualización.
-function makeMarking(title, items, extra = []) {
-  const el = document.createElement('div');
-  el.className = 'mmenu'; el.hidden = true;
-  el.innerHTML = `<svg class="mm-lines"><line x1="0" y1="0" x2="0" y2="0" /></svg><div class="mm-center"></div><div class="mm-title">${title}</div>`;
-  document.body.append(el);
-  const line = el.querySelector('line'), R = 96, all = [];
-  items.forEach((it, n) => {
-    if (!it) return;
-    const a = -Math.PI / 2 + (n / 8) * Math.PI * 2, x = Math.cos(a) * R, y = Math.sin(a) * R * 0.78;
-    const b = document.createElement('button');
-    b.className = 'mm-item' + (it.soon ? ' soon' : '');
-    b.innerHTML = `${esc(it.label)}${it.key ? `<kbd>${it.key}</kbd>` : ''}`;
-    b.style.left = x + 'px'; b.style.top = y + 'px';
-    b.style.transform = `translate(${-50 + 50 * Math.round(Math.cos(a) * 100) / 100}%, ${-50 + 50 * Math.round(Math.sin(a) * 100) / 100}%)`;
-    el.append(b);
-    all.push({ it, b, a, x, y });
-  });
-  if (extra.length) {
-    const list = document.createElement('div');
-    list.className = 'mm-extra';
-    list.style.top = R * 0.78 + 34 + 'px';
-    extra.forEach((it) => {
-      const b = document.createElement('button');
-      b.className = 'mm-item';
-      b.textContent = it.label;
-      list.append(b);
-      all.push({ it, b, extra: true });
-    });
-    el.append(list);
-  }
-  const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, sticky: false };
-  st.highlight = (h) => {
-    st.hover = h;
-    all.forEach((x) => x.b.classList.toggle('on', x === h));
-    line.setAttribute('x2', h && !h.extra ? h.x : 0); line.setAttribute('y2', h && !h.extra ? h.y : 0);
-  };
-  st.pickAt = (x, y) => {
-    const over = all.find((o) => o.extra && (() => { const r = o.b.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; })());
-    if (over) return st.highlight(over);
-    const dx = x - st.at.x, dy = y - st.at.y;
-    if (Math.hypot(dx, dy) < 26) return st.highlight(null);
-    const ang = Math.atan2(dy / 0.78, dx);
-    let best = null, bd = 1e9;
-    for (const o of all) { if (o.extra) continue; const da = Math.abs(Math.atan2(Math.sin(ang - o.a), Math.cos(ang - o.a))); if (da < bd) { bd = da; best = o; } }
-    st.highlight(bd < Math.PI / 8 + 0.05 ? best : null);
-  };
-  st.show = (x, y) => {
-    st.at = { x: Math.min(innerWidth - 190, Math.max(190, x)), y: Math.min(innerHeight - 150 - extra.length * 28, Math.max(110, y)) };
-    el.style.left = st.at.x + 'px'; el.style.top = st.at.y + 'px';
-    el.hidden = false; st.open = true; st.sticky = false; st.highlight(null); st.t0 = performance.now();
-  };
-  st.close = (run) => {
-    if (!st.open) return;
-    st.open = false; el.hidden = true;
-    const h = st.hover;
-    if (run && h) (h.it.soon ? soon(h.it.label) : h.it.run)();
+    if (run && h) (h.it.soon || !h.it.run ? soon(h.it.label) : h.it.run)();
   };
   all.forEach((x) => {
     x.b.addEventListener('pointerenter', () => st.highlight(x));
@@ -2594,28 +2601,10 @@ function makeMarking(title, items, extra = []) {
   });
   return st;
 }
-const D = Object.fromEntries(DISPLAY[0].map((it) => [it.k, it]));
-const pickMenu = makeMarking('Selección', [
-  { label: 'Objeto', key: 'O', run: () => setPickMode('object') },
-  { label: 'Curvas', run: () => setPickMode('object', 'curve') },
-  { label: 'Superficies', run: () => setPickMode('object', 'surface') },
-  { label: 'Encuadrar', key: 'F', run: frameSelection },
-  { label: 'Nada', run: pickNothing },
-  { label: 'Mostrar todo', run: unhideAll },
-  { label: 'Ocultar', run: hideSelection },
-  { label: 'CV', key: 'P', run: () => setPickMode('cv') },
-]);
-const xformMenu = makeMarking('Transformar', [
-  { label: 'Mover', key: 'W', run: () => { setTool('select'); setXform('translate'); } },
-  { label: 'Rotar', key: 'E', run: () => { setTool('select'); setXform('rotate'); } },
-  { label: 'Escalar', key: 'R', run: () => { setTool('select'); setXform('scale'); } },
-  { label: 'Pivote', key: 'D', run: togglePivotEdit },
-  { label: 'Duplicar', run: duplicateSelection },
-  { label: 'Borrar', key: 'Supr', run: deleteSelection },
-  { label: 'Centrar pivote', run: centerPivots },
-  { label: 'Punto de interés', key: 'L', run: pivotToSelection },
-]);
-const disp = makeMarking('Visualización', [D.shade, D.visu, D.ai, D.model, D.full, D.grid, D.ctrlOff, D.ctrlOn], [D.info, D.panel, D.split]);
+const puck = makeRadial(PUCK, { r: 150, title: 'Herramientas' });
+const pickMenu = makeRadial(PICK_MM, { r: 128, title: 'Selección' });
+const xformMenu = makeRadial(XFORM_MM, { r: 128, title: 'Transformar' });
+const disp = makeRadial(DISPLAY_MM, { r: 140, title: 'Visualización' });
 const MENUS = [puck, pickMenu, xformMenu, disp];
 let lastPtr = { x: innerWidth / 2, y: innerHeight / 2 };
 addEventListener('pointermove', (e) => {
