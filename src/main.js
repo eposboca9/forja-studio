@@ -8,6 +8,7 @@ import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as N from './nurbs.js';
 import { applyBackground } from './concrete.js';
 import { drawLogo } from './logo.js';
@@ -233,6 +234,66 @@ addEventListener('pointerup', (e) => {
   navDrag = null;
 });
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// Transformar con los tres botones del ratón (Alias). Usa el mismo camino que el gizmo (mouseDown /
+// objectChange / mouseUp sobre el proxy), así el snap, las mallas y los pivotes funcionan igual.
+let mxDrag = null;
+const AXES = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+function hasTransformable() {
+  return selectedCVRefs().length > 0 || (pickMode === 'object' && selObjs.some((o) => o.kind === 'mesh' && o.visible));
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!mouseXform || carousel || tool !== 'select' || pivotEdit || navHeld || (e.ctrlKey && e.shiftKey) || e.button > 2) return;
+  if ((gizmo.axis && e.button === 0) || !hasTransformable()) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  attachGizmo();
+  const pane = paneAt(e.clientX);
+  useAspect(pane);
+  // dirección en pantalla de cada eje (píxeles por unidad), medida en el punto de anclaje
+  const r = renderer.domElement.getBoundingClientRect(), a = proxy.position.clone();
+  const scr = (q) => { const v = q.clone().project(camera); return new THREE.Vector2(r.left + pane.x + ((v.x + 1) / 2) * pane.w, r.top + ((1 - v.y) / 2) * pane.h); };
+  const s0 = scr(a), unit = camera.position.distanceTo(a) * 0.1;
+  const dirs = AXES.map((ax) => scr(a.clone().addScaledVector(ax, unit)).sub(s0).divideScalar(unit));
+  mxDrag = { x: e.clientX, y: e.clientY, button: e.button, moved: false, dirs, e0: e, depth: camera.position.distanceTo(a), pane,
+    p0: proxy.position.clone(), q0: proxy.quaternion.clone(), s0: proxy.scale.clone() };
+  renderer.domElement.setPointerCapture(e.pointerId);
+}, true);
+addEventListener('pointermove', (e) => {
+  const m = mxDrag;
+  if (!m) return;
+  const dx = e.clientX - m.x, dy = e.clientY - m.y;
+  if (!m.moved) {
+    if (Math.hypot(dx, dy) < 3) return;
+    m.moved = true;
+    gizmo.dispatchEvent({ type: 'mouseDown', mode: xform });
+  }
+  if (xform === 'translate') {
+    const d = m.dirs[m.button], L = d.lengthSq();
+    // si el eje apunta a la cámara casi no se ve en pantalla: entonces se usa el movimiento vertical
+    const t = L > 4 ? (dx * d.x + dy * d.y) / L : (-dy * m.depth) / m.pane.h;
+    proxy.position.copy(m.p0).addScaledVector(AXES[m.button], t);
+  } else if (xform === 'rotate') {
+    let ang = (dx - dy) * 0.012;
+    if (snapModes(mods).grid) ang = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);   // Alt: de 15 en 15 grados
+    proxy.quaternion.copy(new THREE.Quaternion().setFromAxisAngle(AXES[m.button], ang).multiply(m.q0));
+  } else {
+    let k = Math.exp((dx - dy) * 0.006);
+    if (snapModes(mods).grid) k = Math.max(0.25, Math.round(k / 0.25) * 0.25);
+    const v = m.button === 0 ? new THREE.Vector3(k, k, k) : m.button === 1 ? new THREE.Vector3(1, k, 1) : new THREE.Vector3(k, 1, k);
+    proxy.scale.copy(m.s0).multiply(v);
+  }
+  gizmo.dispatchEvent({ type: 'objectChange' });
+});
+addEventListener('pointerup', (e) => {
+  const m = mxDrag;
+  if (!m) return;
+  mxDrag = null;
+  if (m.moved) { gizmo.dispatchEvent({ type: 'mouseUp', mode: xform }); return; }
+  // clic sin arrastrar: elegir, como siempre
+  const hit = pickAt(e);
+  const how = howFor(e);
+  if (hit) applySelection([hit.cv || hit.obj], how); else if (how === 'replace' && e.button === 0) clearSelection();
+});
 renderer.domElement.addEventListener('wheel', (e) => {
   e.preventDefault();
   const step = Math.min(Math.abs(e.deltaY), 120) / 120;
@@ -389,9 +450,30 @@ const isoSelMat = LM({ color: 0xe07a1f, linewidth: 1.8 });
 const hullMat = new THREE.LineDashedMaterial({ color: '#2d6aa8', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.7 });
 const combMat = new THREE.LineBasicMaterial({ color: '#e07a1f', transparent: true, opacity: 0.55 });
 const envMat = new THREE.LineBasicMaterial({ color: '#e07a1f' });
-const handleGeo = new THREE.SphereGeometry(0.075, 16, 12);
-const handleMat = new THREE.MeshBasicMaterial({ color: '#2d6aa8', depthTest: false, transparent: true });
-const handleSelMat = new THREE.MeshBasicMaterial({ color: '#e07a1f', depthTest: false, transparent: true });
+// CVs como pequeños objetos 3D: una cruz "+" (como la del logotipo) y, en las esquinas de las superficies,
+// un cubo para distinguirlas. Cada CV es una esfera invisible (fácil de elegir) con la figura dentro;
+// se escalan con la distancia a la cámara para verse siempre del mismo tamaño.
+const handleGeo = new THREE.SphereGeometry(0.75, 10, 8);
+const handlePickMat = new THREE.MeshBasicMaterial({ visible: false });
+const plusGeo = mergeGeometries([new THREE.BoxGeometry(1.1, 0.26, 0.26), new THREE.BoxGeometry(0.26, 1.1, 0.26), new THREE.BoxGeometry(0.26, 0.26, 1.1)]);
+const cornerGeo = new THREE.BoxGeometry(0.62, 0.62, 0.62);
+const handleMat = new THREE.MeshStandardMaterial({ color: '#2f7bff', roughness: 0.35, metalness: 0.1, depthTest: false, transparent: true });
+const handleSelMat = new THREE.MeshStandardMaterial({ color: '#ff8a1f', emissive: '#5a2400', roughness: 0.35, metalness: 0.1, depthTest: false, transparent: true });
+const HANDLE_PX = 0.013;   // tamaño en pantalla (fracción de la distancia a la cámara)
+function makeHandle(corner, sel) {
+  const h = new THREE.Mesh(handleGeo, handlePickMat);
+  const shape = new THREE.Mesh(corner ? cornerGeo : plusGeo, sel ? handleSelMat : handleMat);
+  shape.renderOrder = 10;
+  if (!corner) shape.rotation.set(0.35, 0.6, 0);   // un poco girada para que se lea como objeto 3D
+  h.add(shape);
+  h.renderOrder = 10;
+  return h;
+}
+function scaleHandles() {
+  const groups = objects.filter((o) => o.parts.handles.visible).map((o) => o.parts.handles);
+  if (draftHandles.visible) groups.push(draftHandles);
+  for (const g of groups) for (const h of g.children) h.scale.setScalar(camera.position.distanceTo(h.position) * HANDLE_PX);
+}
 
 const THEME_3D = {
   dark: { curve: 0xe8e6e1, grid: 0x8a8781, iso: '#000000', shadow: 0.55 },
@@ -615,10 +697,11 @@ function rebuildHandles(obj) {
   g.clear();
   for (const ref of allCVRefs(obj)) {
     const p = cvRef(ref);
-    const h = new THREE.Mesh(handleGeo, selCVs.has(ref.key) ? handleSelMat : handleMat);
+    const nu = obj.kind === 'surface' ? obj.data.cvs.length : 0, nv = nu ? obj.data.cvs[0].length : 0;
+    const corner = nu > 0 && (ref.i === 0 || ref.i === nu - 1) && (ref.j === 0 || ref.j === nv - 1);
+    const h = makeHandle(corner, selCVs.has(ref.key));
     h.position.set(p.x, p.y, p.z);
     h.userData = ref;
-    h.renderOrder = 10;
     g.add(h);
   }
 }
@@ -642,15 +725,20 @@ function applyVisibility(obj) {
 
 // ---------- Selección ----------
 let pickMode = 'object';
+// Filtro del modo Objetos (como Pick Curves / Pick Surfaces de Alias): null = todo, 'curve' o 'surface'
+let pickFilter = null;
+const pickable = (o) => o.visible && (!pickFilter || (pickFilter === 'curve' ? o.kind === 'curve' : o.kind !== 'curve'));
+const PICK_NAMES = { curve: 'curvas', surface: 'superficies' };
 const selObjs = []; // en orden de selección (importa para el loft)
 const selCVs = new Map();
 
-function setPickMode(m) {
-  if (m === pickMode) return;
-  pickMode = m;
+function setPickMode(m, filter = null) {
+  if (m === pickMode && filter === pickFilter) return;
+  pickMode = m; pickFilter = m === 'object' ? filter : null;
+  if (pickFilter) toast(`Elegir solo ${PICK_NAMES[pickFilter]}.`);
   document.querySelectorAll('[data-pick]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pick === m)));
-  selObjs.length = 0; selCVs.clear();
-  selectionChanged();
+  selObjs.length = 0; selCVs.clear(); mouseXform = false;
+  selectionChanged(); updateHint();
 }
 
 // how: 'replace' | 'toggle' | 'remove'
@@ -673,7 +761,7 @@ function selectionChanged() {
   if (pivotEdit && (pickMode !== 'object' || !selObjs.length)) { pivotEdit = false; gizmo.setMode(xform); updateXformButtons(); }
   objects.forEach((o) => {
     applyVisibility(o);
-    o.parts.handles.children.forEach((h) => (h.material = selCVs.has(h.userData.key) ? handleSelMat : handleMat));
+    o.parts.handles.children.forEach((h) => (h.children[0].material = selCVs.has(h.userData.key) ? handleSelMat : handleMat));
   });
   attachGizmo();
   renderSelectionPanel();
@@ -704,8 +792,11 @@ function centroid(refs) {
 // Transformar: mover, rotar o escalar. En modo Objetos cada objeto gira y escala alrededor de su
 // propio pivote (como en Alias); en modo CVs, alrededor del centro de los CVs elegidos.
 let xform = 'translate', pivotEdit = false;
+// Como en Alias: con Mover/Rotar/Escalar activo, arrastrar en la vista transforma lo elegido con los tres
+// botones del ratón (izq = X, medio = Y, der = Z). El gizmo de ejes sigue funcionando igual.
+let mouseXform = false;
 function setXform(m) {
-  xform = m; pivotEdit = false;
+  xform = m; pivotEdit = false; mouseXform = true;
   gizmo.setMode(m);
   updateXformButtons(); attachGizmo();
 }
@@ -940,11 +1031,14 @@ function pickAt(e) {
   setRay(e);
   const live = objects.filter((o) => o.visible);
   if (pickMode === 'cv') {
-    const hit = ray.intersectObjects(live.flatMap((o) => o.parts.handles.children), false)[0];
-    return hit ? { cv: hit.object.userData } : null;
+    // de los CVs tocados, el más cercano al rayo (al cursor en pantalla), no el más cercano a la cámara
+    const hits = ray.intersectObjects(live.flatMap((o) => o.parts.handles.children), false);
+    let best = null, bd = Infinity;
+    for (const h of hits) { const d = ray.ray.distanceSqToPoint(h.object.position) / h.object.scale.x ** 2; if (d < bd) { bd = d; best = h; } }
+    return best ? { cv: best.object.userData } : null;
   }
   ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
-  const hit = ray.intersectObjects(live.map((o) => pickTarget(o)), false)[0];
+  const hit = ray.intersectObjects(live.filter(pickable).map((o) => pickTarget(o)), false)[0];
   return hit ? { obj: hit.object.userData.obj, point: hit.point } : null;
 }
 
@@ -974,12 +1068,19 @@ const HINTS = {
 function updateHint() {
   if (HINTS[tool]) { $('hint').textContent = HINTS[tool]; return; }
   if (typeof pivotEdit !== 'undefined' && pivotEdit) { $('hint').textContent = 'Editar pivote: arrastra el gizmo · Ctrl: snap a punto · Ctrl+Alt: a curva · Alt: rejilla · D o Esc: terminar'; return; }
+  if (mouseXform) {
+    const verb = { translate: 'Mover', rotate: 'Rotar', scale: 'Escalar' }[xform];
+    const axes = xform === 'scale' ? 'izq = uniforme · medio = Y · der = X y Z' : 'izq = X · medio = Y · der = Z';
+    $('hint').textContent = `${verb}: arrastra en la vista con ${axes} · o usa el gizmo · clic sin arrastrar: elegir · Esc: salir`;
+    return;
+  }
   const nav = navStyle === 'alias' ? 'Shift+Alt: navegar' : 'Shift+arrastrar: recuadro';
-  const what = pickMode === 'cv' ? 'CVs' : 'objetos';
+  const what = pickMode === 'cv' ? 'CVs' : PICK_NAMES[pickFilter] || 'objetos';
   $('hint').textContent = `Clic: seleccionar ${what} · Arrastrar: recuadro · ${nav} (clic rápido: punto de interés) · W/E/R: mover/rotar/escalar · Alt/Ctrl/Ctrl+Alt: snap · Espacio: menú`;
 }
 function setTool(t) {
   if (tool === 'curve' && t !== 'curve') cancelDraft();
+  if (t !== 'select') mouseXform = false;
   tool = t;
   $('t-select').setAttribute('aria-pressed', String(t === 'select'));
   $('t-curve').setAttribute('aria-pressed', String(t === 'curve'));
@@ -1009,7 +1110,7 @@ function showDraft() {
     setGeo(draftLine, line2Geo(out));
     draftLine.visible = true;
   }
-  pts.forEach((p) => { const h = new THREE.Mesh(handleGeo, handleMat); h.position.copy(p); h.renderOrder = 10; draftHandles.add(h); });
+  pts.forEach((p) => { const h = makeHandle(false, false); h.position.copy(p); draftHandles.add(h); });
   const n = draft.pts.length;
   $('draw-msg').textContent = n === 0 ? `Haz clic en el plano ${drawPlaneKind === 'xz' ? 'del suelo' : 'frontal'} para el primer punto` : `${n} ${n === 1 ? 'punto' : 'puntos'} · sigue haciendo clic para añadir más`;
   $('draw-done').disabled = n < 2;
@@ -1145,7 +1246,7 @@ function boxSelect(d, e, how) {
   if (pickMode === 'cv') {
     items = live.flatMap(allCVRefs).filter((ref) => { const q = cvRef(ref); return inside(q.x, q.y, q.z); });
   } else {
-    items = live.filter((o) => {
+    items = live.filter(pickable).filter((o) => {
       const a = pickTarget(o).geometry.attributes.position;
       const step = o.kind === 'curve' ? 3 : 5;
       for (let i = 0; i < a.count; i += step) if (inside(a.getX(i), a.getY(i), a.getZ(i))) return true;
@@ -1394,49 +1495,101 @@ function setDiag(m) {
 }
 document.querySelectorAll('[data-diag]').forEach((b) => b.addEventListener('click', () => setDiag(b.dataset.diag)));
 const LAYOUTS = ['split', 'diag', 'render'];
-// Carrusel 3D: el módulo actual gira sobre sí mismo, se aleja y se hace pequeño hacia un lado,
-// mientras el siguiente entra por el otro lado girando y creciendo. Los dos se dibujan a la vez.
+// Carrusel 3D: cada módulo es el propio modelo 3D (con su sombreado: evaluación, PBR o IA) puesto en un
+// anillo; el eje de giro es vertical y está a la altura del horizonte. Al cambiar, la cámara sube a una
+// vista un poco elevada (se ven todos los módulos), el anillo gira hasta dejar delante el módulo nuevo y la cámara vuelve a bajar a la vista de trabajo.
 let carousel = null;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const RING = ['diag', 'render', 'ai'];
+const RING_NAMES = { diag: 'MODELADO', render: 'VISU', ai: 'IA' };
+// Etiquetas de cada módulo, flotando sobre su modelo durante el giro (la del módulo activo, más grande y en azul)
+const ringLabels = document.createElement('div');
+ringLabels.className = 'ring-labels';
+ringLabels.innerHTML = RING.map((k) => `<span data-k="${k}">${RING_NAMES[k]}</span>`).join('');
+view.appendChild(ringLabels);
+const ease = (k) => (k <= 0 ? 0 : k >= 1 ? 1 : k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+const UP = new THREE.Vector3(0, 1, 0);
 function switchLayout(l) {
   if (l === layout || carousel) return;
   if (l === 'split' || layout === 'split' || reduceMotion.matches) { setLayout(l); return; }
-  const ORDER = ['diag', 'render', 'ai'];
-  carousel = { t0: performance.now(), dur: 1300, from: layout, to: l, swapped: false, dir: ORDER.indexOf(l) > ORDER.indexOf(layout) ? 1 : -1,
-    pos: camera.position.clone(), quat: camera.quaternion.clone(), piv: pivot.clone() };
+  const box = boundsOf(objects.filter((o) => o.visible));
+  const bc = box.isEmpty() ? pivot.clone() : box.getCenter(new THREE.Vector3());
+  const size = box.isEmpty() ? new THREE.Vector3(4, 2, 4) : box.getSize(new THREE.Vector3());
+  const r = Math.max(Math.hypot(size.x, size.z) / 2, size.y / 2, 0.5);
+  const floorY = box.isEmpty() ? 0 : box.min.y, topY = box.isEmpty() ? 2 : box.max.y;
+  const f = pivot.clone().sub(camera.position).setY(0);
+  if (f.lengthSq() < 1e-8) f.set(0, 0, -1).applyQuaternion(camera.quaternion).setY(0);
+  if (f.lengthSq() < 1e-8) f.set(0, 0, -1);
+  f.normalize();
+  // Anillo completo: los módulos se reparten a la misma distancia (360° / número de módulos) y el anillo
+  // crece con el número de módulos; la vista elevada se aleja lo necesario para verlo entero.
+  const n = RING.length, slotW = 2.1 * r, slotH = Math.max(size.y + 0.6 * r, 1.6 * r);
+  const R = Math.max(slotW * 1.7 / (2 * Math.sin(Math.PI / n)), 1.2 * r), step = (2 * Math.PI) / n;
+  const center = bc.clone().addScaledVector(f, R); center.y = floorY;
+  const p = panes()[0], vf = THREE.MathUtils.degToRad(camera.fov) / 2, hf = Math.atan(Math.tan(vf) * (p.w / p.h));
+  const el = THREE.MathUtils.degToRad(24);
+  const D = Math.max((R + r) / Math.tan(hf), ((R + r) * Math.sin(el) + slotH * Math.cos(el)) / Math.tan(vf)) * 1.2;
+  const look = center.clone(); look.y = floorY + slotH * 0.3;
+  const overPos = look.clone().addScaledVector(f, -D * Math.cos(el)).addScaledVector(UP, D * Math.sin(el));
+  const overQuat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(overPos, look, UP));
+  carousel = { t0: performance.now(), dur: 2100, from: layout, to: l, swapped: false, center, R, step, r, bc, f, floorY, topY, slotW, slotH,
+    overPos, overQuat, pos: camera.position.clone(), quat: camera.quaternion.clone() };
   flipPanel(l);
 }
-// Pose de la cámara para un módulo en la posición s del carrusel (0 = delante, ±1 = fuera, a un lado)
-function carouselPose(c, s) {
-  const d = c.pos.distanceTo(c.piv), a = Math.abs(s);
-  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s * c.dir * THREE.MathUtils.degToRad(150));
-  const pos = c.pos.clone().sub(c.piv).applyQuaternion(q).multiplyScalar(1 + 4.5 * a * a).add(c.piv);
-  const quat = q.clone().multiply(c.quat);
-  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
-  pos.addScaledVector(right, -s * c.dir * d * 2.2 * a);            // se desplaza hacia un lado mientras se aleja
-  return { pos, quat };
+// Cámara del espectador en el instante k (sube, se queda arriba mientras gira el anillo y vuelve a bajar)
+function carouselState(c, k) {
+  const w = ease(k / 0.3) * (1 - ease((k - 0.7) / 0.3));
+  return { pos: c.pos.clone().lerp(c.overPos, w), quat: c.quat.clone().slerp(c.overQuat, w), w, spin: ease((k - 0.24) / 0.52) };
+}
+// Ángulo de cada módulo en el anillo (0 = delante; el siguiente queda a la derecha)
+function ringAngle(c, kind, spin) {
+  const n = RING.length, from = RING.indexOf(c.from);
+  let d = (RING.indexOf(c.to) - from + n) % n; if (d > n / 2) d -= n;      // el camino más corto
+  return -(RING.indexOf(kind) - from - spin * d) * c.step;
+}
+// Un módulo colocado en el arco se dibuja con la cámara del espectador "desgirada" alrededor del eje
+function moduleCamera(c, V, a) {
+  const q = new THREE.Quaternion().setFromAxisAngle(UP, -a);
+  return { pos: V.pos.clone().sub(c.center).applyQuaternion(q).add(c.center), quat: q.multiply(V.quat) };
 }
 function renderCarousel(now) {
   const c = carousel, k = Math.min(1, (now - c.t0) / c.dur);
-  const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;   // suave al empezar y al terminar
-  if (!c.swapped && e >= 0.5) { c.swapped = true; setLayout(c.to); }
+  const V = carouselState(c, k);
+  if (!c.swapped && V.spin >= 0.5) { c.swapped = true; setLayout(c.to); }
   const full = { x: 0, w: view.clientWidth, h: Math.max(view.clientHeight, 1) };
-  const showG = ground.visible;
-  ground.visible = false;                                             // sin sombra doble durante el giro
+  const showG = ground.visible, showGz = gizmo.visible;
+  ground.visible = false; gizmo.visible = false;
   const bg = envBg; envBg = false;
-  // primero el que está más lejos, después el más cercano
-  const passes = [[c.from, e], [c.to, e - 1]].sort((p1, p2) => Math.abs(p2[1]) - Math.abs(p1[1]));
-  passes.forEach(([kind, s], n) => {
-    const p = carouselPose(c, s);
+  renderer.setViewport(0, 0, full.w, full.h); renderer.setScissor(0, 0, full.w, full.h);
+  renderer.clear();
+  renderer.autoClear = false;
+  // los tres módulos comparten el mismo espacio de profundidad, así que se tapan entre sí bien
+  const angles = RING.map((kind) => ringAngle(c, kind, V.spin));
+  RING.forEach((kind, i) => {
+    const a = angles[i];
+    if (kind !== c.from && kind !== c.to && V.w < 0.02) return;      // abajo solo se ven los que cambian
+    const p = moduleCamera(c, V, a);
     camera.position.copy(p.pos); camera.quaternion.copy(p.quat);
-    renderer.autoClear = n === 0;
-    if (n > 0) renderer.clearDepth();
     renderPane({ ...full, kind });
   });
+  // etiquetas sobre cada modelo, vistas por el espectador
+  camera.position.copy(V.pos); camera.quaternion.copy(V.quat);
+  camera.updateMatrixWorld(); useAspect(full);
+  const active = V.spin < 0.5 ? c.from : c.to, v = new THREE.Vector3();
+  RING.forEach((kind, i) => {
+    const lab = ringLabels.children[i];
+    v.copy(c.bc).sub(c.center).setY(0).applyAxisAngle(UP, angles[i]).add(c.center);
+    v.y = c.topY + c.r * 0.25;
+    v.project(camera);
+    lab.style.transform = `translate(${((v.x + 1) / 2) * full.w}px, ${((1 - v.y) / 2) * full.h}px) translate(-50%, -100%)`;
+    lab.style.opacity = String(V.w * (kind === active ? 1 : 0.6));
+    lab.classList.toggle('on', kind === active);
+  });
+  ringLabels.style.visibility = V.w > 0.01 ? 'visible' : 'hidden';
   renderer.autoClear = true;
-  envBg = bg; ground.visible = showG;
+  envBg = bg; ground.visible = showG; gizmo.visible = showGz;
   camera.position.copy(c.pos); camera.quaternion.copy(c.quat);
-  if (k === 1) { carousel = null; bgFadeT0 = now; }
+  if (k === 1) { carousel = null; bgFadeT0 = now; ringLabels.style.visibility = 'hidden'; }
 }
 let bgFadeT0 = -1e9;
 // El panel derecho cambia de módulo girando como una placa
@@ -1937,7 +2090,10 @@ addEventListener('keydown', (e) => {
   else if (k === '2') setDiag('curv');
   else if (k === '3') setDiag('wire');
   else if (k === 'enter' && tool === 'curve') finishDraft();
-  else if (k === 'escape') { if (tool !== 'select') setTool('select'); else if (pivotEdit) togglePivotEdit(); else clearSelection(); }
+  else if (k === 'escape') {
+    if (tool !== 'select') setTool('select'); else if (pivotEdit) togglePivotEdit();
+    else if (mouseXform) { mouseXform = false; updateHint(); } else clearSelection();
+  }
   else if (k === 'delete' || k === 'backspace') deleteSelection();
 });
 
@@ -1957,7 +2113,7 @@ addEventListener('keydown', (e) => {
 });
 
 // ---------- Comandos de los menús radiales ----------
-function pickNothing() { setTool('select'); clearSelection(); }
+function pickNothing() { setTool('select'); mouseXform = false; clearSelection(); updateHint(); }
 const cloneV4 = (v) => new THREE.Vector4(v.x, v.y, v.z, v.w);
 function duplicateSelection() {
   if (pickMode !== 'object' || !selObjs.length) return toast('Duplicar: selecciona objetos (modo Objetos).');
@@ -2000,7 +2156,8 @@ const IC = {
   dup: 'M9 9h11v11H9zM4 15V4h11', align: 'M4 20V4M8 12c4 0 6-6 12-6M8 12c4 0 6 6 12 6', round: 'M4 20V12a8 8 0 0 1 8-8h8',
   extend: 'M4 18C8 8 12 6 14 6M16 6h5M19 3l3 3-3 3', offset: 'M3 15c5-6 13-6 18 0M3 20c5-6 13-6 18 0', blend: 'M3 6h6c6 0 6 12 12 12M3 18h6',
   nothing: 'M4 4h4M16 4h4M4 20h4M16 20h4M4 4v4M20 4v4M4 16v4M20 16v4M9 9l6 6M15 9l-6 6', object: 'M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8',
-  cv: 'M4 18C8 6 16 18 20 6M3 17h2v2H3zM19 5h2v2h-2zM11 11h2v2h-2z', move: 'M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3',
+  cv: 'M4 18C8 6 16 18 20 6M3 17h2v2H3zM19 5h2v2h-2zM11 11h2v2h-2z', pickCurve: 'M3 17C7 5 13 19 21 7M17 4l4 3-4 3',
+  pickSurf: 'M3 15l5-8h13l-5 8zM6 19h13', move: 'M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3',
   rotate: 'M20 12a8 8 0 1 1-3-6.2M20 4v5h-5', scale: 'M4 10h10v10H4zM13 4h7v7M20 4l-8 8', pivot: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v5M12 17v5M2 12h5M17 12h5',
   frame: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', top: 'M4 4h16v16H4zM12 8v8M8 12h8', hide: 'M3 3l18 18M10.6 6.1A9 9 0 0 1 22 12s-1.3 2.6-4 4.6M6.6 6.6C3.7 8.6 2 12 2 12s3.5 7 10 7c1.6 0 3-.4 4.3-1',
   show: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z', del: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
@@ -2025,10 +2182,14 @@ const PUCK = [
     { k: 'blend', label: 'Blend', soon: true },
     { k: 'round', label: 'Round', soon: true },
     { k: 'offset', label: 'Offset', soon: true },
+    { k: 'symm', label: 'Simetría', soon: true },
+    { k: 'measure', label: 'Distancia', soon: true },
   ],
   [
     { k: 'nothing', label: 'Nada', run: pickNothing },
     { k: 'object', label: 'Objeto', key: 'O', run: () => setPickMode('object') },
+    { k: 'pickCurve', label: 'Curvas', run: () => setPickMode('object', 'curve') },
+    { k: 'pickSurf', label: 'Superficies', run: () => setPickMode('object', 'surface') },
     { k: 'cv', label: 'CV', key: 'P', run: () => setPickMode('cv') },
     { k: 'move', label: 'Mover', key: 'W', run: () => { setTool('select'); setXform('translate'); } },
     { k: 'rotate', label: 'Rotar', key: 'E', run: () => { setTool('select'); setXform('rotate'); } },
@@ -2039,8 +2200,6 @@ const PUCK = [
     { k: 'hide', label: 'Ocultar', run: hideSelection },
     { k: 'show', label: 'Mostrar todo', run: unhideAll },
     { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
-    { k: 'symm', label: 'Simetría', soon: true },
-    { k: 'measure', label: 'Distancia', soon: true },
   ],
 ];
 // Menú de visualización (Espacio o Ctrl+Shift+clic), como el marking menu de Alias
@@ -2058,12 +2217,15 @@ const DISPLAY = [[
   { k: 'model', label: 'Toggle Model', run: toggleModel },
 ]];
 
+// Los menús radiales se ven como un carrusel en 3D: un anillo de esferas visto desde arriba (elipse),
+// las de delante más grandes que las de atrás, y las que están cerca del ratón crecen.
+const RADIAL_TILT = 0.6;   // achatamiento vertical del anillo (vista elevada)
 function makeRadial(rings, radii) {
   const el = document.createElement('div');
   el.className = 'puck'; el.hidden = true;
-  const R = radii[radii.length - 1] + 48;
+  const R = radii[radii.length - 1] + 48, K = RADIAL_TILT;
   el.innerHTML = `<svg class="puck-lines" viewBox="${-R} ${-R} ${2 * R} ${2 * R}" width="${2 * R}" height="${2 * R}" style="left:${-R}px;top:${-R}px">
-      ${radii.map((r) => `<circle r="${r}" />`).join('')}<line id="" x1="0" y1="0" x2="0" y2="0" /></svg>
+      ${radii.map((r) => `<ellipse rx="${r}" ry="${r * K}" />`).join('')}<line x1="0" y1="0" x2="0" y2="0" /></svg>
     <div class="puck-center"><b></b><span></span></div>`;
   document.body.append(el);
   const line = el.querySelector('line'), cName = el.querySelector('.puck-center b'), cHint = el.querySelector('.puck-center span');
@@ -2073,12 +2235,19 @@ function makeRadial(rings, radii) {
     const b = document.createElement('button');
     b.className = 'puck-item' + (it.soon ? ' soon' : '');
     b.innerHTML = `<i>${icon(it.k)}</i><span>${it.label}</span>`;
-    b.style.left = Math.cos(a) * r + 'px'; b.style.top = Math.sin(a) * r + 'px';
+    const x = Math.cos(a) * r, y = Math.sin(a) * r * K, depth = (Math.sin(a) + 1) / 2;   // 1 = delante (abajo)
+    b.style.left = x + 'px'; b.style.top = y + 'px';
+    b.style.zIndex = String(10 + Math.round(depth * 80));
     b.setAttribute('aria-label', it.label);
     el.append(b);
-    items.push({ it, b, a, ri, x: Math.cos(a) * r, y: Math.sin(a) * r });
+    items.push({ it, b, a, ri, x, y, base: 0.74 + 0.34 * depth });
   }));
   const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, sticky: false };
+  const magnify = (mx, my) => items.forEach((x) => {
+    const d = mx == null ? 1e9 : Math.hypot(x.x - mx, x.y - my);
+    const s = x.base * (1 + 0.4 * Math.exp(-(d * d) / (2 * 45 * 45))) * (x === st.hover ? 1.12 : 1);
+    x.b.style.setProperty('--s', s.toFixed(3));
+  });
   st.highlight = (h) => {
     st.hover = h;
     items.forEach((x) => x.b.classList.toggle('on', x === h));
@@ -2087,19 +2256,20 @@ function makeRadial(rings, radii) {
     cHint.textContent = h ? (h.it.soon ? 'próximamente' : h.it.key || '') : 'suelta sobre una opción';
   };
   st.pickAt = (x, y) => {
-    const dx = x - st.at.x, dy = y - st.at.y, d = Math.hypot(dx, dy);
-    if (d < 42) return st.highlight(null);
+    const dx = x - st.at.x, dy = y - st.at.y, d = Math.hypot(dx, dy / K);   // distancia "desachatada"
+    if (d < 42) { st.highlight(null); magnify(dx, dy); return; }
     const ri = radii.length === 1 || d < (radii[0] + radii[1]) / 2 ? 0 : 1;
-    const ring = items.filter((x) => x.ri === ri), ang = Math.atan2(dy, dx);
+    const ring = items.filter((x) => x.ri === ri), ang = Math.atan2(dy / K, dx);
     let best = null, bd = 1e9;
     for (const x of ring) { const da = Math.abs(Math.atan2(Math.sin(ang - x.a), Math.cos(ang - x.a))); if (da < bd) { bd = da; best = x; } }
     st.highlight(best);
+    magnify(dx, dy);
   };
   st.show = (x, y) => {
     const m = R * 0.9;
-    st.at = { x: Math.min(innerWidth - m, Math.max(m, x)), y: Math.min(innerHeight - m, Math.max(m, y)) };
+    st.at = { x: Math.min(innerWidth - m, Math.max(m, x)), y: Math.min(innerHeight - m * K - 30, Math.max(m * K + 30, y)) };
     el.style.left = st.at.x + 'px'; el.style.top = st.at.y + 'px';
-    el.hidden = false; st.open = true; st.sticky = false; st.highlight(null);
+    el.hidden = false; st.open = true; st.sticky = false; st.highlight(null); magnify(null);
   };
   st.close = (run) => {
     if (!st.open) return;
@@ -2113,8 +2283,8 @@ function makeRadial(rings, radii) {
   });
   return st;
 }
-const puck = makeRadial(PUCK, [96, 178]);
-const disp = makeRadial(DISPLAY, [132]);
+const puck = makeRadial(PUCK, [112, 232]);
+const disp = makeRadial(DISPLAY, [150]);
 let lastPtr = { x: innerWidth / 2, y: innerHeight / 2 };
 addEventListener('pointermove', (e) => {
   lastPtr = { x: e.clientX, y: e.clientY };
@@ -2180,6 +2350,7 @@ function renderFrame(now) {
   snapRing.quaternion.copy(camera.quaternion);
   snapRing.scale.setScalar(camera.position.distanceTo(snapRing.position) * 0.06);
   syncPivotMarkers();
+  scaleHandles();
   renderer.shadowMap.needsUpdate = true;
   if (carousel) renderCarousel(now); else panes().forEach(renderPane);
   scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
