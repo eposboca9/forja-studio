@@ -1043,6 +1043,16 @@ document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('clic
   $('panel').classList.add('show');
   $(b.dataset.goto).scrollIntoView({ block: 'start', behavior: 'smooth' });
 }));
+// Bordes que muestran los menús ocultos (la losa de propiedades sigue su propia regla, abajo)
+const NEAR = 90;
+function revealEdges(x, y) {
+  app.classList.toggle('near-top', y < NEAR);
+  app.classList.toggle('near-left', x < NEAR);
+  app.classList.toggle('near-right', x > innerWidth - NEAR || $('panel').classList.contains('show') || pinned);
+  app.classList.toggle('near-bottom', y > innerHeight - NEAR * 0.7);
+}
+addEventListener('pointermove', (e) => { if (!e.buttons) revealEdges(e.clientX, e.clientY); });
+document.addEventListener('pointerleave', () => revealEdges(innerWidth / 2, innerHeight / 2));
 addEventListener('pointermove', (e) => {
   if (pinned) return;
   const r = view.getBoundingClientRect(), panel = $('panel'), tools = $('tools');

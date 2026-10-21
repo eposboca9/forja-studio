@@ -361,12 +361,35 @@
   .top .seg.theme { margin-left: 4px; }
 
   .mat img, .mat .ph, :root[data-theme="dark"] .mat img { background: transparent; box-shadow: none; mix-blend-mode: normal; opacity: 1; }
+
+  /* Solo lo indispensable: cada borde de la pantalla esconde sus menús y los muestra al acercar el ratón */
+  .reveal-top > *, .tools, .wall-right, .status, .hint, .pane-head {
+    transition: opacity .25s ease, transform .25s ease;
+  }
+  .reveal-top > *, .pane-head { opacity: 0; pointer-events: none; transform: translateY(-6px); }
+  .tools, .app.auto .tools, .app.auto .tools.show { opacity: 0; pointer-events: none; transform: translateX(-8px); }
+  .app.near-left .tools, .app.near-left .tools.show { opacity: 1; pointer-events: auto; transform: none; }
+  .wall-right { opacity: 0; pointer-events: none; transform: translateX(8px); }
+  .status, .hint { opacity: 0; pointer-events: none; transform: translateY(6px); }
+  .app.near-top .reveal-top > *, .app.near-top .pane-head { opacity: 1; pointer-events: auto; transform: none; }
+  .app.near-left .tools { opacity: 1; pointer-events: auto; transform: none; }
+  .app.near-right .wall-right { opacity: 1; pointer-events: auto; transform: none; }
+  .app.near-bottom .status, .app.near-bottom .hint { opacity: 1; transform: none; }
+  .app.near-bottom .status { pointer-events: auto; }
+  .brand { opacity: .55; transition: opacity .25s; }
+  .app.near-top .brand { opacity: 1; }
+  .reveal-top { display: contents; }
+  @media (prefers-reduced-motion: reduce) { .reveal-top > *, .tools, .wall-right, .status, .hint, .pane-head { transition: none; } }
+
+  .hint, :root[data-theme="dark"] .hint { transform: translate(-50%, 6px); background: transparent; }
+  .app.near-bottom .hint { transform: translate(-50%, 0); }
 </style>
 </head>
 <body>
 <div class="app auto" id="app">
   <header class="top">
     <div class="brand"><span class="wordmark">FORJA</span><span class="sub">studio</span></div>
+    <div class="reveal-top" id="reveal-top">
     <span class="file">capo_concepto.forja</span>
     <span class="lbl">Seleccionar</span>
     <div class="seg pick" role="group" aria-label="Qué seleccionar">
@@ -389,6 +412,7 @@
       <button id="theme-dark" data-theme-btn="dark" aria-pressed="true" title="Fondo oscuro">Oscuro</button>
     </div>
     <span class="tag">v0.7 · propuesta</span>
+    </div>
   </header>
 
   <nav class="tools" id="tools" aria-label="Herramientas">
