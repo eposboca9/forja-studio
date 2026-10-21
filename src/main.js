@@ -36,6 +36,18 @@ const EVAL_MODES = [
 // historial de construcción: relaciones entre objetos que se recalculan solas (ver "Historial de construcción")
 const relations = [];
 let nextRelId = 1, propagating = false, toolsReady = false;
+// objetos que dependen (en cadena) de lo elegido: se pintan en rosa, como en Alias
+let depSet = new Set();
+function recomputeDeps() {
+  depSet = new Set();
+  if (!relations.length) return;
+  const q = selObjs.map((o) => o.id);
+  while (q.length) { const id = q.shift(); for (const r of relations) if (inputsOf(r).includes(id) && !depSet.has(outputOf(r))) { depSet.add(outputOf(r)); q.push(outputOf(r)); } }
+}
+function histState(o) {
+  if (depSet.has(o.id)) return 'dep';
+  return relations.length && relations.some((r) => outputOf(r) === o.id) ? 'hist' : null;
+}
 // capas y grupos de la escena (ver más abajo)
 const layers = [{ id: 1, name: 'Predeterminada', visible: true }];
 let activeLayer = 1, nextLayerId = 2;
@@ -284,14 +296,22 @@ addEventListener('pointermove', (e) => {
   const dx = e.clientX - m.x, dy = e.clientY - m.y;
   if (!m.moved) {
     if (Math.hypot(dx, dy) < 3) return;
+    const blk = historyBlockers();
+    if (blk.length) { mxDrag = null; askBreakHistory(e.clientX, e.clientY, blk); return; }
     m.moved = true;
     gizmo.dispatchEvent({ type: 'mouseDown', mode: xform });
+    if (gizmoDrag) gizmoDrag.noSnap = true;
   }
   if (xform === 'translate') {
-    const d = m.dirs[m.button], L = d.lengthSq();
+    const d = m.dirs[m.button], L = d.lengthSq(), ax = AXES[m.button];
     // si el eje apunta a la cámara casi no se ve en pantalla: entonces se usa el movimiento vertical
-    const t = L > 4 ? (dx * d.x + dy * d.y) / L : (-dy * m.depth) / m.pane.h;
-    proxy.position.copy(m.p0).addScaledVector(AXES[m.button], t);
+    let t = L > 4 ? (dx * d.x + dy * d.y) / L : (-dy * m.depth) / m.pane.h;
+    // snap combinado con la restricción del botón (como en Alias): solo se toma la componente del eje
+    const modes = snapModes(e), sn = gizmoDrag && findSnap(e.clientX, e.clientY, modes, gizmoDrag.ex);
+    if (sn) { t = sn.point.clone().sub(m.p0).dot(ax); showSnap(sn); }
+    else if (modes.grid) { const c = m.p0.dot(ax) + t; t = Math.round(c / gridStep) * gridStep - m.p0.dot(ax); showSnap({ point: m.p0.clone().addScaledVector(ax, t), kind: 'rejilla' }); }
+    else hideSnap();
+    proxy.position.copy(m.p0).addScaledVector(ax, t);
   } else if (xform === 'rotate') {
     let ang = (dx - dy) * 0.012;
     if (snapModes(mods).grid) ang = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);   // Alt: de 15 en 15 grados
@@ -308,11 +328,12 @@ addEventListener('pointerup', (e) => {
   const m = mxDrag;
   if (!m) return;
   mxDrag = null;
-  if (m.moved) { gizmo.dispatchEvent({ type: 'mouseUp', mode: xform }); return; }
+  if (m.moved) { gizmo.dispatchEvent({ type: 'mouseUp', mode: xform }); hideSnap(); return; }
   // clic sin arrastrar: elegir, como siempre
   const hit = pickAt(e);
   const how = howFor(e);
-  if (hit) applySelection([hit.cv || hit.obj], how); else if (how === 'replace' && e.button === 0) clearSelection();
+  if (hit?.cvTarget) setCvTarget(hit.cvTarget, how);
+  else if (hit) applySelection([hit.cv || hit.obj], how); else if (how === 'replace' && e.button === 0) clearSelection();
 });
 renderer.domElement.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -467,6 +488,11 @@ const edgeSelMat = LM({ color: 0xe07a1f, linewidth: 2.5 });
 // Líneas de los parches (límites de cada span), siempre visibles en el diagnóstico
 const isoMat = LM({ color: 0x4a8fe0, linewidth: 1.6 }); // líneas de parche en azul: se ven sobre cebra blanca y negra
 const isoSelMat = LM({ color: 0xe07a1f, linewidth: 1.8 });
+// Colores del historial (como Alias): verde = tiene historial de construcción, rosa = depende de lo elegido, azul = sin historial
+const isoHistMat = LM({ color: 0x2fb36b, linewidth: 1.8 });
+const isoDepMat = LM({ color: 0xff5fb0, linewidth: 1.8 });
+const curveHistMat = LM({ color: 0x2fb36b, linewidth: 2.5 });
+const curveDepMat = LM({ color: 0xff5fb0, linewidth: 2.5 });
 // Polígono de control: punteado en naranja claro; las aristas (borde de la red de una superficie), continuas en naranja oscuro
 const hullMat = new THREE.LineDashedMaterial({ color: '#ffb46b', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.85 });
 const hullEdgeMat = new THREE.LineBasicMaterial({ color: '#c2560f' });
@@ -616,7 +642,7 @@ function updateObject(obj) {
   if (obj.kind === 'surface') updateSurface(obj); else updateCurve(obj);
   rebuildHandles(obj);
   applyVisibility(obj);
-  if (!propagating && !restoring && relations.length) propagateFrom(obj);
+  if (!propagating && !restoring && relations.length && !(prefs.histLive === false && gizmoDrag)) propagateFrom(obj);
 }
 
 function updateSurface(obj) {
@@ -768,23 +794,26 @@ function rebuildHandles(obj) {
 
 function applyVisibility(obj) {
   const p = obj.parts, vis = obj.visible, sel = selObjs.includes(obj), cvMode = pickMode === 'cv';
-  p.handles.visible = p.hull.visible = vis && cvMode && !modelClean;
+  p.handles.visible = p.hull.visible = vis && cvMode && !modelClean && cvTargets.has(obj.id);
   if (obj.kind === 'mesh') {
     p.mesh.visible = vis;
   } else if (obj.kind === 'surface') {
     p.mesh.visible = vis;
     p.iso.visible = vis && $('show-iso').checked && diagMode !== 'wire' && !modelClean;
-    p.iso.material = sel ? isoSelMat : isoMat;
+    p.iso.material = sel ? isoSelMat : histState(obj) === 'dep' ? isoDepMat : histState(obj) === 'hist' ? isoHistMat : isoMat;
     p.edge.visible = vis && sel;
   } else {
     p.line.visible = vis;
-    p.line.material = sel ? curveSelMat : curveMat;
+    p.line.material = sel ? curveSelMat : histState(obj) === 'dep' ? curveDepMat : histState(obj) === 'hist' ? curveHistMat : curveMat;
     p.comb.visible = p.env.visible = vis && $('show-comb').checked && !modelClean;
   }
 }
 
 // ---------- Selección ----------
 let pickMode = 'object';
+// En modo CV solo se encienden los CVs de los objetos elegidos (como en Alias): los que estaban elegidos al pasar a CV,
+// y los que se tocan con un clic en modo CV (clic = solo ese, Shift / medio = añadir).
+const cvTargets = new Set();
 // Filtro del modo Objetos (como Pick Curves / Pick Surfaces de Alias): null = todo, 'curve' o 'surface'
 let pickFilter = null;
 const pickable = (o) => o.visible && (!pickFilter || (pickFilter === 'curve' ? o.kind === 'curve' : o.kind !== 'curve'));
@@ -794,6 +823,11 @@ const selCVs = new Map();
 
 function setPickMode(m, filter = null) {
   if (m === pickMode && filter === pickFilter) return;
+  if (m === 'cv' && pickMode !== 'cv') {
+    cvTargets.clear();
+    selObjs.filter((o) => o.kind !== 'mesh').forEach((o) => cvTargets.add(o.id));
+    if (!cvTargets.size) toast('Modo CV: haz clic en una superficie o curva para encender sus CVs (Shift: añadir otra).');
+  }
   pickMode = m; pickFilter = m === 'object' ? filter : null;
   if (pickFilter) toast(`Elegir solo ${PICK_NAMES[pickFilter]}.`);
   document.querySelectorAll('[data-pick]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pick === m)));
@@ -816,9 +850,17 @@ function applySelection(items, how) {
   }
   selectionChanged();
 }
+function setCvTarget(obj, how) {
+  if (how === 'replace') { cvTargets.clear(); cvTargets.add(obj.id); for (const [k, r] of selCVs) if (r.obj !== obj) selCVs.delete(k); }
+  else if (how === 'remove' || (how === 'toggle' && cvTargets.has(obj.id))) { cvTargets.delete(obj.id); for (const [k, r] of selCVs) if (r.obj === obj) selCVs.delete(k); }
+  else cvTargets.add(obj.id);
+  selectionChanged();
+  toast(`CVs encendidos: ${objects.filter((o) => cvTargets.has(o.id)).map((o) => o.name).join(', ') || 'ninguno'}`);
+}
 function clearSelection() { selObjs.length = 0; selCVs.clear(); selectionChanged(); }
 
 function selectionChanged() {
+  recomputeDeps();
   if (pivotEdit && (pickMode !== 'object' || !selObjs.length)) { pivotEdit = false; gizmo.setMode(xform); updateXformButtons(); }
   objects.forEach((o) => {
     applyVisibility(o);
@@ -929,7 +971,7 @@ gizmo.addEventListener('objectChange', () => {
   const mode = pivotEdit ? 'translate' : xform;
   const t = new THREE.Vector3();
   if (mode === 'translate') {
-    applySnapToProxy(g.ex);
+    if (!g.noSnap) applySnapToProxy(g.ex);
     const d = proxy.position.clone().sub(g.p0);
     g.items.forEach(({ v, orig }) => { v.x = orig.x + d.x; v.y = orig.y + d.y; v.z = orig.z + d.z; });
     g.pivots.forEach(({ o, orig }) => o.pivot.copy(orig).add(d));
@@ -999,12 +1041,33 @@ function pointCandidates(ex) {
     if (!ex.pivots?.has(o)) out.push(o.pivot);
     allCVRefs(o).forEach((r) => { const v = cvRef(r); if (!ex.cvs?.has(v)) out.push(new THREE.Vector3(v.x, v.y, v.z)); });
     if (!ex.partial?.has(o)) ((o.kind === 'curve' ? o.editPts : o.corners) || []).forEach((v) => out.push(v));
+    // "Snap al centro" (opciones del snap de curva de Alias): centro de la caja de cada curva
+    if (prefs.snapCenter && o.kind === 'curve' && o.samples?.length && !ex.partial?.has(o)) out.push(new THREE.Box3().setFromPoints(o.samples).getCenter(new THREE.Vector3()));
   }
   return out;
 }
 // Para el snap de curva: curvas y bordes de superficies, como polilíneas
 function curvePolylines(ex) {
-  return objects.filter((o) => o.visible && o.kind !== 'mesh' && !ex.full?.has(o) && !ex.partial?.has(o)).map((o) => (o.kind === 'curve' ? o.samples : o.edgePts));
+  const out = [];
+  for (const o of objects.filter((o) => o.visible && o.kind !== 'mesh' && !ex.full?.has(o) && !ex.partial?.has(o))) {
+    if (o.kind === 'curve') { if (o.samples) out.push(o.samples); continue; }
+    const e = o.edgePts || [], E = (e.length - 1) / 4;   // el contorno son 4 bordes seguidos
+    for (let k = 0; k < 4 && E >= 1; k++) out.push(e.slice(k * E, k * E + E + 1));
+  }
+  return out;
+}
+// Divisiones (Alias: "Snap Divisions"): con 2 se puede pegar al punto medio, con 3 a los tercios, etc. (por longitud)
+function divisionPoints(line, n) {
+  const acc = [0];
+  for (let i = 1; i < line.length; i++) acc.push(acc[i - 1] + line[i].distanceTo(line[i - 1]));
+  const L = acc[acc.length - 1], out = [];
+  for (let k = 0; k <= n; k++) {
+    const t = (k / n) * L;
+    let i = 1; while (i < acc.length - 1 && acc[i] < t) i++;
+    const f = (t - acc[i - 1]) / ((acc[i] - acc[i - 1]) || 1);
+    out.push(line[i - 1].clone().lerp(line[i], Math.min(1, Math.max(0, f))));
+  }
+  return out;
 }
 function findSnap(x, y, modes, ex = {}) {
   if (!modes.point && !modes.curve) return null;
@@ -1019,6 +1082,15 @@ function findSnap(x, y, modes, ex = {}) {
       if (!s) continue;
       const d = Math.hypot(s.x - x, s.y - y);
       if (d < bestD) { bestD = d; best = { point: q.clone(), kind: 'punto' }; }
+    }
+  }
+  if (!best && modes.curve && (prefs.snapDiv || 0) >= 2) {
+    let bd = SNAP_PX * 1.6;
+    for (const line of curvePolylines(ex)) for (const q of divisionPoints(line, prefs.snapDiv)) {
+      const s = scr(q);
+      if (!s) continue;
+      const d = Math.hypot(s.x - x, s.y - y);
+      if (d < bd) { bd = d; best = { point: q, kind: `curva · 1/${prefs.snapDiv}` }; }
     }
   }
   if (!best && modes.curve) {
@@ -1097,10 +1169,14 @@ function pickAt(e) {
   const live = objects.filter((o) => o.visible);
   if (pickMode === 'cv') {
     // de los CVs tocados, el más cercano al rayo (al cursor en pantalla), no el más cercano a la cámara
-    const hits = ray.intersectObjects(live.flatMap((o) => o.parts.handles.children), false);
+    const hits = ray.intersectObjects(live.filter((o) => cvTargets.has(o.id)).flatMap((o) => o.parts.handles.children), false);
     let best = null, bd = Infinity;
     for (const h of hits) { const d = ray.ray.distanceSqToPoint(h.object.position) / h.object.scale.x ** 2; if (d < bd) { bd = d; best = h; } }
-    return best ? { cv: best.object.userData } : null;
+    if (best) return { cv: best.object.userData };
+    // si no se tocó un CV, el objeto bajo el cursor enciende (o apaga) sus CVs
+    ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
+    const oh = ray.intersectObjects(live.filter((o) => o.kind !== 'mesh').map((o) => pickTarget(o)), false)[0];
+    return oh ? { cvTarget: oh.object.userData.obj } : null;
   }
   ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
   const hit = ray.intersectObjects(live.filter(pickable).map((o) => pickTarget(o)), false)[0];
@@ -1275,6 +1351,7 @@ addEventListener('pointerup', (e) => {
   }
   if (gizmo.axis && e.button === 0) return; // el gizmo solo usa el botón izquierdo
   const hit = pickAt(e);
+  if (hit?.cvTarget) { setCvTarget(hit.cvTarget, how); return; }
   if (hit) {
     applySelection([hit.cv || hit.obj], how);
     if ($('click-pivot').checked) setPivot(hit.point || (() => { const c = cvRef(hit.cv); return new THREE.Vector3(c.x, c.y, c.z); })());
@@ -1297,7 +1374,7 @@ function boxSelect(d, e, how) {
   const live = objects.filter((o) => o.visible);
   let items;
   if (pickMode === 'cv') {
-    items = live.flatMap(allCVRefs).filter((ref) => { const q = cvRef(ref); return inside(q.x, q.y, q.z); });
+    items = live.filter((o) => cvTargets.has(o.id)).flatMap(allCVRefs).filter((ref) => { const q = cvRef(ref); return inside(q.x, q.y, q.z); });
   } else {
     items = live.filter(pickable).filter((o) => {
       const a = pickTarget(o).geometry.attributes.position;
@@ -2631,7 +2708,13 @@ const PUCK_DEFAULT = {
   ai: ['aiNew', 'aiPhoto', 'aiEx', 'frame', 'undo', 'layers'],
 };
 const PUCK_MODULES = { diag: 'Modelado', render: 'Visu', ai: 'IA' };
-const puckIds = (mod) => (prefs.puck?.[mod] || PUCK_DEFAULT[mod]).filter((id) => PUCK_CMDS[id]);
+// qué comandos caben en el Puck de cada módulo (VISU solo visualización; nada que cambie de módulo sin querer)
+const CMD_MODS = {
+  diag: ['curve', 'surface', 'edit', 'pick', 'xform', 'dup', 'show', 'del', 'eval', 'undo', 'frame', 'layers', 'modules', 'prefs'],
+  render: ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'render', 'frame', 'prefs'],
+  ai: ['aiNew', 'aiPhoto', 'aiEx', 'undo', 'frame', 'layers', 'prefs'],
+};
+const puckIds = (mod) => (prefs.puck?.[mod] || PUCK_DEFAULT[mod]).filter((id) => PUCK_CMDS[id] && CMD_MODS[mod].includes(id));
 // Marking menus (Ctrl+Shift + botón del ratón), con la misma forma pero otra información
 const PICK_MM = [
   { k: 'object', label: 'Objeto', key: 'O', run: () => setPickMode('object'), sub: [
@@ -2727,11 +2810,13 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
   };
   st.pickAt = (x, y) => {
     const dx = x - st.at.x, dy = y - st.at.y, d = Math.hypot(dx, dy / K), ang = Math.atan2(dy / K, dx);
-    if (d < 44) { st.highlight(null); st.active = null; magnify(dx, dy); return; }
-    if (d < r + 38 || !st.active?.subs.length) st.highlight(nearest(mains, ang)[0]);
+    // menos sensible: solo se marca una esfera si el cursor está realmente cerca de ella (no solo en su dirección)
+    const near = (o, lim) => o && Math.hypot(o.x - dx, o.y - dy) < lim;
+    if (d < 52) { st.highlight(null); st.active = null; magnify(dx, dy); return; }
+    if (d < r + 38 || !st.active?.subs.length) { const m = nearest(mains, ang)[0]; st.highlight(near(m, 66) ? m : null); }
     else {
-      const [sub, da] = nearest(st.active.subs, ang);
-      st.highlight(da < 44 / r2 + 0.12 ? sub : st.active);
+      const sub = nearest(st.active.subs, ang)[0];
+      st.highlight(near(sub, 44) ? sub : near(st.active, 70) ? st.active : null);
     }
     magnify(dx, dy);
   };
@@ -2768,7 +2853,12 @@ function getPuck() {
 const pickMenu = makeRadial(PICK_MM, { r: 128, title: 'Selección' });
 const xformMenu = makeRadial(XFORM_MM, { r: 128, title: 'Transformar' });
 const disp = makeRadial(DISPLAY_MM, { r: 140, title: 'Visualización' });
-const MENUS = [null, pickMenu, xformMenu, disp];
+// En VISU los menús solo llevan cosas de visualización (nada de modelado ni de IA, que cambiarían de módulo)
+const VISU_MM = ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'frame'].map((id) => PUCK_CMDS[id])
+  .concat([{ k: 'screen', label: 'Pantalla', run: fullscreen, sub: [{ k: 'full', label: 'Completa', run: fullscreen }, { k: 'panel', label: 'Panel', run: () => setPinned(!pinned) }] }]);
+const dispVisu = makeRadial(VISU_MM, { r: 140, title: 'Visu' });
+const MENUS = [null, pickMenu, xformMenu, disp, dispVisu];
+const menuFor = (button) => (layout === 'render' ? dispVisu : [pickMenu, xformMenu, disp][button] || disp);
 getPuck();
 let lastPtr = { x: innerWidth / 2, y: innerHeight / 2 };
 addEventListener('pointermove', (e) => {
@@ -2799,14 +2889,14 @@ function bindKey(code, getMenu) {
   }, true);
 }
 bindKey('Tab', getPuck);
-bindKey('Space', () => disp);
+bindKey('Space', () => menuFor(2));
 addEventListener('keydown', (e) => { if (e.key === 'Escape') MENUS.forEach((m) => m.close(false)); }, true);
 let mouseMenu = null;
 addEventListener('pointerdown', (e) => {
   if (!(e.ctrlKey && e.shiftKey) || e.target !== renderer.domElement || carousel) return;
   e.stopImmediatePropagation(); e.preventDefault();
   MENUS.forEach((m) => m.close(false));
-  mouseMenu = [pickMenu, xformMenu, disp][e.button] || disp;
+  mouseMenu = menuFor(e.button);
   mouseMenu.show(e.clientX, e.clientY);
 }, true);
 addEventListener('pointerup', (e) => {
@@ -3092,6 +3182,7 @@ function openPrefs(tab = 'ui') {
   d.querySelectorAll('[name="pref-eval"]').forEach((r) => (r.checked = r.value === prefs.evalUI));
   $('pref-xform').value = prefs.xform;
   if (tab === 'puck') { $('pk-mod').value = layout === 'split' ? 'diag' : layout; renderPuckEditor(); }
+  d.querySelectorAll('[data-pref-snap]').forEach((c) => (c.checked = !!snapToggles[c.dataset.prefSnap]));
   if (!d.open) d.showModal();
 }
 // Editor del Puck: lista de esferas del módulo elegido, con subir / bajar / quitar y añadir de la biblioteca
@@ -3106,7 +3197,7 @@ function renderPuckEditor() {
   $('pk-list').querySelectorAll('[data-up]').forEach((b) => b.addEventListener('click', () => { const i = +b.dataset.up; if (i > 0) { [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; save(ids); } }));
   $('pk-list').querySelectorAll('[data-down]').forEach((b) => b.addEventListener('click', () => { const i = +b.dataset.down; if (i < ids.length - 1) { [ids[i + 1], ids[i]] = [ids[i], ids[i + 1]]; save(ids); } }));
   $('pk-list').querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => { if (ids.length > 1) { ids.splice(+b.dataset.del, 1); save(ids); } }));
-  const rest = Object.keys(PUCK_CMDS).filter((id) => !ids.includes(id));
+  const rest = CMD_MODS[mod].filter((id) => PUCK_CMDS[id] && !ids.includes(id));
   $('pk-add').innerHTML = rest.map((id) => `<option value="${id}">${esc(PUCK_CMDS[id].label)}</option>`).join('');
   $('pk-add-btn').disabled = !rest.length || ids.length >= 10;
   $('pk-add-btn').onclick = () => { if ($('pk-add').value && ids.length < 10) save([...ids, $('pk-add').value]); };
@@ -3121,7 +3212,17 @@ function initPrefs() {
   d.querySelectorAll('[data-ptab]').forEach((b) => b.addEventListener('click', () => openPrefs(b.dataset.ptab)));
   d.querySelectorAll('[name="pref-eval"]').forEach((r) => r.addEventListener('change', () => { prefs.evalUI = r.value; savePrefs(); updateEvalUI(); }));
   $('pref-xform').addEventListener('change', (e) => { prefs.xform = e.target.value; savePrefs(); attachGizmo(); });
+  $('pref-histlive').checked = prefs.histLive !== false;
+  $('pref-histlive').addEventListener('change', (e) => { prefs.histLive = e.target.checked; savePrefs(); });
   $('pk-mod').addEventListener('change', renderPuckEditor);
+  // Snap: rejilla, divisiones de curva, centro y snap fijo
+  $('pref-grid').value = String(gridStep);
+  $('pref-grid').addEventListener('change', (e) => { gridStep = +e.target.value; $('grid-step').value = e.target.value; });
+  $('pref-div').value = prefs.snapDiv || 0;
+  $('pref-div').addEventListener('change', (e) => { prefs.snapDiv = Math.max(0, Math.min(100, Math.round(+e.target.value || 0))); e.target.value = prefs.snapDiv; savePrefs(); });
+  $('pref-center').checked = !!prefs.snapCenter;
+  $('pref-center').addEventListener('change', (e) => { prefs.snapCenter = e.target.checked; savePrefs(); });
+  d.querySelectorAll('[data-pref-snap]').forEach((c) => c.addEventListener('change', () => { if (snapToggles[c.dataset.prefSnap] !== c.checked) $('snap-' + c.dataset.prefSnap).click(); }));
   $('prefs-close').addEventListener('click', () => d.close());
   d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
 }
@@ -3204,6 +3305,7 @@ function applyRelation(r) {
   catch (e) { console.warn(e); toast(`${REL_NAMES[r.type]}: no se pudo recalcular (${e.message})`); return false; }
   const was = propagating;
   propagating = true; updateObject(out); propagating = was;
+  if (r === arrowsFor && !arrowDrag) updateRelArrows();
   return true;
 }
 function propagateFrom(obj) {
@@ -3243,8 +3345,8 @@ const saveToolDef = () => { prefs.tools = toolDef; savePrefs(); };
 // --- Ventana de opciones de la herramienta: un desenfoque de lo que hay detrás, sin marco, con los ajustes encima ---
 const TW = {
   spec: null,
-  show(spec) { this.spec = spec; this.render(); $('toolwin').hidden = false; },
-  hide() { this.spec = null; $('toolwin').hidden = true; },
+  show(spec) { this.spec = spec; this.render(); $('toolwin').hidden = false; updateRelArrows(); },
+  hide() { this.spec = null; $('toolwin').hidden = true; updateRelArrows(); },
   render() {
     const sp = this.spec;
     if (!sp) return;
@@ -3333,12 +3435,26 @@ function surfaceEdgeAt(e) {
   if (!hit?.uv) return null;
   return { obj: hit.object.userData.obj, edge: HX.nearestEdge(hit.uv.x, hit.uv.y) };
 }
+// Opciones de control (como el "Control Options" de Alias)
+const CONTROL_OPTS = () => [
+  { type: 'check', label: 'Crear historial', get: () => toolDef.createHist !== false, set: (v) => { toolDef.createHist = v; saveToolDef(); } },
+  { type: 'check', label: 'Comprobar continuidad', get: () => toolDef.contCheck !== false, set: (v) => { toolDef.contCheck = v; saveToolDef(); } },
+];
+// sin "Crear historial", la forma se queda pero no sigue a las originales
+function maybeDropHistory(r) {
+  if (toolDef.createHist !== false) return false;
+  const i = relations.indexOf(r);
+  if (i >= 0) relations.splice(i, 1);
+  renderHistory();
+  return true;
+}
 const EDGE_OPS = {
   align: {
     title: 'Align', steps: ['1 · Clic cerca del borde de la superficie que se ajusta (verde)', '2 · Clic en el borde de la superficie maestra (azul)'],
     fields: () => [
       { type: 'seg', label: 'Continuidad', opts: [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.alignCont, set: (v) => { toolDef.alignCont = v; saveToolDef(); } },
       { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => toolDef.alignTension, set: (v) => { toolDef.alignTension = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) },
+      ...CONTROL_OPTS(),
       { type: 'html', html: () => '<span class="tw-note">Al elegir la maestra sale G0–G3 junto al cursor (o pulsa 1–4).</span>' }],
     async afterPick(i, p, e) {
       if (i === 1) {
@@ -3355,6 +3471,7 @@ const EDGE_OPS = {
       { type: 'seg', label: 'Lado 1', opts: [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.blendA, set: (v) => { toolDef.blendA = v; saveToolDef(); } },
       { type: 'seg', label: 'Lado 2', opts: [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.blendB, set: (v) => { toolDef.blendB = v; saveToolDef(); } },
       { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => toolDef.blendTension, set: (v) => { toolDef.blendTension = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) },
+      ...CONTROL_OPTS(),
       { type: 'html', html: () => '<span class="tw-note">En cada borde sale la continuidad junto al cursor (o pulsa 1–4).</span>' }],
     async afterPick(i, p, e) {
       const c = await quickPick(e.clientX, e.clientY, `Continuidad lado ${i + 1}`, G_OPTS(0, 3), i ? toolDef.blendB : toolDef.blendA);
@@ -3378,6 +3495,15 @@ function startEdgeOp(type) {
 }
 // tras crear (o cancelar) la herramienta sigue activa para la siguiente unión, como en Alias
 function restartEdgeOp() { if (!edgeOp) return; edgeOp.picks = []; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint(); TW.show(edgeSpec()); }
+// tras crear: se ve la ventana de lo creado (con sus flechas) y la herramienta sigue lista para la siguiente unión
+function continueEdgeOp(r) {
+  if (!edgeOp) return;
+  edgeOp.picks = []; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint();
+  const sp = relSpec(r);
+  sp.actions = [{ label: 'Quitar historial', run: () => removeRelation(r.id) }, { label: 'Terminar', primary: true, run: () => { setTool('select'); TW.hide(); } }];
+  sp.hint = () => 'Arrastra las flechas: azul = tensión, naranja = forma · clic en otro borde = nueva unión';
+  TW.show(sp);
+}
 function endEdgeOp() { edgeOp = null; [0, 1, 2].forEach((k) => markEdge(k, null)); if (TW.spec && !TW.spec.rel) TW.hide(); }
 let edgeBusy = false;
 async function edgeClick(e) {
@@ -3386,6 +3512,7 @@ async function edgeClick(e) {
   if (!p) return toast('Haz clic sobre una superficie, cerca del borde que quieres.');
   if (edgeOp.picks[0]?.obj === p.obj) return toast('Elige un borde de otra superficie.');
   const i = edgeOp.picks.length;
+  if (i === 0 && TW.spec?.rel) TW.show(edgeSpec());
   markEdge(i, p.obj, p.edge);
   edgeOp.picks.push(p);
   updateHint(); TW.render();
@@ -3408,8 +3535,9 @@ function createAlign(s, m, cont = toolDef.alignCont) {
     addRelation(r);
     applyRelation(r);
   } catch (err) { console.warn(err); toast(`Align no se pudo hacer: ${err.message}`); return restartEdgeOp(); }
-  toast(`Align G${cont}: ${s.obj.name} sigue a ${m.obj.name}. Si mueves ${m.obj.name}, ${s.obj.name} se ajusta sola.`);
-  restartEdgeOp();
+  if (maybeDropHistory(r)) { toast(`Align G${cont} hecho, sin historial`); return restartEdgeOp(); }
+  toast(`Align G${cont}: ${s.obj.name} sigue a ${m.obj.name}. Ajusta con las flechas; clic en otro borde para otro Align.`);
+  continueEdgeOp(r);
 }
 function createBlend(a, b, cA = toolDef.blendA, cB = toolDef.blendB) {
   checkpoint();
@@ -3420,8 +3548,9 @@ function createBlend(a, b, cA = toolDef.blendA, cB = toolDef.blendB) {
   r.out = o.id;
   addRelation(r);
   const exact = HX.blendCompatible(a.obj.data, a.edge, b.obj.data, b.edge);
-  toast(`${o.name}: G${cA} / G${cB}${exact ? '' : ' (bordes distintos: uno se remuestreó, mira el diagnóstico)'}`);
-  restartEdgeOp();
+  if (maybeDropHistory(r)) { toast(`${o.name}: G${cA} / G${cB}, sin historial`); return restartEdgeOp(); }
+  toast(`${o.name}: G${cA} / G${cB}${exact ? '' : ' (bordes distintos: uno se remuestreó, mira el diagnóstico)'} · ajusta con las flechas`);
+  continueEdgeOp(r);
 }
 function offsetSelection() {
   const src = selObjs.filter((o) => o.kind === 'surface');
@@ -3499,7 +3628,9 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && extrudeDrag) canc
 
 // --- Ventana de opciones de una relación ya creada (al elegir su resultado se abre para modificarla) ---
 function relSpec(r, group = [r]) {
-  const redo = () => { group.forEach((x) => { if (applyRelation(x)) { const out = byId(outputOf(x)); if (out) propagateFrom(out); } }); scheduleHistoryDiag(); renderHistory(); };
+  const apply = () => { group.forEach((x) => { x.pending = false; if (applyRelation(x)) { const out = byId(outputOf(x)); if (out) propagateFrom(out); } }); scheduleHistoryDiag(); renderHistory(); };
+  // "Auto Update" de Alias: apagado, los cambios esperan al botón Actualizar
+  const redo = () => { if (r.auto === false) { group.forEach((x) => (x.pending = true)); TW.render(); return; } apply(); };
   const set = (k, v) => { checkpoint(); group.forEach((x) => (x[k] = v)); redo(); };
   const live = (k) => (v) => { group.forEach((x) => (x[k] = v)); redo(); };
   const G = (from, to) => [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']].filter(([v]) => v >= from && v <= to);
@@ -3527,9 +3658,144 @@ function relSpec(r, group = [r]) {
     title += ` · ${nm(r.src)}`;
     fields.push({ type: 'seg', label: 'Plano', opts: [['x', 'YZ'], ['y', 'XZ'], ['z', 'XY']], get: () => r.plane || 'x', set: (v) => { toolDef.mirrorPlane = v; saveToolDef(); set('plane', v); } });
   } else title += ` · ${r.type === 'loft' ? r.srcs.length + ' curvas' : nm(r.src)}`;
-  if (r.type === 'align' || r.type === 'blend') fields.push({ type: 'html', html: () => relDiag(r), diagOf: r.id });
-  return { title, rel: r, fields, actions: [{ label: 'Quitar historial', run: () => removeRelation(r.id) }, { label: 'Cerrar', primary: true, run: () => TW.hide() }] };
+  if ((r.type === 'align' || r.type === 'blend') && toolDef.contCheck !== false) fields.push({ type: 'html', html: () => relDiag(r), diagOf: r.id });
+  fields.push({ type: 'check', label: 'Actualizar al momento', get: () => r.auto !== false, set: (v) => { group.forEach((x) => (x.auto = v)); if (v && r.pending) apply(); } });
+  const actions = [{ label: 'Quitar historial', run: () => removeRelation(r.id) }, { label: 'Cerrar', primary: true, run: () => TW.hide() }];
+  if (r.auto === false) actions.splice(1, 0, { label: r.pending ? 'Actualizar •' : 'Actualizar', primary: !!r.pending, run: () => { apply(); TW.render(); } });
+  return { title, rel: r, fields, actions };
 }
+// --- Flechas para manipular cada herramienta en la vista (como los manipuladores de Alias) ---
+// Align / Blend: una flecha en la 1.ª fila de CVs (tensión) y otra en la 2.ª (forma, sin romper G2).
+// Extruir: flecha en el extremo (distancia). Offset: flecha a lo largo de la normal (distancia).
+const relArrows = new THREE.Group();
+relArrows.renderOrder = 40;
+scene.add(relArrows);
+const ARROW_COLORS = { t: '#2f7bff', s: '#ff9a1f', d: '#2fb36b' };
+function makeArrow(color) {
+  const g = new THREE.Group(), m = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.8, 10), m); shaft.position.y = 0.4;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 16), m); head.position.y = 0.95;
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.09, 14, 10), m);
+  const pick = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.2, 8), new THREE.MeshBasicMaterial({ visible: false })); pick.position.y = 0.55;
+  [shaft, head, ball].forEach((x) => { x.renderOrder = 41; });
+  g.add(shaft, head, ball, pick);
+  g.userData.pick = pick;
+  return g;
+}
+const mid = (arr) => arr[Math.floor(arr.length / 2)];
+const v3 = (q) => new THREE.Vector3(q.x, q.y, q.z);
+// manijas de la relación abierta: { pos, dir, kind: 't' | 's' | 'd', drag(delta, start) }
+function relHandles(r) {
+  const out = byId(outputOf(r));
+  if (!out || out.kind !== 'surface') return [];
+  const d = out.data, H = [];
+  const rows = (edge, cont, tKey, sKey) => {
+    const p0 = v3(mid(HX.row(d, edge, 0))), p1 = v3(mid(HX.row(d, edge, 1)));
+    const l1 = p1.distanceTo(p0) || 1e-3;
+    if (cont >= 1) H.push({ pos: p1, dir: p1.clone().sub(p0).normalize(), kind: 't', label: 'tensión',
+      start: () => r[tKey] ?? r.tension, drag: (delta, s0) => { r[tKey] = Math.max(0.05, s0 * (1 + delta / l1)); } });
+    if (cont >= 2) {
+      const p2 = v3(mid(HX.row(d, edge, 2))), l2 = p2.distanceTo(p1) || 1e-3;
+      H.push({ pos: p2, dir: p2.clone().sub(p1).normalize(), kind: 's', label: 'forma',
+        start: () => r[sKey] || 0, drag: (delta, s0) => { r[sKey] = s0 + delta / l2; } });
+    }
+  };
+  if (r.type === 'align') rows(r.sEdge, r.cont, 'tension', 'shape');
+  else if (r.type === 'blend') { rows('v0', r.contA ?? r.cont, 'tensionA', 'shapeA'); rows('v1', r.contB ?? r.cont, 'tensionB', 'shapeB'); }
+  else if (r.type === 'extrude') {
+    const top = d.cvs[1], bot = d.cvs[0], p = v3(mid(top)), dir = p.clone().sub(v3(mid(bot))).normalize();
+    const sgn = Math.sign(r.dist) || 1;
+    H.push({ pos: p, dir: dir.lengthSq() ? dir : new THREE.Vector3(0, 1, 0), kind: 'd', label: 'distancia', start: () => r.dist, drag: (delta, s0) => { r.dist = Math.round((s0 + delta * sgn) * 100) / 100 || 0.01; } });
+  } else if (r.type === 'offset') {
+    const src = byId(r.src);
+    if (!src) return H;
+    const i = Math.floor(d.cvs.length / 2), j = Math.floor(d.cvs[0].length / 2), p = v3(d.cvs[i][j]), q = v3(src.data.cvs[i][j]);
+    let dir = p.clone().sub(q);
+    const sgn = Math.sign(r.dist) || 1;
+    dir = dir.lengthSq() > 1e-10 ? dir.normalize().multiplyScalar(sgn) : new THREE.Vector3(0, 1, 0);
+    H.push({ pos: p, dir: dir.clone().multiplyScalar(sgn), kind: 'd', label: 'distancia', start: () => r.dist, drag: (delta, s0) => { r.dist = Math.round((s0 + delta) * 100) / 100; } });
+  }
+  return H;
+}
+let arrowsFor = null, arrowDrag = null;
+function updateRelArrows() {
+  const r = TW.spec?.rel || (extrudeDrag ? null : null);
+  arrowsFor = r && relations.includes(r) ? r : null;
+  const H = arrowsFor ? relHandles(arrowsFor) : [];
+  while (relArrows.children.length > H.length) relArrows.remove(relArrows.children[relArrows.children.length - 1]);
+  H.forEach((h, i) => {
+    let a = relArrows.children[i];
+    if (!a || a.userData.kind !== h.kind) { a = makeArrow(ARROW_COLORS[h.kind]); a.userData.kind = h.kind; if (relArrows.children[i]) relArrows.remove(relArrows.children[i]); relArrows.add(a); relArrows.children.splice(i, 0, relArrows.children.pop()); }
+    a.position.copy(h.pos);
+    a.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), h.dir);
+    a.userData.h = h;
+  });
+}
+function scaleRelArrows() {
+  for (const a of relArrows.children) a.scale.setScalar(camera.position.distanceTo(a.position) * 0.075);
+}
+// en captura sobre la ventana: así la flecha gana a la selección y a mover con los botones
+addEventListener('pointerdown', (e) => {
+  if (e.target !== renderer.domElement || !relArrows.children.length || e.button !== 0 || carousel) return;
+  setRay(e);
+  const hit = ray.intersectObjects(relArrows.children.map((a) => a.userData.pick), false)[0];
+  if (!hit) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  const a = hit.object.parent, h = a.userData.h;
+  checkpoint();
+  arrowDrag = { h, s0: h.start(), x: e.clientX, y: e.clientY, pos: h.pos.clone(), dir: h.dir.clone(), pane: paneAt(e.clientX) };
+  renderer.domElement.setPointerCapture(e.pointerId);
+}, true);
+addEventListener('pointermove', (e) => {
+  const g = arrowDrag;
+  if (!g) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  useAspect(g.pane);
+  const scr = (v) => { const q = v.clone().project(camera); return new THREE.Vector2(r.left + g.pane.x + ((q.x + 1) / 2) * g.pane.w, r.top + ((1 - q.y) / 2) * g.pane.h); };
+  const unit = camera.position.distanceTo(g.pos) * 0.1;
+  const s = scr(g.pos.clone().addScaledVector(g.dir, unit)).sub(scr(g.pos)).divideScalar(unit);
+  if (s.lengthSq() < 1e-6) return;
+  const delta = ((e.clientX - g.x) * s.x + (e.clientY - g.y) * s.y) / s.lengthSq();
+  g.h.drag(delta, g.s0);
+  if (applyRelation(arrowsFor)) { const out = byId(outputOf(arrowsFor)); if (out) propagateFrom(out); }
+  updateRelArrows();
+});
+addEventListener('pointerup', () => {
+  if (!arrowDrag) return;
+  arrowDrag = null;
+  TW.render(); renderHistory(); scheduleHistoryDiag();
+});
+// --- Aviso de Alias: transformar algo que SALE de una operación con historial rompe el historial ---
+// (mover sus entradas sí está bien: el resultado las sigue). Se pregunta antes de empezar a moverlo.
+function historyBlockers() {
+  if (!relations.length) return [];
+  const outs = new Set(relations.map(outputOf));
+  const objs = pickMode === 'cv'
+    // en modo CV, la superficie de un Align se puede retocar: sus filas del borde siguen atadas a la maestra
+    ? [...new Set([...selCVs.values()].map((r) => r.obj))].filter((o) => outs.has(o.id) && !relations.some((r) => r.type === 'align' && r.slave === o.id))
+    : selObjs.filter((o) => outs.has(o.id));
+  return objs;
+}
+async function askBreakHistory(x, y, objs) {
+  const v = await quickPick(x, y, `${objs.map((o) => o.name).join(', ')} tiene historial de construcción`,
+    [['yes', 'Quitar historial y transformar'], ['no', 'No, dejarlo']], 'no');
+  if (v !== 'yes') return false;
+  checkpoint();
+  const ids = new Set(objs.map((o) => o.id));
+  for (let i = relations.length - 1; i >= 0; i--) if (ids.has(outputOf(relations[i]))) relations.splice(i, 1);
+  renderHistory(); TW.hide();
+  toast('Historial quitado: ya puedes transformarlo');
+  return true;
+}
+// manipulador de flechas (gizmo): se intercepta antes de que empiece a arrastrar
+addEventListener('pointerdown', (e) => {
+  if (e.target !== renderer.domElement || e.button !== 0 || pivotEdit || !gizmo.axis || !gizmo.object) return;
+  const b = historyBlockers();
+  if (!b.length) return;
+  e.stopImmediatePropagation(); e.preventDefault();
+  askBreakHistory(e.clientX, e.clientY, b);
+}, true);
+
 // al elegir un solo objeto que sale de una relación, su ventana de opciones se abre para modificarla
 function syncToolWinToSelection() {
   if (tool !== 'select' || extrudeDrag) return;
@@ -3559,6 +3825,7 @@ function scheduleHistoryDiag() {
   histDiagT = setTimeout(() => document.querySelectorAll('[data-diag-of]').forEach((el) => { const r = relations.find((x) => x.id === +el.dataset.diagOf); if (r) el.innerHTML = relDiag(r); }), 250);
 }
 function renderHistory() {
+  recomputeDeps(); objects.forEach(applyVisibility);
   const box = $('hist-body');
   if (!box) return;
   if (!relations.length) {
@@ -3581,6 +3848,35 @@ function renderHistory() {
 }
 renderHistory();
 toolsReady = true;
+
+// ---------- Nudge (Alias): las flechas del teclado mueven, giran o escalan lo elegido un poquito ----------
+// El paso depende de lo cerca que esté la cámara (acercarse = pasos más finos). Shift = 10 veces más.
+// Izq/der usan el eje del mundo más parecido al "derecha" de la pantalla; arriba/abajo, el más parecido al "arriba".
+function nearestAxis(v) {
+  const a = [Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)], i = a.indexOf(Math.max(...a));
+  return AXES[i].clone().multiplyScalar(Math.sign([v.x, v.y, v.z][i]) || 1);
+}
+addEventListener('keydown', (e) => {
+  if (!e.key.startsWith('Arrow') || e.ctrlKey || e.metaKey || e.altKey || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+  if (tool !== 'select' || carousel || MENUS.some((m) => m?.open) || pivotEdit) return;
+  if (!hasTransformable()) return;
+  e.preventDefault();
+  const blk = historyBlockers();
+  if (blk.length) { askBreakHistory(lastPtr.x, lastPtr.y, blk); return; }
+  const horiz = e.key === 'ArrowLeft' || e.key === 'ArrowRight', sgn = e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 : -1;
+  const big = e.shiftKey ? 10 : 1;
+  attachGizmo();
+  gizmo.dispatchEvent({ type: 'mouseDown', mode: xform });
+  if (!gizmoDrag) return;
+  gizmoDrag.noSnap = true;
+  const ax = nearestAxis(camAxis(horiz ? 1 : 0, horiz ? 0 : 1));
+  if (xform === 'translate') proxy.position.addScaledVector(ax, sgn * big * camera.position.distanceTo(proxy.position) * 0.004);
+  else if (xform === 'rotate') proxy.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(horiz ? new THREE.Vector3(0, 1, 0) : nearestAxis(camAxis(1, 0)), sgn * THREE.MathUtils.degToRad(big)));
+  else proxy.scale.multiplyScalar(1 + sgn * 0.01 * big);
+  gizmo.dispatchEvent({ type: 'objectChange' });
+  gizmo.dispatchEvent({ type: 'mouseUp', mode: xform });
+  $('st-snap').textContent = xform === 'translate' ? `Nudge ${'XYZ'[AXES.findIndex((a) => Math.abs(a.dot(ax)) > 0.5)]}` : xform === 'rotate' ? `Nudge ${big}°` : `Nudge ${big}%`;
+});
 
 // ---------- Dibujo de cada cuadro ----------
 function renderPane(p) {
@@ -3606,7 +3902,7 @@ const xfPrompt = document.createElement('div');
 xfPrompt.className = 'xf-prompt'; xfPrompt.hidden = true;
 document.body.append(xfPrompt);
 function updateXfPrompt() {
-  const on = mouseXform && prefs.xform !== 'gizmo' && tool === 'select' && !pivotEdit && !carousel && !MENUS.some((m) => m.open) && hasTransformable();
+  const on = $('quickpick').hidden && mouseXform && prefs.xform !== 'gizmo' && tool === 'select' && !pivotEdit && !carousel && !MENUS.some((m) => m.open) && hasTransformable();
   xfPrompt.hidden = !on;
   if (!on) return;
   const txt = xform === 'scale' ? 'ESCALAR <i>izq</i> todo · <i>medio</i> Y · <i>der</i> X Z'
@@ -3650,6 +3946,7 @@ function renderFrame(now) {
   snapRing.scale.setScalar(camera.position.distanceTo(snapRing.position) * 0.06);
   syncPivotMarkers();
   scaleHandles();
+  if (relArrows.children.length) scaleRelArrows();
   renderer.shadowMap.needsUpdate = true;
   if (carousel) renderCarousel(now); else panes().forEach(renderPane);
   scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
@@ -3712,7 +4009,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, updateObject, undo, HX };
+window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, updateObject, undo, HX, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

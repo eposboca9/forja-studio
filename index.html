@@ -539,8 +539,8 @@
   .toolwin[hidden], .quickpick[hidden] { display: none; }
   .toolwin::before, .quickpick::before { content: ""; position: absolute; inset: -22px; z-index: -1; pointer-events: none;
     backdrop-filter: blur(16px) saturate(1.05); -webkit-backdrop-filter: blur(16px) saturate(1.05);
-    background: color-mix(in srgb, var(--bg) 42%, transparent);
-    -webkit-mask-image: radial-gradient(closest-side, #000 72%, transparent 100%); mask-image: radial-gradient(closest-side, #000 72%, transparent 100%);
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    -webkit-mask-image: radial-gradient(closest-side, #000 78%, transparent 100%); mask-image: radial-gradient(closest-side, #000 78%, transparent 100%);
     -webkit-mask-size: 100% 100%; mask-size: 100% 100%; }
   .tw-head { display: flex; align-items: center; gap: 8px; cursor: grab; user-select: none; touch-action: none; margin-bottom: 8px; }
   .tw-head b { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -991,7 +991,7 @@
 
   <dialog class="prefs" id="prefs" aria-label="Preferencias">
     <div class="prefs-head"><b>Preferencias</b>
-      <div class="seg small" role="tablist"><button data-ptab="ui">Interfaz</button><button data-ptab="puck">Puck</button><button data-ptab="nav">Navegación</button><button data-ptab="help">Atajos</button></div>
+      <div class="seg small" role="tablist"><button data-ptab="ui">Interfaz</button><button data-ptab="puck">Puck</button><button data-ptab="snap">Snap</button><button data-ptab="nav">Navegación</button><button data-ptab="help">Atajos</button></div>
       <button class="iconbtn" id="prefs-close" title="Cerrar" aria-label="Cerrar">×</button></div>
     <div class="prefs-page" data-ppage="ui">
       <h3>Tema</h3><div id="pref-theme"></div>
@@ -999,6 +999,9 @@
       <label class="radio"><input type="radio" name="pref-eval" value="a"> <b>A · Esferas en la barra izquierda</b><span>seis esferas pequeñas bajo las herramientas; el nombre sale al pasar el ratón</span></label>
       <label class="radio"><input type="radio" name="pref-eval" value="b"> <b>B · Miniaturas en el panel derecho</b><span>sección "Evaluación" con una esfera de muestra de cada modo, como la biblioteca de materiales</span></label>
       <label class="radio"><input type="radio" name="pref-eval" value="c"> <b>C · Una sola esfera que se despliega</b><span>la barra izquierda muestra solo el modo actual; al pasar el ratón salen los demás</span></label>
+      <h3>Historial de construcción</h3>
+      <label class="check"><input type="checkbox" id="pref-histlive"> Actualizar lo que depende mientras arrastras (apagado: al soltar el ratón, más ligero en modelos grandes)</label>
+      <p class="muted">Colores: verde = tiene historial · rosa = depende de lo elegido · azul = sin historial.</p>
       <h3>Mover, rotar y escalar</h3>
       <div class="row"><label for="pref-xform">Con</label><select id="pref-xform" class="sel">
         <option value="mouse">Botones del ratón (Alias): izq X · medio Y · der Z</option>
@@ -1011,6 +1014,20 @@
       <ol class="pk-list" id="pk-list"></ol>
       <div class="pk-add"><select id="pk-add" class="sel"></select><button class="btn" id="pk-add-btn">Añadir</button><button class="btn" id="pk-reset">Restablecer</button></div>
     </div>
+    <div class="prefs-page" data-ppage="snap" hidden>
+      <p class="muted">Como en Alias: mantén Alt (rejilla), Ctrl (punto) o Ctrl+Alt (curva) antes de hacer clic o arrastrar. Con mover/rotar/escalar con los botones, el snap respeta el eje del botón.</p>
+      <h3>Snap fijo (sin mantener teclas)</h3>
+      <label class="check"><input type="checkbox" data-pref-snap="grid"> Rejilla</label>
+      <label class="check"><input type="checkbox" data-pref-snap="curve"> Curva</label>
+      <label class="check"><input type="checkbox" data-pref-snap="point"> Punto</label>
+      <h3>Opciones</h3>
+      <div class="row"><label for="pref-grid">Rejilla</label><select id="pref-grid" class="sel"><option value="0.1">0.1 dm</option><option value="0.25">0.25 dm</option><option value="0.5">0.5 dm</option><option value="1">1 dm</option></select><span></span></div>
+      <div class="row"><label for="pref-div">Divisiones de curva</label><input id="pref-div" type="number" min="0" max="100" step="1" class="sel"><span></span></div>
+      <p class="muted">0 = deslizar por la curva. 2 = pegar al punto medio, 3 = a los tercios… (en curvas y en cada borde de superficie).</p>
+      <label class="check"><input type="checkbox" id="pref-center"> Snap al centro de las curvas</label>
+      <h3>Nudge</h3>
+      <p class="muted">Con algo elegido, las flechas del teclado lo mueven un poco (o giran 1° / escalan 1 % con E y R). Shift = 10 veces más. Acércate para pasos más finos.</p>
+    </div>
     <div class="prefs-page" data-ppage="nav" hidden><div id="pref-nav"></div></div>
     <div class="prefs-page" data-ppage="help" hidden>
       <table class="keys">
@@ -1020,6 +1037,7 @@
         <tr><td>Espacio</td><td>Menú de visualización</td></tr>
         <tr><td>Mantener V</td><td>Ver los módulos y elegir uno con el ratón</td></tr>
         <tr><td>W · E · R</td><td>Mover · rotar · escalar (izq X · medio Y · der Z)</td></tr>
+        <tr><td>Flechas (Shift ×10)</td><td>Nudge: mover / girar / escalar un poco lo elegido</td></tr>
         <tr><td>Ctrl+Z · Ctrl+X</td><td>Deshacer</td></tr><tr><td>Ctrl+Y</td><td>Rehacer</td></tr>
         <tr><td>Ctrl+G · Ctrl+Shift+G</td><td>Agrupar · desagrupar</td></tr>
         <tr><td>O · P</td><td>Elegir objetos · CVs</td></tr>

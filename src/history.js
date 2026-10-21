@@ -90,7 +90,9 @@ export function prepareSlave(S, sEdge, M, mEdge, cont, rev) {
 // Ajuste: las filas 0..cont de S (desde su borde) se calculan para que sus derivadas al cruzar el borde sean
 // las de M multiplicadas por (-λ)^k (el signo porque cada superficie avanza hacia su propio lado).
 // G0 = posición, G1 = tangencia, G2 = curvatura, G3 = variación de curvatura.
-export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev) {
+// mu = término de forma: la continuidad geométrica G2 permite S'' = λ²M'' − μM' (y para G3 S''' = −λ³M''' + 3λμM''),
+// así la segunda fila de CVs se puede mover (flecha de "forma") sin romper la curvatura.
+export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev, mu = 0) {
   const mc = cross(M, mEdge), sc = cross(S, sEdge);
   const mRows = [], sRows = [];
   // la maestra puede tener menos filas que las que pide la continuidad (p. ej. una extrusión tiene 2): sus derivadas
@@ -108,6 +110,8 @@ export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev) {
     const P = sRows.map((r) => xyz(r[j]));
     for (let k = 1; k <= cont; k++) {
       const target = Dm[k].clone().multiplyScalar((-lambda) ** k);
+      if (k === 2) target.addScaledVector(Dm[1], -mu);
+      if (k === 3) target.addScaledVector(Dm[2], 3 * lambda * mu);
       P[k].set(0, 0, 0);
       const D0 = startDerivs(P.slice(0, k + 1), sc.knots, sc.deg, k)[k];
       P[k].set(1, 1, 1);
@@ -131,7 +135,8 @@ export function naturalLambda(S, sEdge, M, mEdge, rev) {
 }
 export function align(rel, M, S) {
   const d = prepareSlave(S, rel.sEdge, M, rel.mEdge, rel.cont, rel.rev);
-  alignRows(d, rel.sEdge, M, rel.mEdge, rel.cont, rel.lambda0 * rel.tension, rel.rev);
+  const lam = rel.lambda0 * rel.tension;
+  alignRows(d, rel.sEdge, M, rel.mEdge, rel.cont, lam, rel.rev, (rel.shape || 0) * lam);
   return d;
 }
 
@@ -199,7 +204,7 @@ export function blendData(rel, A, B) {
   const bs = along(base, eBase);
   const om = compat ? oth : resampleAlong(oth, eOth, bs.deg, bs.knots, rel.rev);
   const r = swap
-    ? { aEdge: rel.bEdge, bEdge: rel.aEdge, contA: rel.contB ?? rel.cont ?? 2, contB: rel.contA ?? rel.cont ?? 2, tension: rel.tension, rev: false, lambdaA: rel.lambdaB, lambdaB: rel.lambdaA, lambdaN: rel.lambdaN }
+    ? { aEdge: rel.bEdge, bEdge: rel.aEdge, contA: rel.contB ?? rel.cont ?? 2, contB: rel.contA ?? rel.cont ?? 2, tension: rel.tension, tensionA: rel.tensionB, tensionB: rel.tensionA, shapeA: rel.shapeB, shapeB: rel.shapeA, rev: false, lambdaA: rel.lambdaB, lambdaB: rel.lambdaA, lambdaN: rel.lambdaN }
     : { ...rel, rev: compat ? rel.rev : false };
   const d = blendOn(r, base, om);
   rel.lambdaN = r.lambdaN;
@@ -224,8 +229,10 @@ function blendOn(rel, A, B) {
   if (rel.lambdaA == null || rel.lambdaN !== nv) {
     rel.lambdaA = naturalLambda(d, 'v0', A, rel.aEdge, false); rel.lambdaB = naturalLambda(d, 'v1', Bm, rel.bEdge, rel.rev); rel.lambdaN = nv;
   }
-  alignRows(d, 'v0', A, rel.aEdge, cA, rel.lambdaA * rel.tension, false);
-  alignRows(d, 'v1', Bm, rel.bEdge, cB, rel.lambdaB * rel.tension, rel.rev);
+  // cada lado con su tensión y su forma (las flechas de cada lado)
+  const lA = rel.lambdaA * (rel.tensionA ?? rel.tension), lB = rel.lambdaB * (rel.tensionB ?? rel.tension);
+  alignRows(d, 'v0', A, rel.aEdge, cA, lA, false, (rel.shapeA || 0) * lA);
+  alignRows(d, 'v1', Bm, rel.bEdge, cB, lB, rel.rev, (rel.shapeB || 0) * lB);
   return d;
 }
 
