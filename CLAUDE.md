@@ -30,6 +30,7 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - `src/exporters.js`: IGES 5.3 (128/126, lectura y escritura), STEP AP214 (GEOMETRIC_SET de B-splines), OBJ de cuadriláteros para SubD,
   SVG/DXF 2D (proyección paralela), .zip sin compresión. Validado con occt-import-js (OpenCASCADE) en el scratchpad.
 - `src/logo.js`: logotipo Nodo.
+- `src/ai.js`: módulo IA: generadores paramétricos (tornillo ISO con rosca, tuerca, arandela, mesa, silla) y parsePrompt (español).
 - `docs/capturas/`: capturas de pantalla de cada versión.
 - `docs/alias-referencia.md`: atajos y comportamiento de Alias (de la hoja oficial que pasó el usuario). Consúltalo.
 - Desde este entorno no se puede abrir help.autodesk.com ni download.autodesk.com (DNS bloqueado); pedir capturas al usuario.
@@ -143,6 +144,20 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - Showroom estilo Alias: horizonte bajo (-0.32), paredes claras, suelo oscuro reflejado, especular y luz de relleno.
 - Idea del usuario para el futuro: carrusel configurable con más módulos, p. ej. "IA" (prompts que crean tornillos M6, mesas,
   sillas, o reconstruyen mallas como NURBS).
+
+## Hecho (v0.8)
+
+- Puck (Tab, como el de Alias, en limpio): anillo interior crear/superficies, exterior elegir/transformar/mostrar. Mantener y soltar,
+  o pulsación corta = queda abierto. Comandos "próximamente" atenuados (Align, Blend, Round, Offset, Simetría, Distancia).
+  Menú de visualización (Espacio o Ctrl+Shift+clic): Información, Modelado, Visu, IA, Controls ON/OFF, Toggle Grid, Toggle Model,
+  Pantalla completa, Panel, Dividida. makeRadial(rings, radii) genera ambos.
+- Nuevos comandos: Nada (pick nothing), Duplicar, Ocultar, Mostrar todo, Toggle Model (modelClean), Toggle Grid.
+- Barra de dibujo de curva abajo (no tapa la cabecera).
+- Mallas: el gizmo ahora las mueve/rota/escala (gizmoDrag.meshes, applyMatrix4 sobre la geometría original).
+- Módulo IA (tercer módulo del carrusel, layout 'ai'): pedido en español -> parsePrompt -> generadores -> mallas colocadas en fila.
+  Si no entiende, y está dentro de claude.ai, pregunta a Claude con la capacidad `sample` (CLAUDE_INSTRUCTIONS -> JSON).
+  En GitHub Pages solo funciona el intérprete local.
+- Pendiente IA: más generadores, que creen NURBS en vez de mallas, reconstruir mallas como NURBS.
 
 ## Siguiente paso
 

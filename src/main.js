@@ -12,6 +12,7 @@ import * as N from './nurbs.js';
 import { applyBackground } from './concrete.js';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
+import * as AI from './ai.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { PLYExporter } from 'three/addons/exporters/PLYExporter.js';
@@ -624,18 +625,18 @@ function rebuildHandles(obj) {
 
 function applyVisibility(obj) {
   const p = obj.parts, vis = obj.visible, sel = selObjs.includes(obj), cvMode = pickMode === 'cv';
-  p.handles.visible = p.hull.visible = vis && cvMode;
+  p.handles.visible = p.hull.visible = vis && cvMode && !modelClean;
   if (obj.kind === 'mesh') {
     p.mesh.visible = vis;
   } else if (obj.kind === 'surface') {
     p.mesh.visible = vis;
-    p.iso.visible = vis && $('show-iso').checked && diagMode !== 'wire';
+    p.iso.visible = vis && $('show-iso').checked && diagMode !== 'wire' && !modelClean;
     p.iso.material = sel ? isoSelMat : isoMat;
     p.edge.visible = vis && sel;
   } else {
     p.line.visible = vis;
     p.line.material = sel ? curveSelMat : curveMat;
-    p.comb.visible = p.env.visible = vis && $('show-comb').checked;
+    p.comb.visible = p.env.visible = vis && $('show-comb').checked && !modelClean;
   }
 }
 
@@ -731,7 +732,8 @@ function gizmoAnchor() {
 }
 function attachGizmo() {
   const refs = selectedCVRefs();
-  if (!refs.length || tool !== 'select') { gizmo.detach(); return; }
+  const meshSel = pickMode === 'object' && selObjs.some((o) => o.kind === 'mesh' && o.visible);
+  if ((!refs.length && !meshSel) || tool !== 'select') { gizmo.detach(); return; }
   proxy.position.copy(gizmoAnchor());
   proxy.quaternion.identity(); proxy.scale.set(1, 1, 1);
   gizmo.attach(proxy);
@@ -744,6 +746,11 @@ gizmo.addEventListener('mouseDown', () => {
     p0: proxy.position.clone(), q0: proxy.quaternion.clone(), s0: proxy.scale.clone(),
     items: refs.map((r) => ({ v: cvRef(r), orig: cvRef(r).clone(), c: objMode ? r.obj.pivot.clone() : center })),
     pivots: objMode ? objs.map((o) => ({ o, orig: o.pivot.clone() })) : [],
+    // las mallas no tienen CVs: se guarda su geometría original y se le aplica la transformación entera
+    meshes: !pivotEdit && objMode ? objs.filter((o) => o.kind === 'mesh').map((o) => {
+      const g = o.data.geometry;
+      return { o, pos: g.attributes.position.array.slice(), nor: g.attributes.normal?.array.slice(), c: o.pivot.clone() };
+    }) : [],
     objs,
     ex: pivotEdit
       ? { pivots: new Set(objs) }
@@ -776,6 +783,20 @@ gizmo.addEventListener('objectChange', () => {
   } else {
     const k = proxy.scale.clone().divide(g.s0);
     g.items.forEach(({ v, orig, c }) => { v.x = c.x + (orig.x - c.x) * k.x; v.y = c.y + (orig.y - c.y) * k.y; v.z = c.z + (orig.z - c.z) * k.z; });
+  }
+  if (!pivotEdit && g.meshes.length) {
+    const M = new THREE.Matrix4();
+    for (const m of g.meshes) {
+      const T = new THREE.Matrix4().makeTranslation(m.c.x, m.c.y, m.c.z), Ti = new THREE.Matrix4().makeTranslation(-m.c.x, -m.c.y, -m.c.z);
+      if (mode === 'translate') M.makeTranslation(...proxy.position.clone().sub(g.p0).toArray());
+      else if (mode === 'rotate') M.copy(T).multiply(new THREE.Matrix4().makeRotationFromQuaternion(proxy.quaternion.clone().multiply(g.q0.clone().invert()))).multiply(Ti);
+      else { const k = proxy.scale.clone().divide(g.s0); M.copy(T).multiply(new THREE.Matrix4().makeScale(k.x, k.y, k.z)).multiply(Ti); }
+      const geo = m.o.data.geometry;
+      geo.attributes.position.array.set(m.pos);
+      if (m.nor) geo.attributes.normal.array.set(m.nor);
+      geo.applyMatrix4(M);
+      geo.computeBoundingBox(); geo.computeBoundingSphere();
+    }
   }
   if (pivotEdit) { updatePivotReadout(); return; }
   pendingObjs = g.objs;
@@ -1380,7 +1401,8 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 function switchLayout(l) {
   if (l === layout || carousel) return;
   if (l === 'split' || layout === 'split' || reduceMotion.matches) { setLayout(l); return; }
-  carousel = { t0: performance.now(), dur: 1300, from: layout, to: l, swapped: false, dir: l === 'render' ? 1 : -1,
+  const ORDER = ['diag', 'render', 'ai'];
+  carousel = { t0: performance.now(), dur: 1300, from: layout, to: l, swapped: false, dir: ORDER.indexOf(l) > ORDER.indexOf(layout) ? 1 : -1,
     pos: camera.position.clone(), quat: camera.quaternion.clone(), piv: pivot.clone() };
   flipPanel(l);
 }
@@ -1418,7 +1440,7 @@ function renderCarousel(now) {
 }
 let bgFadeT0 = -1e9;
 // El panel derecho cambia de módulo girando como una placa
-const MODULE_TITLES = { diag: 'Modelado', render: 'Visu', split: 'Modelado + Visu' };
+const MODULE_TITLES = { diag: 'Modelado', render: 'Visu', ai: 'IA', split: 'Modelado + Visu' };
 function showModule(l) {
   document.querySelectorAll('#panel-body [data-module]').forEach((sec) => {
     const m = sec.dataset.module;
@@ -1429,7 +1451,7 @@ function showModule(l) {
 async function flipPanel(l) {
   const body = $('panel-body');
   if (reduceMotion.matches || !body.animate) { showModule(l); return; }
-  const dir = l === 'render' ? 1 : -1;
+  const ORDER = ['diag', 'render', 'ai'], dir = ORDER.indexOf(l) > ORDER.indexOf(layout) ? 1 : -1;
   await body.animate([{ transform: 'perspective(900px) rotateY(0deg)', opacity: 1 }, { transform: `perspective(900px) rotateY(${-90 * dir}deg)`, opacity: 0 }],
     { duration: 380, easing: 'cubic-bezier(.55,0,.8,.4)' }).finished;
   showModule(l);
@@ -1440,13 +1462,14 @@ function setLayout(l) {
   layout = l;
   document.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === l)));
   $('pane-diag').hidden = l === 'render';
-  $('pane-render').hidden = l === 'diag';
-  $('pane-diag').className = 'pane left' + (l === 'diag' ? ' full' : '');
+  $('pane-render').hidden = l !== 'render' && l !== 'split';
+  $('pane-diag').className = 'pane left' + (l !== 'split' ? ' full' : '');
+  $('pane-diag').querySelector('.pane-title b').textContent = l === 'ai' ? 'IA' : 'MODELADO';
   $('pane-render').className = 'pane right' + (l === 'render' ? ' full' : '');
   if (!carousel) showModule(l);
   resize();
 }
-const cycleLayout = () => switchLayout(layout === 'render' ? 'diag' : 'render');
+const cycleLayout = () => switchLayout({ diag: 'render', render: 'ai', ai: 'diag', split: 'diag' }[layout]);
 document.querySelectorAll('[data-layout]').forEach((b) => b.addEventListener('click', () => switchLayout(b.dataset.layout)));
 document.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => setPickMode(b.dataset.pick)));
 document.querySelectorAll('[data-plane]').forEach((b) => b.addEventListener('click', () => setDrawPlane(b.dataset.plane)));
@@ -1837,9 +1860,64 @@ addEventListener('keydown', (e) => {
   else if (k === 'e') { e.preventDefault(); toggleFilePanel(); }
 });
 
+// ---------- Módulo IA ----------
+let sampleCap;
+async function askClaude(text) {
+  // Dentro de claude.ai la página puede preguntarle a Claude (capacidad "sample"); en GitHub Pages no hay IA conectada
+  sampleCap ??= window.claude?.use ? await window.claude.use('sample').catch(() => null) : null;
+  if (!sampleCap) return null;
+  const r = await sampleCap.json(`${AI.CLAUDE_INSTRUCTIONS}\n\nPedido: ${text}`, { modelTier: 'quick' });
+  return r && Array.isArray(r.items) ? r : null;
+}
+function placeGenerated(cmds) {
+  const box = boundsOf(objects.filter((o) => o.visible));
+  let x = box.isEmpty() ? 0 : box.max.x + 1;
+  const created = [];
+  for (const c of cmds) {
+    const gen = AI.GENERATORS[c.type];
+    if (!gen) continue;
+    for (let k = 0; k < Math.min(20, c.n || 1); k++) {
+      const { geometry, name } = gen(c.params || {});
+      geometry.computeBoundingBox();
+      const bb = geometry.boundingBox, w = bb.max.x - bb.min.x;
+      geometry.translate(x - bb.min.x, 0, -(bb.min.z + bb.max.z) / 2);
+      x += w + Math.max(0.15, w * 0.35);
+      const o = addMesh(geometry, name);
+      o.name = name.replace(/ \d+$/, '') + (k ? ` ${k + 1}` : '');
+      created.push(o);
+    }
+  }
+  return created;
+}
+async function runAI(text) {
+  text = text.trim();
+  if (!text) return;
+  const log = (msg) => { const li = document.createElement('li'); li.innerHTML = msg; $('ai-log').prepend(li); };
+  $('ai-status').textContent = 'Pensando…';
+  let cmds = AI.parsePrompt(text), note = '';
+  if (!cmds) {
+    try { const r = await askClaude(text); if (r) { cmds = r.items; note = r.note || ''; } } catch (e) { console.warn(e); }
+  }
+  if (!cmds || !cmds.length) {
+    $('ai-status').textContent = note || 'No entendí el pedido. Prueba con tornillos, tuercas, arandelas, mesas o sillas, con sus medidas.';
+    log(`<b>${text.replace(/</g, '&lt;')}</b> · sin resultado`);
+    return;
+  }
+  const created = placeGenerated(cmds);
+  setPickMode('object');
+  applySelection(created, 'replace');
+  frameObjects(created);
+  $('ai-status').textContent = note || `Creado: ${created.map((o) => o.name).join(', ')}.`;
+  log(`<b>${text.replace(/</g, '&lt;')}</b> → ${created.length} ${created.length === 1 ? 'objeto' : 'objetos'}`);
+  updateStatus();
+}
+$('ai-go').addEventListener('click', () => runAI($('ai-prompt').value));
+$('ai-prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runAI(e.target.value); } });
+document.querySelectorAll('#ai-chips .chip').forEach((b) => b.addEventListener('click', () => { $('ai-prompt').value = b.textContent; runAI(b.textContent); }));
+
 // ---------- Atajos de teclado ----------
 addEventListener('keydown', (e) => {
-  if (['INPUT', 'SELECT'].includes(e.target.tagName) || e.altKey || e.ctrlKey || e.metaKey) return;
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.altKey || e.ctrlKey || e.metaKey) return;
   const k = e.key.toLowerCase();
   if (k === 'f') frameSelection();
   else if (k === 't') topView();
@@ -1878,79 +1956,202 @@ addEventListener('keydown', (e) => {
   }
 });
 
-// ---------- Menú radial (mantener Espacio, o Ctrl+Shift + clic como los marking menus de Alias) ----------
-const RADIAL = [
-  { label: 'Curva', key: 'C', run: () => setTool('curve') },
-  { label: 'Plano', key: '', run: () => setTool('plane') },
-  { label: 'Loft', key: '', run: OPS.loft },
-  { label: 'Extruir', key: '', run: OPS.extrude },
-  { label: 'Revolución', key: '', run: OPS.revolve },
-  { label: 'Objetos/CVs', key: 'O/P', run: () => setPickMode(pickMode === 'cv' ? 'object' : 'cv') },
-  { label: 'Pivote', key: 'L', run: pivotToSelection },
-  { label: 'Encuadrar', key: 'F', run: frameSelection },
-  { label: 'Vista sup.', key: 'T', run: topView },
-  { label: 'Modelado ↔ Visu', key: 'V', run: cycleLayout },
-  { label: 'Dividida', key: '', run: () => switchLayout('split') },
+// ---------- Comandos de los menús radiales ----------
+function pickNothing() { setTool('select'); clearSelection(); }
+const cloneV4 = (v) => new THREE.Vector4(v.x, v.y, v.z, v.w);
+function duplicateSelection() {
+  if (pickMode !== 'object' || !selObjs.length) return toast('Duplicar: selecciona objetos (modo Objetos).');
+  const out = selObjs.map((o) => {
+    const d = o.data;
+    const c = o.kind === 'surface' ? addSurface({ degU: d.degU, degV: d.degV, knotsU: d.knotsU.slice(), knotsV: d.knotsV.slice(), cvs: d.cvs.map((r) => r.map(cloneV4)) }, o.name.replace(/ \d+$/, ''))
+      : o.kind === 'curve' ? addCurve({ deg: d.deg, knots: d.knots.slice(), plane: d.plane, cvs: d.cvs.map(cloneV4) }, o.name.replace(/ \d+$/, ''))
+      : addMesh(d.geometry.clone(), o.name.replace(/ \d+$/, ''));
+    c.mat = o.mat; c.pivot.copy(o.pivot);
+    return c;
+  });
+  applySelection(out, 'replace');
+  toast(`${out.length} ${out.length === 1 ? 'objeto duplicado' : 'objetos duplicados'} en el mismo sitio · W para moverlo`);
+}
+function hideSelection() {
+  if (!selObjs.length) return toast('Ocultar: selecciona objetos.');
+  const n = selObjs.length;
+  selObjs.forEach((o) => (o.visible = false));
+  clearSelection();
+  toast(`${n} ${n === 1 ? 'objeto oculto' : 'objetos ocultos'} · Mostrar todo en el Puck (Tab)`);
+}
+function unhideAll() { objects.forEach((o) => (o.visible = true)); selectionChanged(); toast('Todo visible'); }
+let modelClean = false;
+function toggleModel() {
+  modelClean = !modelClean;
+  objects.forEach(applyVisibility);
+  toast(modelClean ? 'Toggle Model: parches, hulls y CVs ocultos' : 'Toggle Model: parches, hulls y CVs visibles');
+}
+function toggleGrid() { grid.visible = !grid.visible; }
+function fullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen?.();
+  else document.documentElement.requestFullscreen?.().catch(() => toast('La pantalla completa no está disponible en esta vista.'));
+}
+const soon = (name) => () => toast(`${name}: próximamente`);
+
+// Iconos de línea (24×24) para los menús radiales
+const IC = {
+  curve: 'M3 18C7 4 17 20 21 6', plane: 'M3 16l6-9h12l-6 9z', revolve: 'M12 3v18M4 12a8 3 0 0 0 16 0M15 6c2 2 2 9 0 12',
+  loft: 'M4 18c3-4 6-4 9-2s5 1 7-2M4 12c3-4 6-4 9-2s5 1 7-2M4 6c3-4 6-4 9-2s5 1 7-2', extrude: 'M4 18c4-3 8 1 12-2M8 6c4-3 8 1 12-2M4 18l4-12M16 16l4-12',
+  dup: 'M9 9h11v11H9zM4 15V4h11', align: 'M4 20V4M8 12c4 0 6-6 12-6M8 12c4 0 6 6 12 6', round: 'M4 20V12a8 8 0 0 1 8-8h8',
+  extend: 'M4 18C8 8 12 6 14 6M16 6h5M19 3l3 3-3 3', offset: 'M3 15c5-6 13-6 18 0M3 20c5-6 13-6 18 0', blend: 'M3 6h6c6 0 6 12 12 12M3 18h6',
+  nothing: 'M4 4h4M16 4h4M4 20h4M16 20h4M4 4v4M20 4v4M4 16v4M20 16v4M9 9l6 6M15 9l-6 6', object: 'M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8',
+  cv: 'M4 18C8 6 16 18 20 6M3 17h2v2H3zM19 5h2v2h-2zM11 11h2v2h-2z', move: 'M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3',
+  rotate: 'M20 12a8 8 0 1 1-3-6.2M20 4v5h-5', scale: 'M4 10h10v10H4zM13 4h7v7M20 4l-8 8', pivot: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v5M12 17v5M2 12h5M17 12h5',
+  frame: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5', top: 'M4 4h16v16H4zM12 8v8M8 12h8', hide: 'M3 3l18 18M10.6 6.1A9 9 0 0 1 22 12s-1.3 2.6-4 4.6M6.6 6.6C3.7 8.6 2 12 2 12s3.5 7 10 7c1.6 0 3-.4 4.3-1',
+  show: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z', del: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',
+  symm: 'M12 3v18M9 6L4 12l5 6M15 6l5 6-5 6', measure: 'M3 17l14-14 4 4L7 21zM7 13l2 2M10 10l2 2M13 7l2 2',
+  info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7v.5', model: 'M7 4h10l2 5-2 11H7L5 9z', grid: 'M4 4h16v16H4zM4 10h16M4 15h16M10 4v16M15 4v16',
+  ctrlOn: 'M4 18C8 6 16 18 20 6M3 17h2v2H3zM19 5h2v2h-2z', ctrlOff: 'M4 18C8 6 16 18 20 6M3 3l18 18', shade: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 3c-4 3-4 15 0 18',
+  visu: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 9a3 2 0 0 1 4-1', full: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5M9 9l-4-4M15 9l4-4M9 15l-4 4M15 15l4 4',
+  panel: 'M4 4h16v16H4zM14 4v16', split: 'M4 4h16v16H4zM12 4v16', ai: 'M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2zM19 15l1 2 2 1-2 1-1 2-1-2-2-1 2-1z',
+};
+const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="${IC[k]}"/></svg>`;
+
+// Puck (Tab): anillo interior = crear y superficies; anillo exterior = elegir, transformar y mostrar.
+const PUCK = [
+  [
+    { k: 'curve', label: 'Curva', key: 'C', run: () => setTool('curve') },
+    { k: 'plane', label: 'Plano', run: () => setTool('plane') },
+    { k: 'revolve', label: 'Revolución', run: () => OPS.revolve() },
+    { k: 'loft', label: 'Loft', run: () => OPS.loft() },
+    { k: 'extrude', label: 'Extruir', run: () => OPS.extrude() },
+    { k: 'dup', label: 'Duplicar', run: duplicateSelection },
+    { k: 'align', label: 'Align', soon: true },
+    { k: 'blend', label: 'Blend', soon: true },
+    { k: 'round', label: 'Round', soon: true },
+    { k: 'offset', label: 'Offset', soon: true },
+  ],
+  [
+    { k: 'nothing', label: 'Nada', run: pickNothing },
+    { k: 'object', label: 'Objeto', key: 'O', run: () => setPickMode('object') },
+    { k: 'cv', label: 'CV', key: 'P', run: () => setPickMode('cv') },
+    { k: 'move', label: 'Mover', key: 'W', run: () => { setTool('select'); setXform('translate'); } },
+    { k: 'rotate', label: 'Rotar', key: 'E', run: () => { setTool('select'); setXform('rotate'); } },
+    { k: 'scale', label: 'Escalar', key: 'R', run: () => { setTool('select'); setXform('scale'); } },
+    { k: 'pivot', label: 'Pivote', key: 'D', run: togglePivotEdit },
+    { k: 'frame', label: 'Encuadrar', key: 'F', run: frameSelection },
+    { k: 'top', label: 'Vista sup.', key: 'T', run: topView },
+    { k: 'hide', label: 'Ocultar', run: hideSelection },
+    { k: 'show', label: 'Mostrar todo', run: unhideAll },
+    { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
+    { k: 'symm', label: 'Simetría', soon: true },
+    { k: 'measure', label: 'Distancia', soon: true },
+  ],
 ];
-const radialEl = $('radial');
-let radialOn = false, radialPick = -1, lastPtr = { x: innerWidth / 2, y: innerHeight / 2 }, radialAt = lastPtr;
-// Las opciones van en un óvalo, desplazadas medio paso para que ninguna quede justo arriba o abajo
-const RSTEP = (Math.PI * 2) / RADIAL.length, ROFF = -Math.PI / 2 + RSTEP / 2;
-RADIAL.forEach((it, n) => {
-  const a = ROFF + n * RSTEP;
-  const b = document.createElement('button');
-  b.className = 'item';
-  b.innerHTML = it.key ? `${it.label}<kbd>${it.key}</kbd>` : it.label;
-  b.style.left = Math.cos(a) * 185 + 'px'; b.style.top = Math.sin(a) * 120 + 'px';
-  b.addEventListener('pointerenter', () => highlightRadial(n));
-  b.addEventListener('click', () => { radialPick = n; closeRadial(true); });
-  radialEl.append(b);
-});
-function highlightRadial(n) {
-  radialPick = n;
-  radialEl.querySelectorAll('.item').forEach((el, m) => el.classList.toggle('on', m === n));
-  $('radial-center').textContent = n >= 0 ? RADIAL[n].label : 'Suelta sobre una opción';
+// Menú de visualización (Espacio o Ctrl+Shift+clic), como el marking menu de Alias
+const DISPLAY = [[
+  { k: 'info', label: 'Información', run: () => { $('panel').classList.add('show'); } },
+  { k: 'shade', label: 'Modelado', key: 'V', run: () => switchLayout('diag') },
+  { k: 'visu', label: 'Visu', key: 'V', run: () => switchLayout('render') },
+  { k: 'ai', label: 'IA', run: () => switchLayout('ai') },
+  { k: 'ctrlOn', label: 'Controls ON', run: () => setPickMode('cv') },
+  { k: 'full', label: 'Pantalla completa', run: fullscreen },
+  { k: 'panel', label: 'Panel', run: () => setPinned(!pinned) },
+  { k: 'split', label: 'Dividida', run: () => switchLayout('split') },
+  { k: 'ctrlOff', label: 'Controls OFF', run: () => setPickMode('object') },
+  { k: 'grid', label: 'Toggle Grid', run: toggleGrid },
+  { k: 'model', label: 'Toggle Model', run: toggleModel },
+]];
+
+function makeRadial(rings, radii) {
+  const el = document.createElement('div');
+  el.className = 'puck'; el.hidden = true;
+  const R = radii[radii.length - 1] + 48;
+  el.innerHTML = `<svg class="puck-lines" viewBox="${-R} ${-R} ${2 * R} ${2 * R}" width="${2 * R}" height="${2 * R}" style="left:${-R}px;top:${-R}px">
+      ${radii.map((r) => `<circle r="${r}" />`).join('')}<line id="" x1="0" y1="0" x2="0" y2="0" /></svg>
+    <div class="puck-center"><b></b><span></span></div>`;
+  document.body.append(el);
+  const line = el.querySelector('line'), cName = el.querySelector('.puck-center b'), cHint = el.querySelector('.puck-center span');
+  const items = [];
+  rings.forEach((ring, ri) => ring.forEach((it, n) => {
+    const a = -Math.PI / 2 + (n / ring.length) * Math.PI * 2, r = radii[ri];
+    const b = document.createElement('button');
+    b.className = 'puck-item' + (it.soon ? ' soon' : '');
+    b.innerHTML = `<i>${icon(it.k)}</i><span>${it.label}</span>`;
+    b.style.left = Math.cos(a) * r + 'px'; b.style.top = Math.sin(a) * r + 'px';
+    b.setAttribute('aria-label', it.label);
+    el.append(b);
+    items.push({ it, b, a, ri, x: Math.cos(a) * r, y: Math.sin(a) * r });
+  }));
+  const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, sticky: false };
+  st.highlight = (h) => {
+    st.hover = h;
+    items.forEach((x) => x.b.classList.toggle('on', x === h));
+    line.setAttribute('x2', h ? h.x : 0); line.setAttribute('y2', h ? h.y : 0);
+    cName.textContent = h ? h.it.label : '';
+    cHint.textContent = h ? (h.it.soon ? 'próximamente' : h.it.key || '') : 'suelta sobre una opción';
+  };
+  st.pickAt = (x, y) => {
+    const dx = x - st.at.x, dy = y - st.at.y, d = Math.hypot(dx, dy);
+    if (d < 42) return st.highlight(null);
+    const ri = radii.length === 1 || d < (radii[0] + radii[1]) / 2 ? 0 : 1;
+    const ring = items.filter((x) => x.ri === ri), ang = Math.atan2(dy, dx);
+    let best = null, bd = 1e9;
+    for (const x of ring) { const da = Math.abs(Math.atan2(Math.sin(ang - x.a), Math.cos(ang - x.a))); if (da < bd) { bd = da; best = x; } }
+    st.highlight(best);
+  };
+  st.show = (x, y) => {
+    const m = R * 0.9;
+    st.at = { x: Math.min(innerWidth - m, Math.max(m, x)), y: Math.min(innerHeight - m, Math.max(m, y)) };
+    el.style.left = st.at.x + 'px'; el.style.top = st.at.y + 'px';
+    el.hidden = false; st.open = true; st.sticky = false; st.highlight(null);
+  };
+  st.close = (run) => {
+    if (!st.open) return;
+    st.open = false; el.hidden = true;
+    const h = st.hover;
+    if (run && h) (h.it.soon ? soon(h.it.label) : h.it.run)();
+  };
+  items.forEach((x) => {
+    x.b.addEventListener('pointerenter', () => st.highlight(x));
+    x.b.addEventListener('click', () => { st.highlight(x); st.close(true); });
+  });
+  return st;
 }
-function openRadial() {
-  radialOn = true; radialAt = { ...lastPtr };
-  radialEl.style.left = radialAt.x + 'px'; radialEl.style.top = radialAt.y + 'px';
-  radialEl.hidden = false; highlightRadial(-1);
-}
-function closeRadial(run) {
-  if (!radialOn) return;
-  radialOn = false; radialEl.hidden = true;
-  if (run && radialPick >= 0) RADIAL[radialPick].run();
-}
+const puck = makeRadial(PUCK, [96, 178]);
+const disp = makeRadial(DISPLAY, [132]);
+let lastPtr = { x: innerWidth / 2, y: innerHeight / 2 };
 addEventListener('pointermove', (e) => {
   lastPtr = { x: e.clientX, y: e.clientY };
-  if (!radialOn) return;
-  const dx = e.clientX - radialAt.x, dy = e.clientY - radialAt.y;
-  if (Math.hypot(dx, dy) < 30) return highlightRadial(-1);
-  const a = Math.atan2(dy / 120, dx / 185) - ROFF;
-  highlightRadial(Math.round(((a + Math.PI * 4) % (Math.PI * 2)) / RSTEP) % RADIAL.length);
+  for (const m of [puck, disp]) if (m.open) m.pickAt(e.clientX, e.clientY);
 });
+addEventListener('pointerdown', (e) => {
+  for (const m of [puck, disp]) if (m.open && m.sticky && !e.target.closest('.puck')) m.close(false);
+}, true);
+// Tab = Puck. Mantener y soltar sobre la opción; una pulsación corta lo deja abierto para hacer clic.
+function bindKey(code, m) {
+  addEventListener('keydown', (e) => {
+    if (e.code !== code || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+    e.preventDefault();
+    if (e.repeat) return;
+    if (m.open && m.sticky) return m.close(false);
+    m.show(lastPtr.x, lastPtr.y); m.t0 = performance.now();
+  }, true);
+  addEventListener('keyup', (e) => {
+    if (e.code !== code || !m.open || m.sticky) return;
+    e.preventDefault();
+    if (m.hover) m.close(true);
+    else if (performance.now() - m.t0 < 400) m.sticky = true;
+    else m.close(false);
+  }, true);
+}
+bindKey('Tab', puck);
+bindKey('Space', disp);
+addEventListener('keydown', (e) => { if (e.key === 'Escape') { puck.close(false); disp.close(false); } }, true);
 let radialByMouse = false;
 addEventListener('pointerdown', (e) => {
   if (!(e.ctrlKey && e.shiftKey) || e.target !== renderer.domElement) return;
   e.stopImmediatePropagation(); e.preventDefault();
-  radialByMouse = true;
-  openRadial();
+  radialByMouse = true; disp.show(e.clientX, e.clientY);
 }, true);
 addEventListener('pointerup', (e) => {
   if (!radialByMouse) return;
-  radialByMouse = false;
-  e.stopImmediatePropagation();
-  closeRadial(true);
-}, true);
-addEventListener('keydown', (e) => {
-  if (e.code !== 'Space' || ['INPUT', 'SELECT'].includes(e.target.tagName)) return;
-  e.preventDefault();
-  if (!e.repeat && !radialOn) openRadial();
-}, true);
-addEventListener('keyup', (e) => {
-  if (e.code !== 'Space') return;
-  e.preventDefault();
-  closeRadial(true);
+  radialByMouse = false; e.stopImmediatePropagation(); disp.close(true);
 }, true);
 
 // ---------- Dibujo de cada cuadro ----------
@@ -1958,7 +2159,7 @@ function renderPane(p) {
   renderer.setViewport(p.x, 0, p.w, p.h);
   renderer.setScissor(p.x, 0, p.w, p.h);
   useAspect(p);
-  const diag = p.kind === 'diag';
+  const diag = p.kind !== 'render';                 // MODELADO e IA usan los shaders de evaluación
   const dm = diagMaterial();
   objects.forEach((o) => { if (o.kind !== 'curve') o.parts.mesh.material = diag ? dm : materials[o.mat]; });
   scene.background = !diag && envBg ? scene.environment : null;
@@ -2039,7 +2240,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel };
+window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;
