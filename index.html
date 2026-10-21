@@ -106,7 +106,7 @@
   .pane-title { font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: .06em; }
   .pane-title b { color: var(--fg); font-weight: 500; }
   .seg.small button { font-size: 11px; padding: 3px 9px; }
-  .pane .legend { right: 12px; top: 12px; }
+  .pane .legend { right: 76px; top: 70px; }
   /* Menú radial */
   .radial { position: fixed; width: 0; height: 0; z-index: 50; pointer-events: none; }
   .radial .ring { position: absolute; left: -215px; top: -160px; width: 430px; height: 320px; border-radius: 50%;
@@ -383,6 +383,15 @@
 
   .hint, :root[data-theme="dark"] .hint { transform: translate(-50%, 6px); background: transparent; }
   .app.near-bottom .hint { transform: translate(-50%, 0); }
+
+  /* La información siempre a la vista, tenue: cabecera, título de la vista y barra de estado */
+  .reveal-top > *, .pane-head { opacity: .6; pointer-events: auto; transform: none; }
+  .status { opacity: .6; pointer-events: auto; transform: none; }
+  .app.near-top .reveal-top > *, .app.near-top .pane-head, .app.near-bottom .status { opacity: 1; }
+  .brand { opacity: 1; }
+  .viewinfo { margin-left: 18px; display: flex; gap: 14px; font-family: var(--font-mono); font-size: 10px;
+    letter-spacing: .14em; color: var(--muted); pointer-events: none; text-shadow: 0 1px 0 var(--engrave-light); z-index: 1; }
+  .viewinfo span + span::before { content: "·"; margin-right: 14px; opacity: .6; }
 </style>
 </head>
 <body>
@@ -390,7 +399,7 @@
   <header class="top">
     <div class="brand"><span class="wordmark">FORJA</span><span class="sub">studio</span></div>
     <div class="reveal-top" id="reveal-top">
-    <span class="file">capo_concepto.forja</span>
+    <span class="file">vaso_concepto.forja</span>
     <span class="lbl">Seleccionar</span>
     <div class="seg pick" role="group" aria-label="Qué seleccionar">
       <button id="pick-object" data-pick="object" aria-pressed="true" title="Seleccionar objetos completos (O)">Objetos</button>
@@ -403,8 +412,8 @@
       <button id="snap-point" data-snap="point" aria-pressed="false" title="Snap a puntos: CVs, pivotes, extremos, esquinas. Momentáneo: mantener Ctrl">Punto</button>
     </div>
     <div class="seg lay" role="group" aria-label="Distribución de la vista">
-      <button id="lay-split" data-layout="split" aria-pressed="true" title="Diagnóstico y render lado a lado (V)">Dividida</button>
-      <button id="lay-diag" data-layout="diag" aria-pressed="false" title="Solo diagnóstico (V)">Diagnóstico</button>
+      <button id="lay-split" data-layout="split" aria-pressed="false" title="Diagnóstico y render lado a lado (V)">Dividida</button>
+      <button id="lay-diag" data-layout="diag" aria-pressed="true" title="Solo diagnóstico (V)">Diagnóstico</button>
       <button id="lay-render" data-layout="render" aria-pressed="false" title="Solo render (V)">Render</button>
     </div>
     <div class="seg theme" role="group" aria-label="Tema">
@@ -447,6 +456,10 @@
           <button id="d-curv" data-diag="curv" aria-pressed="false" title="Curvatura (2)">Curvatura</button>
           <button id="d-wire" data-diag="wire" aria-pressed="false" title="Malla (3)">Malla</button>
         </div>
+        <div class="viewinfo" id="viewinfo" aria-live="polite">
+      <span>PERSPECTIVA</span><span id="vi-shader">CEBRA</span><span id="vi-objs">—</span><span id="vi-cvs">—</span><span id="vi-sel">SIN SELECCIÓN</span>
+    </div>
+
       </div>
       <div class="legend" id="legend" hidden>
         <span>Curvatura media</span>

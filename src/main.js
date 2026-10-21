@@ -5,6 +5,8 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import * as N from './nurbs.js';
 import { applyBackground } from './concrete.js';
 
@@ -263,8 +265,9 @@ const curveMat = LM({ color: 0x2b2a27, linewidth: 2.5 });
 const curveSelMat = LM({ color: 0xe07a1f, linewidth: 3 });
 const draftMat = LM({ color: 0xe07a1f, linewidth: 2 });
 const edgeSelMat = LM({ color: 0xe07a1f, linewidth: 2.5 });
-const isoMat = new THREE.LineBasicMaterial({ color: '#0b0d10', transparent: true, opacity: 0.35 });
-const isoSelMat = new THREE.LineBasicMaterial({ color: '#e07a1f', transparent: true, opacity: 0.75 });
+// Líneas de los parches (límites de cada span), siempre visibles en el diagnóstico
+const isoMat = LM({ color: 0x4a8fe0, linewidth: 1.6 }); // líneas de parche en azul: se ven sobre cebra blanca y negra
+const isoSelMat = LM({ color: 0xe07a1f, linewidth: 1.8 });
 const hullMat = new THREE.LineDashedMaterial({ color: '#2d6aa8', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.7 });
 const combMat = new THREE.LineBasicMaterial({ color: '#e07a1f', transparent: true, opacity: 0.55 });
 const envMat = new THREE.LineBasicMaterial({ color: '#e07a1f' });
@@ -292,7 +295,7 @@ function setTheme(t) {
 }
 document.querySelectorAll('[data-theme-btn]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeBtn)));
 
-let diagMode = 'zebra', layout = 'split', matKey = 'paint', res = 90, combScale = 0.8;
+let diagMode = 'zebra', layout = 'diag', matKey = 'paint', res = 90, combScale = 0.8;
 
 // ---------- Objetos de la escena ----------
 const objects = [];
@@ -306,7 +309,7 @@ function addSurface(data, base = 'Superficie') {
   p.mesh = new THREE.Mesh(new THREE.BufferGeometry(), materials[obj.mat]);
   p.mesh.castShadow = true;
   p.mesh.userData.obj = obj;
-  p.iso = new THREE.LineSegments(new THREE.BufferGeometry(), isoMat); p.iso.layers.set(DIAG);
+  p.iso = new LineSegments2(new LineSegmentsGeometry(), isoMat); p.iso.layers.set(DIAG);
   p.hull = new THREE.LineSegments(new THREE.BufferGeometry(), hullMat); p.hull.layers.set(DIAG);
   p.edge = new Line2(new LineGeometry(), edgeSelMat); p.edge.renderOrder = 6;
   p.handles = new THREE.Group();
@@ -369,7 +372,7 @@ function updateSurface(obj) {
   const seg = (fn) => { for (let k = 0; k < S; k++) { fn(k / S, t); iso.push(t.x, t.y, t.z); fn((k + 1) / S, t); iso.push(t.x, t.y, t.z); } };
   N.uniqueKnots(d.knotsU).forEach((u) => seg((a, tt) => s.getPoint(u, a, tt)));
   N.uniqueKnots(d.knotsV).forEach((v) => seg((a, tt) => s.getPoint(a, v, tt)));
-  setGeo(p.iso, posGeo(iso));
+  { const g = new LineSegmentsGeometry(); g.setPositions(iso); setGeo(p.iso, g); }
   const hull = [], nu = d.cvs.length, nv = d.cvs[0].length;
   for (let i = 0; i < nu; i++) for (let j = 0; j < nv; j++) {
     const a = d.cvs[i][j];
@@ -1011,7 +1014,7 @@ function frameObjects(list) {
   const c = box.getCenter(new THREE.Vector3()), rad = box.getSize(new THREE.Vector3()).length() / 2;
   const p = panes()[0], vf = THREE.MathUtils.degToRad(camera.fov) / 2;
   const hf = Math.atan(Math.tan(vf) * (p.w / p.h));
-  const dist = rad / Math.sin(Math.min(vf, hf)) * 1.3; // margen: los menús grabados quedan encima de la vista
+  const dist = rad / Math.sin(Math.min(vf, hf)) * 1.12; // margen: los menús grabados quedan encima de la vista
   pivot.copy(c);
   camera.position.copy(c).addScaledVector(viewDir(), -dist);
 }
@@ -1194,11 +1197,22 @@ function updateStatus() {
   $('st-sel').textContent = n ? `Selección: ${n} ${what}` : 'Nada seleccionado';
   const ns = objects.filter((o) => o.kind === 'surface').length;
   $('st-scene').textContent = `Unidades: dm · Escena: ${ns} ${ns === 1 ? 'superficie' : 'superficies'} · ${objects.length - ns} ${objects.length - ns === 1 ? 'curva' : 'curvas'}`;
+  // Información de la vista (arriba a la derecha)
+  const cvs = objects.reduce((s, o) => s + o.data.cvs.flat().length, 0);
+  const patches = objects.filter((o) => o.kind === 'surface')
+    .reduce((s, o) => s + (N.uniqueKnots(o.data.knotsU).length - 1) * (N.uniqueKnots(o.data.knotsV).length - 1), 0);
+  $('vi-objs').textContent = `${ns} SUPERFICIES · ${patches} PARCHES`;
+  $('vi-cvs').textContent = `${cvs} CVS`;
+  const last = selObjs[selObjs.length - 1];
+  $('vi-sel').textContent = pickMode === 'cv' && selCVs.size ? `${selCVs.size} CVS SELECCIONADOS`
+    : last ? (last.kind === 'surface' ? `${last.name.toUpperCase()} · GRADO ${last.data.degU}×${last.data.degV} · SPANS ${N.spansOf(last.data.cvs.length, last.data.degU)}×${N.spansOf(last.data.cvs[0].length, last.data.degV)}` : last.name.toUpperCase())
+    : 'SIN SELECCIÓN';
 }
 
 // ---------- Panel: modos, materiales, análisis ----------
 function setDiag(m) {
   diagMode = m;
+  $('vi-shader').textContent = { zebra: 'CEBRA', curv: 'CURVATURA', wire: 'MALLA' }[m];
   document.querySelectorAll('[data-diag]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.diag === m)));
   if (layout === 'render') setLayout('split');
   $('legend').hidden = m !== 'curv';
@@ -1457,20 +1471,34 @@ new ResizeObserver(resize).observe(view);
 resize();
 buildMaterialLibrary();
 
-// Escena de ejemplo: un capó (superficie 6×6, grado 3) y una curva frente a él
-const hood = [];
-for (let i = 0; i < 6; i++) {
-  const row = [], u = i / 5;
-  for (let j = 0; j < 6; j++) {
-    const v = j / 5;
-    const crown = Math.pow(Math.sin(Math.PI * u), 1.1) * (0.55 + 0.45 * Math.sin(Math.PI * v));
-    row.push(new THREE.Vector4((u - 0.5) * 6.4, 0.35 + 1.35 * crown + 0.45 * u, (v - 0.5) * 4.4, 1));
+// Escena de ejemplo. Por defecto: un vaso hecho con 4 superficies de revolución unidas por sus bordes
+// (base, cuerpo, labio enrollado y fondo interior), como el modelo de los videos de Alias.
+// Con ?demo=capo se carga la escena antigua (capó + curva), que usan las pruebas automáticas.
+if (new URLSearchParams(location.search).get('demo') === 'capo') {
+  const hood = [];
+  for (let i = 0; i < 6; i++) {
+    const row = [], u = i / 5;
+    for (let j = 0; j < 6; j++) {
+      const v = j / 5;
+      const crown = Math.pow(Math.sin(Math.PI * u), 1.1) * (0.55 + 0.45 * Math.sin(Math.PI * v));
+      row.push(new THREE.Vector4((u - 0.5) * 6.4, 0.35 + 1.35 * crown + 0.45 * u, (v - 0.5) * 4.4, 1));
+    }
+    hood.push(row);
   }
-  hood.push(row);
+  addSurface({ degU: 3, degV: 3, knotsU: N.clampedKnots(6, 3), knotsV: N.clampedKnots(6, 3), cvs: hood }, 'Capó').name = 'Capó';
+  addCurve(N.curveData([[-3.25, 3.75], [-2, 2.75], [-0.5, 4.5], [1, 3], [2.25, 4.25], [3.25, 3.5]].map(([x, z]) => new THREE.Vector3(x, 0.01, z))));
+} else {
+  const P = (pts) => N.curveData(pts.map(([x, y]) => new THREE.Vector3(x, y, 0)), 3, 'xy');
+  // Perfiles (radio, altura) en dm. Los CVs a ambos lados de cada unión están alineados: tangencia (G1).
+  const parts = [
+    ['Base', [[0, 0], [0.6, 0], [1.2, 0], [1.55, 0.05], [1.7, 0.35]]],
+    ['Cuerpo', [[1.7, 0.35], [1.85, 0.65], [1.98, 1.5], [1.88, 2.5], [1.65, 3.1], [1.6, 3.3]]],
+    ['Labio', [[1.6, 3.3], [1.55, 3.5], [1.42, 3.58], [1.3, 3.42], [1.3, 2.8], [1.25, 1.0]]],
+    ['Fondo interior', [[1.25, 1.0], [1.22, 0.55], [0.9, 0.42], [0, 0.42]]],
+  ];
+  for (const [name, pts] of parts) addSurface(N.revolve(P(pts)), name).name = name;
 }
-addSurface({ degU: 3, degV: 3, knotsU: N.clampedKnots(6, 3), knotsV: N.clampedKnots(6, 3), cvs: hood }, 'Capó').name = 'Capó';
 refreshOutliner();
-addCurve(N.curveData([[-3.25, 3.75], [-2, 2.75], [-0.5, 4.5], [1, 3], [2.25, 4.25], [3.25, 3.5]].map(([x, z]) => new THREE.Vector3(x, 0.01, z))));
 camera.position.set(8, 6.4, 10.5);
 camera.lookAt(0, 0.6, 0.6);
 pivot.set(0, 0.6, 0.6);
