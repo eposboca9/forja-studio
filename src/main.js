@@ -1209,6 +1209,7 @@ function howFor(e) {
 renderer.domElement.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); }); // sin autodesplazamiento
 renderer.domElement.addEventListener('pointerdown', (e) => {
   dragPane = paneAt(e.clientX);
+  if (carousel) { down = null; return; }
   if (navHeld || (e.button !== 0 && !(navStyle === 'alias' && tool === 'select'))) { down = null; return; }
   const canBox = tool === 'select' && !gizmo.axis && (navStyle === 'alias' || e.shiftKey);
   down = { x: e.clientX, y: e.clientY, box: canBox, boxing: false };
@@ -1540,9 +1541,8 @@ ringLabels.innerHTML = RING.map((k) => `<span data-k="${k}">${RING_NAMES[k]}</sp
 view.appendChild(ringLabels);
 const ease = (k) => (k <= 0 ? 0 : k >= 1 ? 1 : k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
 const UP = new THREE.Vector3(0, 1, 0);
-function switchLayout(l) {
-  if (l === layout || carousel) return;
-  if (l === 'split' || layout === 'split' || reduceMotion.matches) { setLayout(l); return; }
+// Geometría del anillo para la escena actual
+function ringSetup() {
   const box = boundsOf(objects.filter((o) => o.visible));
   const bc = box.isEmpty() ? pivot.clone() : box.getCenter(new THREE.Vector3());
   const size = box.isEmpty() ? new THREE.Vector3(4, 2, 4) : box.getSize(new THREE.Vector3());
@@ -1563,30 +1563,92 @@ function switchLayout(l) {
   const look = center.clone(); look.y = floorY + slotH * 0.3;
   const overPos = look.clone().addScaledVector(f, -D * Math.cos(el)).addScaledVector(UP, D * Math.sin(el));
   const overQuat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(overPos, look, UP));
-  carousel = { t0: performance.now(), dur: 2100, from: layout, to: l, swapped: false, center, R, step, r, bc, f, floorY, topY, slotW, slotH,
-    overPos, overQuat, pos: camera.position.clone(), quat: camera.quaternion.clone() };
+  return { from: layout, to: null, swapped: false, center, R, step, r, bc, f, floorY, topY, slotW, slotH, size,
+    overPos, overQuat, pos: camera.position.clone(), quat: camera.quaternion.clone(), hover: null, lift: RING.map(() => 0), screen: [] };
+}
+// Cambio directo (botones de la cabecera, menús): sube, gira y baja de una vez
+function switchLayout(l) {
+  if (l === layout || carousel) return;
+  if (l === 'split' || layout === 'split' || reduceMotion.matches) { setLayout(l); return; }
+  carousel = Object.assign(ringSetup(), { auto: true, to: l, t0: performance.now(), dur: 2100 });
   flipPanel(l);
 }
-// Cámara del espectador en el instante k (sube, se queda arriba mientras gira el anillo y vuelve a bajar)
-function carouselState(c, k) {
-  const w = ease(k / 0.3) * (1 - ease((k - 0.7) / 0.3));
-  return { pos: c.pos.clone().lerp(c.overPos, w), quat: c.quat.clone().slerp(c.overQuat, w), w, spin: ease((k - 0.24) / 0.52) };
+// Mantener V: la cámara sube y se queda arriba; con el ratón se elige un módulo (clic) y el anillo lo gira
+// hacia delante. Soltar V sin elegir nada cancela y la cámara vuelve a bajar al módulo de antes.
+const W_DUR = 520, SPIN_DUR = 800;
+function holdCarousel() {
+  if (carousel || layout === 'split' || reduceMotion.matches) return;
+  carousel = Object.assign(ringSetup(), { hold: true, held: true, anim: { a: 0, b: 1, t0: performance.now() } });
+  view.classList.add('ring-picking');
+}
+const animW = (c, now) => c.anim.a + (c.anim.b - c.anim.a) * ease((now - c.anim.t0) / W_DUR);
+function descend(c, now) { if (c.anim.b !== 0) c.anim = { a: animW(c, now), b: 0, t0: now }; view.classList.remove('ring-picking'); }
+function releaseCarousel() {
+  const c = carousel;
+  if (!c?.hold) return;
+  c.held = false;
+  if (!c.to) descend(c, performance.now());
+}
+function pickModule(kind) {
+  const c = carousel, now = performance.now();
+  if (!c?.hold || c.to) return;
+  if (kind === c.from) { descend(c, now); return; }
+  c.to = kind; c.spinT0 = now;
+  view.classList.remove('ring-picking');
+  flipPanel(kind);
+}
+// módulo bajo el cursor (el más cercano en pantalla a su modelo)
+function moduleAt(x, y) {
+  const c = carousel;
+  if (!c?.screen.length) return null;
+  let best = null, bd = Infinity;
+  c.screen.forEach((p, i) => { const d = Math.hypot(p.x - x, p.y - y); if (d < p.rad && d < bd) { bd = d; best = RING[i]; } });
+  return best;
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!carousel) return;
+  e.stopImmediatePropagation(); e.preventDefault();          // durante el carrusel el ratón solo elige módulo
+  if (carousel.hold && !carousel.to && e.button === 0) { const r = renderer.domElement.getBoundingClientRect(); const k = moduleAt(e.clientX - r.left, e.clientY - r.top); if (k) pickModule(k); }
+}, true);
+addEventListener('pointermove', (e) => {
+  if (!carousel?.hold) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  carousel.hover = carousel.to ? null : moduleAt(e.clientX - r.left, e.clientY - r.top);
+});
+addEventListener('blur', () => releaseCarousel());
+// Cámara del espectador: sube (w: 0 -> 1), gira el anillo (spin: 0 -> 1) y vuelve a bajar
+function carouselState(c, now) {
+  let w, spin;
+  if (c.auto) {
+    const k = Math.min(1, (now - c.t0) / c.dur);
+    w = ease(k / 0.3) * (1 - ease((k - 0.7) / 0.3));
+    spin = ease((k - 0.24) / 0.52);
+    c.done = k === 1;
+  } else {
+    spin = c.to ? ease((now - c.spinT0) / SPIN_DUR) : 0;
+    if (c.to && spin >= 1) descend(c, now);
+    w = animW(c, now);
+    c.done = c.anim.b === 0 && now - c.anim.t0 >= W_DUR;
+  }
+  return { pos: c.pos.clone().lerp(c.overPos, w), quat: c.quat.clone().slerp(c.overQuat, w), w, spin };
 }
 // Ángulo de cada módulo en el anillo (0 = delante; el siguiente queda a la derecha)
 function ringAngle(c, kind, spin) {
+  if (!c.to) return (RING.indexOf(kind) - RING.indexOf(c.from)) * c.step;
   const n = RING.length, from = RING.indexOf(c.from);
   let d = (RING.indexOf(c.to) - from + n) % n; if (d > n / 2) d -= n;      // el camino más corto
-  return -(RING.indexOf(kind) - from - spin * d) * c.step;
+  return (RING.indexOf(kind) - from - spin * d) * c.step;
 }
-// Un módulo colocado en el arco se dibuja con la cámara del espectador "desgirada" alrededor del eje
-function moduleCamera(c, V, a) {
+// Un módulo colocado en el anillo se dibuja con la cámara del espectador "desgirada" alrededor del eje
+// (y bajada un poco si el módulo está levantado porque el ratón está encima)
+function moduleCamera(c, V, a, lift = 0) {
   const q = new THREE.Quaternion().setFromAxisAngle(UP, -a);
-  return { pos: V.pos.clone().sub(c.center).applyQuaternion(q).add(c.center), quat: q.multiply(V.quat) };
+  return { pos: V.pos.clone().sub(c.center).applyQuaternion(q).add(c.center).addScaledVector(UP, -lift), quat: q.multiply(V.quat) };
 }
 function renderCarousel(now) {
-  const c = carousel, k = Math.min(1, (now - c.t0) / c.dur);
-  const V = carouselState(c, k);
-  if (!c.swapped && V.spin >= 0.5) { c.swapped = true; setLayout(c.to); }
+  const c = carousel;
+  const V = carouselState(c, now);
+  if (c.to && !c.swapped && V.spin >= 0.5) { c.swapped = true; setLayout(c.to); }
   const full = { x: 0, w: view.clientWidth, h: Math.max(view.clientHeight, 1) };
   const showG = ground.visible, showGz = gizmo.visible;
   ground.visible = false; gizmo.visible = false;
@@ -1594,33 +1656,37 @@ function renderCarousel(now) {
   renderer.setViewport(0, 0, full.w, full.h); renderer.setScissor(0, 0, full.w, full.h);
   renderer.clear();
   renderer.autoClear = false;
-  // los tres módulos comparten el mismo espacio de profundidad, así que se tapan entre sí bien
+  // los módulos comparten el mismo espacio de profundidad, así que se tapan entre sí bien
   const angles = RING.map((kind) => ringAngle(c, kind, V.spin));
   RING.forEach((kind, i) => {
-    const a = angles[i];
+    c.lift[i] += ((kind === c.hover ? c.slotH * 0.12 : 0) - c.lift[i]) * 0.2;          // el módulo bajo el ratón se levanta
     if (kind !== c.from && kind !== c.to && V.w < 0.02) return;      // abajo solo se ven los que cambian
-    const p = moduleCamera(c, V, a);
+    const p = moduleCamera(c, V, angles[i], c.lift[i]);
     camera.position.copy(p.pos); camera.quaternion.copy(p.quat);
     renderPane({ ...full, kind });
   });
-  // etiquetas sobre cada modelo, vistas por el espectador
+  // etiquetas sobre cada modelo y zona de cada módulo en pantalla (para elegirlo con el ratón)
   camera.position.copy(V.pos); camera.quaternion.copy(V.quat);
   camera.updateMatrixWorld(); useAspect(full);
-  const active = V.spin < 0.5 ? c.from : c.to, v = new THREE.Vector3();
+  const active = c.to && V.spin >= 0.5 ? c.to : c.from, v = new THREE.Vector3(), m = new THREE.Vector3();
   RING.forEach((kind, i) => {
     const lab = ringLabels.children[i];
     v.copy(c.bc).sub(c.center).setY(0).applyAxisAngle(UP, angles[i]).add(c.center);
-    v.y = c.topY + c.r * 0.25;
+    m.copy(v); m.y = c.floorY + c.size.y / 2 + c.lift[i]; m.project(camera);
+    const edge = v.clone(); edge.y = m.y; edge.addScaledVector(new THREE.Vector3().crossVectors(UP, c.f), c.r).project(camera);
+    c.screen[i] = { x: ((m.x + 1) / 2) * full.w, y: ((1 - m.y) / 2) * full.h, rad: Math.max(40, Math.abs(edge.x - m.x) * full.w * 0.75) };
+    v.y = c.topY + c.r * 0.25 + c.lift[i];
     v.project(camera);
     lab.style.transform = `translate(${((v.x + 1) / 2) * full.w}px, ${((1 - v.y) / 2) * full.h}px) translate(-50%, -100%)`;
-    lab.style.opacity = String(V.w * (kind === active ? 1 : 0.6));
+    lab.style.opacity = String(V.w * (kind === active || kind === c.hover ? 1 : 0.6));
     lab.classList.toggle('on', kind === active);
+    lab.classList.toggle('hover', kind === c.hover && kind !== active);
   });
   ringLabels.style.visibility = V.w > 0.01 ? 'visible' : 'hidden';
   renderer.autoClear = true;
   envBg = bg; ground.visible = showG; gizmo.visible = showGz;
   camera.position.copy(c.pos); camera.quaternion.copy(c.quat);
-  if (k === 1) { carousel = null; bgFadeT0 = now; ringLabels.style.visibility = 'hidden'; }
+  if (c.done) { carousel = null; bgFadeT0 = now; ringLabels.style.visibility = 'hidden'; view.classList.remove('ring-picking'); }
 }
 let bgFadeT0 = -1e9;
 // El panel derecho cambia de módulo girando como una placa
@@ -1654,6 +1720,12 @@ function setLayout(l) {
   resize();
 }
 const cycleLayout = () => switchLayout({ diag: 'render', render: 'ai', ai: 'diag', split: 'diag' }[layout]);
+// V: mantener para ver todos los módulos y elegir uno con el ratón; soltar sin elegir = cancelar
+addEventListener('keydown', (e) => {
+  if (e.code !== 'KeyV' || e.repeat || e.altKey || e.ctrlKey || e.metaKey || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+  holdCarousel();
+});
+addEventListener('keyup', (e) => { if (e.code === 'KeyV') releaseCarousel(); });
 document.querySelectorAll('[data-layout]').forEach((b) => b.addEventListener('click', () => switchLayout(b.dataset.layout)));
 document.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => setPickMode(b.dataset.pick)));
 document.querySelectorAll('[data-plane]').forEach((b) => b.addEventListener('click', () => setDrawPlane(b.dataset.plane)));
@@ -2051,11 +2123,14 @@ async function claudeSample() {
   sampleCap ??= window.claude?.use ? await window.claude.use('sample').catch(() => null) : null;
   return sampleCap;
 }
-async function askClaude(text, answers) {
+async function askClaude(text, answers, images = [], force = false) {
   const cap = await claudeSample();
   if (!cap) return null;
-  const done = answers.length ? `\n\nRespuestas del usuario a tus preguntas:\n${answers.map((a) => `- ${a.q} → ${a.a}`).join('\n')}\nYa no preguntes más: devuelve items.` : '';
-  const r = await cap.json(`${AI.CLAUDE_INSTRUCTIONS}\n\nPedido: ${text}${done}`, { modelTier: 'quick' });
+  const done = force && !answers.length ? '\n\nNo hagas preguntas: devuelve items ya, con suposiciones razonables.' : answers.length ? `\n\nRespuestas del usuario a tus preguntas:\n${answers.map((a) => `- ${a.q} → ${a.a}`).join('\n')}\nYa no preguntes más: devuelve items.` : '';
+  const pics = images.length ? `\n\nEl usuario adjunta ${images.length} foto(s) del mismo objeto desde distintos ángulos: modélalo lo más fiel posible.` : '';
+  // primero (preguntas) basta el modelo rápido; para construir la pieza se usa el normal, que piensa mejor la forma
+  const r = await cap.json(`${AI.CLAUDE_INSTRUCTIONS}\n\nPedido: ${text}${pics}${done}`,
+    { modelTier: answers.length || images.length || force ? 'default' : 'quick', ...(images.length ? { images } : {}) });
   return r && (Array.isArray(r.items) || Array.isArray(r.questions)) ? r : null;
 }
 // Coloca lo generado en fila a la derecha de la escena. Mallas (tornillería, muebles) o superficies NURBS (vasos…)
@@ -2068,16 +2143,30 @@ function placeGenerated(cmds) {
     if (!gen) continue;
     for (let k = 0; k < Math.min(20, c.n || 1); k++) {
       const res = gen(c.params || {});
-      if (res.surfaces) {
-        const all = res.surfaces.flatMap((sf) => sf.data.cvs.flat());
-        const x0 = Math.min(...all.map((v) => v.x)), x1 = Math.max(...all.map((v) => v.x));
-        for (const sf of res.surfaces) {
-          sf.data.cvs.forEach((row) => row.forEach((v) => (v.x += x - x0)));
+      if (res.surfaces || res.meshes) {
+        // varias piezas (superficies NURBS y mallas): se colocan juntas, apoyadas en el suelo
+        const sfs = res.surfaces || [], ms = res.meshes || [];
+        const box = new THREE.Box3();
+        sfs.forEach((sf) => sf.data.cvs.flat().forEach((v) => box.expandByPoint(new THREE.Vector3(v.x, v.y, v.z))));
+        ms.forEach((m) => { m.geometry.computeBoundingBox(); box.union(m.geometry.boundingBox); });
+        if (box.isEmpty()) continue;
+        const d = new THREE.Vector3(x - box.min.x, -box.min.y, -(box.min.z + box.max.z) / 2);
+        const many = sfs.length + ms.length > 1;
+        for (const sf of sfs) {
+          sf.data.cvs.forEach((row) => row.forEach((v) => { v.x += d.x; v.y += d.y; v.z += d.z; }));
           const o = addSurface(sf.data, sf.name);
-          o.name = res.name + (k ? ` ${k + 1}` : '');
+          o.name = many ? `${res.name} · ${sf.name}` : res.name + (k ? ` ${k + 1}` : '');
+          if (sf.material) o.mat = sf.material;
           created.push(o);
         }
-        x += (x1 - x0) * 1.35 + 0.15;
+        for (const m of ms) {
+          m.geometry.translate(d.x, d.y, d.z);
+          const o = addMesh(m.geometry, m.name);
+          o.name = many ? `${res.name} · ${m.name}` : res.name;
+          if (m.material) o.mat = m.material;
+          created.push(o);
+        }
+        x += (box.max.x - box.min.x) * 1.35 + 0.15;
         continue;
       }
       const { geometry, name } = res;
@@ -2114,7 +2203,7 @@ function aiAsk() {
     <button class="chip ghost" data-def>${c.claude ? 'Como veas' : 'Por defecto'}</button><button class="chip ghost" data-now>Crear ya</button></div>`);
   el.querySelectorAll('[data-i]').forEach((b) => b.addEventListener('click', () => aiAnswer(options[+b.dataset.i], b)));
   el.querySelector('[data-def]').addEventListener('click', (e) => aiAnswer(null, e.target));
-  el.querySelector('[data-now]').addEventListener('click', (e) => { if (aiConv !== c) return; c.queue.length = 0; markChosen(e.target); aiNext(); });
+  el.querySelector('[data-now]').addEventListener('click', (e) => { if (aiConv !== c) return; c.queue.length = 0; c.forced = true; markChosen(e.target); aiNext(); });
   $('ai-status').textContent = 'Elige una opción o escribe la respuesta.';
 }
 function markChosen(btn) { btn.closest('.ai-chips').querySelectorAll('button').forEach((b) => { b.disabled = true; b.classList.toggle('on', b === btn); }); }
@@ -2140,8 +2229,8 @@ async function aiNext() {
   if (c.queue.length) return aiAsk();
   aiConv = null;
   if (c.claude) {
-    $('ai-status').textContent = 'Pensando…';
-    try { const r = await askClaude(c.text, c.answers); if (r?.items?.length) return aiCreate(c.text, r.items, r.note); aiSay(esc(r?.note || 'No pude hacerlo.')); }
+    $('ai-status').textContent = 'Modelando… (puede tardar hasta un minuto)';
+    try { const r = await askClaude(c.text, c.answers, c.images || [], !!c.forced); if (r?.items?.length) return aiCreate(c.text, r.items, r.note); aiSay(esc(r?.note || 'No pude hacerlo.')); }
     catch (e) { aiSay('No pude hablar con Claude ahora. Prueba de nuevo en un momento.'); console.warn(e); }
     $('ai-status').textContent = '';
     return;
@@ -2155,43 +2244,70 @@ function aiCreate(text, cmds, note) {
   applySelection(created, 'replace');
   frameObjects(created);
   const what = cmds.filter((c) => AI.CATALOG[c.type]).map((c) => AI.describe({ ...c, n: c.n || 1, params: { ...c.params } }));
-  aiSay(`Listo: ${esc(note || what.join(' · '))}.`);
+  aiSay(`Listo: ${esc((note || what.join(' · ') || [...new Set(created.map((o) => o.name.split(' · ')[0]))].join(', ')).replace(/[.\s]+$/, ''))}.`);
   $('ai-status').textContent = '';
   const li = document.createElement('li');
   li.innerHTML = `<b>${esc(text)}</b> → ${created.length} ${created.length === 1 ? 'objeto' : 'objetos'}`;
   $('ai-log').prepend(li);
   updateStatus();
 }
+// Fotos del objeto (solo dentro de claude.ai, con la capacidad sample + imágenes)
+let aiPhotos = [];
+function renderPhotos() {
+  $('ai-photos').innerHTML = aiPhotos.map((f, i) => `<span class="ai-photo"><img src="${URL.createObjectURL(f)}" alt="Foto ${i + 1}"><button data-i="${i}" aria-label="Quitar foto">×</button></span>`).join('');
+  $('ai-photos').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { aiPhotos.splice(+b.dataset.i, 1); renderPhotos(); }));
+}
+$('ai-photo-btn').addEventListener('click', () => $('ai-photo-in').click());
+$('ai-photo-in').addEventListener('change', async (e) => {
+  const lim = (await (await claudeSample())?.limits().catch(() => null))?.images;
+  if (!lim) { aiSay('Las fotos solo funcionan con Forja abierto dentro de Claude (allí la IA puede ver las imágenes).'); e.target.value = ''; return; }
+  aiPhotos = [...aiPhotos, ...[...e.target.files].filter((f) => lim.mediaTypes.includes(f.type))].slice(0, lim.maxCount);
+  e.target.value = '';
+  renderPhotos();
+  $('ai-status').textContent = 'Escribe qué es (y una medida real si la sabes) y pulsa Crear.';
+});
+// Un pedido "sencillo" de la biblioteca se resuelve aquí mismo; uno con detalles extra (marca, "con asa"...) va a Claude si está
+const EXTRA = /\bcon (?!patas|asiento|respaldo|cabeza|sus tuercas|tuercas|arandelas)|\bmarca\b|\bestilo\b|\bcomo (?:el|la|un|una)\b|\bpara\b|\bde (?:madera|metal|vidrio|plastico|plástico)\b/i;
 async function runAI(text) {
   text = text.trim();
-  if (!text) return;
+  const photos = aiPhotos.slice();
+  if (!text && !photos.length) return;
   $('ai-prompt').value = '';
   // si hay una pregunta abierta, lo escrito es la respuesta
-  if (aiConv?.queue.length && !AI.parsePrompt(text)) return aiAnswer(null, null, text);
+  if (aiConv?.queue.length && !photos.length && !AI.parsePrompt(text)) return aiAnswer(null, null, text);
   aiConv = null;
-  aiSay(esc(text), 'user');
-  const items = AI.parsePrompt(text);
-  if (items) {
+  const shown = text || 'el objeto de las fotos';
+  aiSay(esc(shown) + (photos.length ? `<div class="ai-photos small">${photos.map((f) => `<img src="${URL.createObjectURL(f)}" alt="">`).join('')}</div>` : ''), 'user');
+  aiPhotos = []; renderPhotos();
+  const cap = await claudeSample();
+  const items = photos.length ? null : AI.parsePrompt(text);
+  if (items && !(cap && EXTRA.test(text))) {
     const queue = AI.questionsFor(items, 2);
     aiConv = { text, items, queue, total: queue.length };
     if (queue.length) aiSay(`Voy a hacer ${items.map((it) => AI.CATALOG[it.type].label).join(' y ')}. Para que salga como quieres, ${queue.length === 1 ? 'una pregunta' : 'un par de preguntas'}:`);
     return aiNext();
   }
-  // Pedido que el intérprete local no conoce: dentro de claude.ai se le pregunta a Claude
+  if (!cap) {
+    const known = Object.values(AI.CATALOG);
+    const el = aiSay(`${photos.length ? 'Para modelar desde fotos' : 'Para objetos fuera de la biblioteca'} hace falta la IA de Claude: abre Forja dentro de Claude.
+      Aquí, sin conexión, sé hacer: <div class="ai-chips">${known.map((k) => `<button class="chip">${k.label}</button>`).join('')}</div>`);
+    el.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => runAI('un ' + b.textContent)));
+    return;
+  }
+  // Claude: primero un par de preguntas para concretar, después construye el objeto (de la biblioteca o con piezas)
   $('ai-status').textContent = 'Pensando…';
   let r = null;
-  try { r = await askClaude(text, []); } catch (e) { console.warn(e); }
+  try { r = await askClaude(shown, [], photos); }
+  catch (e) { console.warn(e); aiSay(e?.code === 'not_granted' ? 'Sin permiso para usar Claude en esta página.' : 'No pude hablar con Claude ahora. Prueba otra vez en un momento.'); }
   $('ai-status').textContent = '';
   if (r?.questions?.length) {
-    aiConv = { text, claude: true, queue: r.questions.slice(0, 2), answers: [] };
+    aiConv = { text: shown, claude: true, queue: r.questions.slice(0, 2), answers: [], images: photos };
     aiConv.total = aiConv.queue.length;
+    aiSay(`Para que salga ${photos.length ? 'igual que en las fotos' : 'lo más parecido posible'}, ${aiConv.total === 1 ? 'una pregunta' : 'un par de preguntas'}:`);
     return aiNext();
   }
-  if (r?.items?.length) return aiCreate(text, r.items, r.note);
-  const known = Object.values(AI.CATALOG);
-  const el = aiSay(`${r?.note ? esc(r.note) + '<br>' : ''}Todavía no sé hacer eso${sampleCap ? '' : ' aquí (sin conexión con Claude solo entiendo objetos conocidos)'}. Sé hacer:
-    <div class="ai-chips">${known.map((k) => `<button class="chip">${k.label}</button>`).join('')}</div>`);
-  el.querySelectorAll('.chip').forEach((b) => b.addEventListener('click', () => runAI('un ' + b.textContent)));
+  if (r?.items?.length) return aiCreate(shown, r.items, r.note);
+  if (r) aiSay(esc(r.note || 'No pude hacerlo.'));
 }
 $('ai-go').addEventListener('click', () => runAI($('ai-prompt').value));
 $('ai-prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runAI(e.target.value); } });
@@ -2209,7 +2325,6 @@ addEventListener('keydown', (e) => {
   else if (k === 'r') setXform('scale');
   else if (k === 'd' || k === 'insert') togglePivotEdit();
   else if (k === 'c') setTool('curve');
-  else if (k === 'v') cycleLayout();
   else if (k === 'o') setPickMode('object');
   else if (k === 'p') setPickMode('cv');
   else if (k === '4') setDiag('showroom');
@@ -2413,14 +2528,102 @@ function makeRadial(rings, radii) {
   return st;
 }
 const puck = makeRadial(PUCK, [112, 232]);
-const disp = makeRadial(DISPLAY, [150]);
+// Marking menus como los de Alias: planos, con 8 opciones en las direcciones de la brújula (y una lista
+// extra debajo). Ctrl+Shift + botón izquierdo = selección, medio = transformar, derecho = visualización.
+// Se arrastra hacia la opción y se suelta; un clic rápido sin mover lo deja abierto. Espacio = visualización.
+function makeMarking(title, items, extra = []) {
+  const el = document.createElement('div');
+  el.className = 'mmenu'; el.hidden = true;
+  el.innerHTML = `<svg class="mm-lines"><line x1="0" y1="0" x2="0" y2="0" /></svg><div class="mm-center"></div><div class="mm-title">${title}</div>`;
+  document.body.append(el);
+  const line = el.querySelector('line'), R = 96, all = [];
+  items.forEach((it, n) => {
+    if (!it) return;
+    const a = -Math.PI / 2 + (n / 8) * Math.PI * 2, x = Math.cos(a) * R, y = Math.sin(a) * R * 0.78;
+    const b = document.createElement('button');
+    b.className = 'mm-item' + (it.soon ? ' soon' : '');
+    b.innerHTML = `${esc(it.label)}${it.key ? `<kbd>${it.key}</kbd>` : ''}`;
+    b.style.left = x + 'px'; b.style.top = y + 'px';
+    b.style.transform = `translate(${-50 + 50 * Math.round(Math.cos(a) * 100) / 100}%, ${-50 + 50 * Math.round(Math.sin(a) * 100) / 100}%)`;
+    el.append(b);
+    all.push({ it, b, a, x, y });
+  });
+  if (extra.length) {
+    const list = document.createElement('div');
+    list.className = 'mm-extra';
+    list.style.top = R * 0.78 + 34 + 'px';
+    extra.forEach((it) => {
+      const b = document.createElement('button');
+      b.className = 'mm-item';
+      b.textContent = it.label;
+      list.append(b);
+      all.push({ it, b, extra: true });
+    });
+    el.append(list);
+  }
+  const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, sticky: false };
+  st.highlight = (h) => {
+    st.hover = h;
+    all.forEach((x) => x.b.classList.toggle('on', x === h));
+    line.setAttribute('x2', h && !h.extra ? h.x : 0); line.setAttribute('y2', h && !h.extra ? h.y : 0);
+  };
+  st.pickAt = (x, y) => {
+    const over = all.find((o) => o.extra && (() => { const r = o.b.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; })());
+    if (over) return st.highlight(over);
+    const dx = x - st.at.x, dy = y - st.at.y;
+    if (Math.hypot(dx, dy) < 26) return st.highlight(null);
+    const ang = Math.atan2(dy / 0.78, dx);
+    let best = null, bd = 1e9;
+    for (const o of all) { if (o.extra) continue; const da = Math.abs(Math.atan2(Math.sin(ang - o.a), Math.cos(ang - o.a))); if (da < bd) { bd = da; best = o; } }
+    st.highlight(bd < Math.PI / 8 + 0.05 ? best : null);
+  };
+  st.show = (x, y) => {
+    st.at = { x: Math.min(innerWidth - 190, Math.max(190, x)), y: Math.min(innerHeight - 150 - extra.length * 28, Math.max(110, y)) };
+    el.style.left = st.at.x + 'px'; el.style.top = st.at.y + 'px';
+    el.hidden = false; st.open = true; st.sticky = false; st.highlight(null); st.t0 = performance.now();
+  };
+  st.close = (run) => {
+    if (!st.open) return;
+    st.open = false; el.hidden = true;
+    const h = st.hover;
+    if (run && h) (h.it.soon ? soon(h.it.label) : h.it.run)();
+  };
+  all.forEach((x) => {
+    x.b.addEventListener('pointerenter', () => st.highlight(x));
+    x.b.addEventListener('click', () => { st.highlight(x); st.close(true); });
+  });
+  return st;
+}
+const D = Object.fromEntries(DISPLAY[0].map((it) => [it.k, it]));
+const pickMenu = makeMarking('Selección', [
+  { label: 'Objeto', key: 'O', run: () => setPickMode('object') },
+  { label: 'Curvas', run: () => setPickMode('object', 'curve') },
+  { label: 'Superficies', run: () => setPickMode('object', 'surface') },
+  { label: 'Encuadrar', key: 'F', run: frameSelection },
+  { label: 'Nada', run: pickNothing },
+  { label: 'Mostrar todo', run: unhideAll },
+  { label: 'Ocultar', run: hideSelection },
+  { label: 'CV', key: 'P', run: () => setPickMode('cv') },
+]);
+const xformMenu = makeMarking('Transformar', [
+  { label: 'Mover', key: 'W', run: () => { setTool('select'); setXform('translate'); } },
+  { label: 'Rotar', key: 'E', run: () => { setTool('select'); setXform('rotate'); } },
+  { label: 'Escalar', key: 'R', run: () => { setTool('select'); setXform('scale'); } },
+  { label: 'Pivote', key: 'D', run: togglePivotEdit },
+  { label: 'Duplicar', run: duplicateSelection },
+  { label: 'Borrar', key: 'Supr', run: deleteSelection },
+  { label: 'Centrar pivote', run: centerPivots },
+  { label: 'Punto de interés', key: 'L', run: pivotToSelection },
+]);
+const disp = makeMarking('Visualización', [D.shade, D.visu, D.ai, D.model, D.full, D.grid, D.ctrlOff, D.ctrlOn], [D.info, D.panel, D.split]);
+const MENUS = [puck, pickMenu, xformMenu, disp];
 let lastPtr = { x: innerWidth / 2, y: innerHeight / 2 };
 addEventListener('pointermove', (e) => {
   lastPtr = { x: e.clientX, y: e.clientY };
-  for (const m of [puck, disp]) if (m.open) m.pickAt(e.clientX, e.clientY);
+  for (const m of MENUS) if (m.open) m.pickAt(e.clientX, e.clientY);
 });
 addEventListener('pointerdown', (e) => {
-  for (const m of [puck, disp]) if (m.open && m.sticky && !e.target.closest('.puck')) m.close(false);
+  for (const m of MENUS) if (m.open && m.sticky && !e.target.closest('.puck, .mmenu')) m.close(false);
 }, true);
 // Tab = Puck. Mantener y soltar sobre la opción; una pulsación corta lo deja abierto para hacer clic.
 function bindKey(code, m) {
@@ -2441,16 +2644,22 @@ function bindKey(code, m) {
 }
 bindKey('Tab', puck);
 bindKey('Space', disp);
-addEventListener('keydown', (e) => { if (e.key === 'Escape') { puck.close(false); disp.close(false); } }, true);
-let radialByMouse = false;
+addEventListener('keydown', (e) => { if (e.key === 'Escape') MENUS.forEach((m) => m.close(false)); }, true);
+let mouseMenu = null;
 addEventListener('pointerdown', (e) => {
-  if (!(e.ctrlKey && e.shiftKey) || e.target !== renderer.domElement) return;
+  if (!(e.ctrlKey && e.shiftKey) || e.target !== renderer.domElement || carousel) return;
   e.stopImmediatePropagation(); e.preventDefault();
-  radialByMouse = true; disp.show(e.clientX, e.clientY);
+  MENUS.forEach((m) => m.close(false));
+  mouseMenu = [pickMenu, xformMenu, disp][e.button] || disp;
+  mouseMenu.show(e.clientX, e.clientY);
 }, true);
 addEventListener('pointerup', (e) => {
-  if (!radialByMouse) return;
-  radialByMouse = false; e.stopImmediatePropagation(); disp.close(true);
+  const m = mouseMenu;
+  if (!m) return;
+  mouseMenu = null; e.stopImmediatePropagation();
+  if (m.hover) m.close(true);
+  else if (performance.now() - m.t0 < 350) m.sticky = true;      // clic rápido: queda abierto
+  else m.close(false);
 }, true);
 
 // ---------- Dibujo de cada cuadro ----------
@@ -2472,7 +2681,21 @@ function diagMaterial() {
   if (ENV_MODES[diagMode]) { envDiagMat.uniforms.uMode.value = ENV_MODES[diagMode]; return envDiagMat; }
   return diagMode === 'curv' ? curvMat : diagMode === 'wire' ? wireMat : zebraMat;
 }
+// Etiqueta junto al cursor mientras mover/rotar/escalar con los botones del ratón está activo (como la línea de ayuda de Alias)
+const xfPrompt = document.createElement('div');
+xfPrompt.className = 'xf-prompt'; xfPrompt.hidden = true;
+document.body.append(xfPrompt);
+function updateXfPrompt() {
+  const on = mouseXform && tool === 'select' && !pivotEdit && !carousel && !MENUS.some((m) => m.open) && hasTransformable();
+  xfPrompt.hidden = !on;
+  if (!on) return;
+  const txt = xform === 'scale' ? 'ESCALAR <i>izq</i> todo · <i>medio</i> Y · <i>der</i> X Z'
+    : `${xform === 'rotate' ? 'ROTAR' : 'MOVER'} <i>izq</i> X · <i>medio</i> Y · <i>der</i> Z`;
+  if (xfPrompt.dataset.t !== txt) { xfPrompt.innerHTML = txt; xfPrompt.dataset.t = txt; }
+  xfPrompt.style.transform = `translate(${lastPtr.x + 18}px, ${lastPtr.y + 20}px)`;
+}
 function renderFrame(now) {
+  updateXfPrompt();
   pivotMarker.position.copy(pivot);
   pivotMarker.scale.setScalar(camera.position.distanceTo(pivot) * 0.06);
   pivotMarker.visible = navHeld || !!navDrag || now < pivotShowUntil;

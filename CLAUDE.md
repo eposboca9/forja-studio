@@ -139,7 +139,8 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - Panel por módulo: secciones con data-module="all|diag|render"; showModule()/flipPanel() con giro de placa.
   VISU: materiales, editor de material, entornos (Estudio RoomEnvironment, Exterior y Atardecer con Sky, Nublado), fondo desenfocado,
   gestión de color AgX/ACES, exposición, sombra.
-- Contraste: el muro va en .app y header/pane-head/status usan mix-blend-mode: difference (texto blanco). No volver a poner
+- Contraste (v0.10): ya NO se usa mix-blend-mode: difference (fallaba con objetos grises). El texto de header/pane-head/status
+  lleva color --fg con halo de text-shadow del color --bg. El muro sigue en .app. No volver a poner
   z-index/opacity/transform en .top o .view: crean capas aisladas y rompen la mezcla. El <header> está después de <main> en el DOM.
 - Showroom estilo Alias: horizonte bajo (-0.32), paredes claras, suelo oscuro reflejado, especular y luz de relleno.
 - Idea del usuario para el futuro: carrusel configurable con más módulos, p. ej. "IA" (prompts que crean tornillos M6, mesas,
@@ -177,6 +178,22 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Conversación en #ai-chat con opciones de un clic, "Por defecto", "Crear ya" o respuesta escrita. Vaso, cuenco y botella
   salen como superficies NURBS de revolución. Pedidos desconocidos: dentro de claude.ai pregunta a Claude (sample), que puede
   devolver preguntas o items; en GitHub Pages muestra lo que sabe hacer. Pruebas del intérprete: scratchpad aitest/run.mjs.
+
+## Hecho (v0.10)
+
+- Carrusel con V mantenida (holdCarousel/releaseCarousel/pickModule): la cámara sube y se queda arriba; el módulo bajo el
+  ratón se levanta (c.lift) y su etiqueta se aclara; clic = el anillo lo gira al frente y baja; soltar V sin elegir = cancela.
+  Los botones de la cabecera y los menús siguen haciendo el giro automático (c.auto). ringSetup() calcula el anillo.
+- Marking menus estilo Alias (makeMarking, planos, 8 direcciones + lista extra): Ctrl+Shift+izq = Selección (Objeto, Curvas,
+  Superficies, CV, Nada...), +medio = Transformar (Mover, Rotar, Escalar, Pivote...), +der = Visualización; Espacio = Visualización.
+  El Puck (Tab) sigue siendo el anillo 3D de esferas (makeRadial). MENUS = [puck, pickMenu, xformMenu, disp].
+- Etiqueta junto al cursor (.xf-prompt) cuando mover/rotar/escalar con los 3 botones está activo.
+- IA libre: tipo "custom" con piezas (ai.js buildParts: revolve/sphere -> NURBS; extrude/box/torus/tube -> malla; position,
+  rotation en grados, material). Claude (sample) primero pregunta (tier quick) y luego construye (tier default).
+  "Crear ya" fuerza items sin preguntas. Fotos: botón "Añadir fotos" -> sample con images (capacidad {sample:{images:true}}).
+  Pedidos de biblioteca con detalles extra (EXTRA: "con asa", "marca"...) van a Claude si está disponible.
+  Prueba con Claude simulado: scratchpad taic.mjs (addInitScript define window.claude).
+- Publicar el Artifact con capabilities {sample: {images: true}, downloads: true}.
 
 ## Siguiente paso
 

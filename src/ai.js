@@ -169,7 +169,74 @@ export function bottle({ h = 25, d = 7, t = 0.25 }) {
   return { surfaces: [{ data: revolveProfile(pts), name: 'Botella' }], name: `Botella ${h} cm` };
 }
 
-export const GENERATORS = { bolt, nut, washer, table, chair, vase, bowl, bottle };
+// ---------- Objetos libres hechos de piezas (para lo que no está en la biblioteca) ----------
+// Claude describe el objeto como piezas sencillas en cm, Y hacia arriba, base del objeto en y = 0:
+//   revolve  { profile: [[r, y], ...], smooth }  perfil girado alrededor del eje Y de la pieza -> superficie NURBS
+//   extrude  { outline: [[x, z], ...], height, smooth }  contorno cerrado en el plano XZ, extruido hacia arriba -> malla
+//   box      { size: [w, h, d], radius }  -> malla (radius = canto redondeado)
+//   sphere   { radius }  -> superficie NURBS
+//   torus    { radius, tube, arc }  -> malla (asas, aros)
+//   tube     { path: [[x, y, z], ...], radius }  -> malla (cables, asas curvas)
+// Todas aceptan position [x, y, z], rotation [rx, ry, rz] en grados, name y material.
+export const PART_MATERIALS = ['paint', 'black', 'pearl', 'alu', 'chrome', 'ceram', 'glass', 'plastic', 'clay'];
+const V3 = (a, d = 0) => new THREE.Vector3(+(a?.[0] ?? d), +(a?.[1] ?? d), +(a?.[2] ?? d));
+function partMatrix(pt) {
+  const r = V3(pt.rotation).multiplyScalar(Math.PI / 180);
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(r.x, r.y, r.z, 'XYZ'));
+  return new THREE.Matrix4().compose(V3(pt.position).multiplyScalar(CM), q, new THREE.Vector3(1, 1, 1));
+}
+function profileSurface(pts, smooth) {
+  const v = pts.map(([r, y]) => new THREE.Vector3(Math.max(0, +r) * CM, +y * CM, 0));
+  const c = smooth === false || v.length < 3 ? N.curveData(v, 1, 'xy') : N.fitCurve(v, 3, 'xy');
+  return N.revolve(c);
+}
+export function buildParts(spec) {
+  const surfaces = [], meshes = [];
+  const parts = Array.isArray(spec?.parts) ? spec.parts.slice(0, 40) : [];
+  for (const pt of parts) {
+    const M = partMatrix(pt), name = String(pt.name || pt.shape || 'Pieza').slice(0, 40);
+    const material = PART_MATERIALS.includes(pt.material) ? pt.material : undefined;
+    try {
+      if (pt.shape === 'revolve' || pt.shape === 'sphere') {
+        let prof = pt.profile;
+        if (pt.shape === 'sphere') {
+          const R = +pt.radius || 5;
+          prof = Array.from({ length: 9 }, (_, k) => { const a = -Math.PI / 2 + (k / 8) * Math.PI; return [R * Math.cos(a), R + R * Math.sin(a)]; });
+        }
+        if (!Array.isArray(prof) || prof.length < 2) continue;
+        const data = profileSurface(prof.slice(0, 60), pt.smooth);
+        const v = new THREE.Vector3();
+        data.cvs.forEach((row) => row.forEach((c) => { v.set(c.x, c.y, c.z).applyMatrix4(M); c.x = v.x; c.y = v.y; c.z = v.z; }));
+        surfaces.push({ data, name, material });
+        continue;
+      }
+      let g = null;
+      if (pt.shape === 'extrude' && Array.isArray(pt.outline) && pt.outline.length >= 3) {
+        const sh = new THREE.Shape();
+        const o = pt.outline.slice(0, 200).map(([x, z]) => new THREE.Vector2(+x, -+z));
+        if (pt.smooth) sh.splineThru([...o, o[0]]); else sh.setFromPoints(o);
+        g = extrudeY(sh, Math.max(0.05, +pt.height || 1), 0, Math.min(0.2, (+pt.height || 1) * 0.05));
+      } else if (pt.shape === 'box') {
+        const [w, h, d] = [0, 1, 2].map((i) => Math.max(0.05, +(pt.size?.[i] ?? 5)));
+        g = new THREE.BoxGeometry(w, h, d).translate(0, h / 2, 0);
+      } else if (pt.shape === 'torus') {
+        g = new THREE.TorusGeometry(+pt.radius || 3, +pt.tube || 0.5, 24, 64, ((+pt.arc || 360) * Math.PI) / 180);
+      } else if (pt.shape === 'tube' && Array.isArray(pt.path) && pt.path.length >= 2) {
+        const curve = new THREE.CatmullRomCurve3(pt.path.slice(0, 60).map((q) => V3(q)));
+        g = new THREE.TubeGeometry(curve, 96, +pt.radius || 0.5, 20, false);
+      }
+      if (!g) continue;
+      g.scale(CM, CM, CM);
+      g.applyMatrix4(M);
+      meshes.push({ geometry: finish([g], 1), name, material });
+    } catch (e) { console.warn('pieza no válida', pt, e); }
+  }
+  return { surfaces, meshes, name: String(spec?.name || 'Objeto').slice(0, 40) };
+}
+// Generador "custom": un objeto libre descrito por piezas
+export const custom = (params) => buildParts(params);
+
+export const GENERATORS = { bolt, nut, washer, table, chair, vase, bowl, bottle, custom };
 
 // ---------- Intérprete de pedidos en español, con preguntas ----------
 // Cada tipo tiene sus parámetros en orden de importancia. Lo que el pedido no diga se pregunta
@@ -349,13 +416,36 @@ export function describe(cmd) {
   return `${name} de ${p.d} cm de diámetro`;
 }
 
-// Instrucciones para que Claude traduzca pedidos libres (cuando la página corre dentro de claude.ai)
-export const CLAUDE_INSTRUCTIONS = `Eres el módulo IA de Forja, un modelador 3D. Con el pedido del usuario (y las respuestas que ya dio)
-responde SOLO con JSON de una de estas dos formas:
-1) Si el pedido es vago y aún no hay respuestas, haz como mucho 2 preguntas concretas:
-   {"questions":[{"q":"pregunta corta en español","options":["opción 1","opción 2","opción 3"]}]}
-2) Si ya se puede, los objetos: {"items":[{"type":"bolt|nut|washer|table|chair|vase|bowl|bottle","params":{...},"n":1}],"note":"explicación breve en español"}
-Parámetros: bolt {d: métrica ISO en mm (3,4,5,6,8,10,12,16,20), L: largo en mm, head: "hex"|"allen"}; nut {d}; washer {d};
-table {w, dep, h en cm, legs: "recta"|"conica"|"redonda", shape: "rect"|"redonda"}; chair {seat: altura del asiento en cm, back: altura del respaldo en cm};
-vase {h, d en cm, forma: "recto"|"abombado"|"conico"}; bowl {d, h en cm}; bottle {h, d en cm}. n = cantidad (máx 20).
-Si el pedido no se parece a ninguno de esos tipos, elige el más cercano y dilo en note; si no hay ninguno parecido, items vacío y explica en note qué tipos hay.`;
+// Instrucciones para Claude (cuando la página corre dentro de claude.ai, capacidad "sample")
+export const CLAUDE_INSTRUCTIONS = `Eres el módulo IA de Forja, un modelador 3D de superficies NURBS. El usuario pide un objeto en español
+(a veces con fotos). Responde SOLO con JSON, de una de estas dos formas:
+
+1) Preguntas, si faltan datos importantes y todavía no hay respuestas (máximo 2, concretas, con 2-4 opciones cortas):
+   {"questions":[{"q":"¿...?","options":["...","..."]}]}
+   Pregunta lo que más cambia la forma: medida principal real, proporción, estilo/variante, detalles que no se ven en las fotos.
+
+2) El objeto:
+   {"items":[{"type":"...","params":{...},"n":1}],"note":"frase corta en español de lo que hiciste"}
+
+Tipos de la biblioteca (úsalos si encajan exactamente):
+ bolt {d: métrica ISO mm (3,4,5,6,8,10,12,16,20), L: largo mm, head: "hex"|"allen"}; nut {d}; washer {d};
+ table {w, dep, h cm, legs: "recta"|"conica"|"redonda", shape: "rect"|"redonda"}; chair {seat, back cm};
+ vase {h, d cm, forma: "recto"|"abombado"|"conico"}; bowl {d, h cm}; bottle {h, d cm}.
+
+Para CUALQUIER otro objeto usa "custom" y constrúyelo con piezas (nunca digas que no se puede):
+ {"type":"custom","params":{"name":"Lápiz","parts":[ ...piezas... ]}}
+ Unidades cm, Y hacia arriba, el objeto apoyado en y = 0 (o tumbado si es su posición natural), centrado en x = z = 0.
+ Piezas (todas aceptan "name", "position":[x,y,z], "rotation":[rx,ry,rz] en grados, "material"):
+  - {"shape":"revolve","profile":[[r,y],...],"smooth":true}  perfil (radio, altura) girado alrededor del eje Y local; empieza y acaba
+    en r = 0 si la pieza es cerrada. smooth:false = tramos rectos con esquinas vivas. Ideal para piezas redondas (es NURBS).
+  - {"shape":"extrude","outline":[[x,z],...],"height":h,"smooth":false}  contorno cerrado en el plano XZ extruido hacia +Y
+    (perfiles hexagonales, placas, siluetas). smooth:true lo redondea.
+  - {"shape":"box","size":[ancho,alto,fondo]}  apoyada en y = 0 local.
+  - {"shape":"sphere","radius":r}  apoyada en y = 0 local.
+  - {"shape":"torus","radius":R,"tube":r,"arc":360}  en el plano XY local (asas, aros).
+  - {"shape":"tube","path":[[x,y,z],...],"radius":r}  tubo por una curva suave (asas, cables, patas curvas).
+ materials: paint (pintura roja), black, pearl (azul perlado), alu, chrome, ceram (cerámica), glass, plastic (negro), clay.
+ Usa medidas reales y proporciones correctas (consulta lo que sabes del objeto real, p. ej. un lápiz BIC mide 17,5 cm y 0,7 cm
+ entre caras hexagonales). Para piezas tumbadas usa rotation (p. ej. [0,0,90] tumba un eje Y sobre X). Entre 1 y 25 piezas.
+ Con fotos: estima las proporciones midiendo en las fotos, respeta la silueta y los detalles visibles, y usa la medida real
+ que te dé el usuario como escala.`;
