@@ -833,7 +833,7 @@
   .bf-ui .dis { opacity: .4; pointer-events: none; }
   /* datos de la pieza abajo a la izquierda de la vista, como la información de Forja; y el aviso de progreso */
   .bf-hud { position: absolute; left: 18px; bottom: 34px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; z-index: 5; pointer-events: none; }
-  .app:not([data-layout-now="forge"]) .bf-hud, .app:not([data-layout-now="forge"]) .bf-loader { display: none !important; }
+  .app:not([data-layout-now="forge"]) .bf-hud, .app:not([data-layout-now="forge"]):not([data-forge-busy="1"]) .bf-loader { display: none !important; }
   .bf-hud .chip { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .06em; color: var(--fg); }
   .bf-hud .chip[hidden] { display: none; }
   .bf-hud .chip .dot { width: 7px; height: 7px; background: currentColor; opacity: .4; } .bf-hud .chip.ok .dot { background: #2fb36b; opacity: 1; } .bf-hud .chip.bad .dot { background: #e0612b; opacity: 1; }

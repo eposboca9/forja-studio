@@ -26,7 +26,9 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - `src/nurbs.js`: matemática NURBS pura (clampedKnots, greville, fitCurve/fitSurface, rebuild*, loft, extrude, revolve, planeData).
   OJO: en three 0.160 `NURBSSurface.getPoint(u, v, target)` NO devuelve el punto, solo rellena `target`.
 - `src/main.js`: escena (array `objects`), selección, herramientas, paneles.
-- Para publicar el Artifact: página = index.html sin <!doctype>/<html>/<head>/<body>, y `files` con src/main.js y src/nurbs.js.
+- Para publicar el Artifact: página = index.html sin <!doctype>/<html>/<head>/<body>, y `files` con los src/*.js cambiados.
+  OJO: al quitar <head> con una expresión regular NO tocar <header class="top"> (pasó en v0.18.3: el menú se fue abajo).
+  Usar `</?head(\s[^>]*)?>` (con límite), no `</?head[^>]*>`.
 - `src/exporters.js`: IGES 5.3 (128/126, lectura y escritura), STEP AP214 (GEOMETRIC_SET de B-splines), OBJ de cuadriláteros para SubD,
   SVG/DXF 2D (proyección paralela), .zip sin compresión. Validado con occt-import-js (OpenCASCADE) en el scratchpad.
 - `src/logo.js`: logotipo Nodo.
@@ -35,6 +37,10 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - `src/forge/engine.js` + `src/forge/replicad_single.wasm`: motor de FORGE = el código de modelado de BumpForge (app del usuario,
   https://claude.ai/artifact/S7MagYHBjK4qJ9bKmJjo3y) como módulo nativo de Forja (startForge(ctx)). Sus controles están en index.html
   dentro de <div class="bf-ui" data-module="forge"> (ids con prefijo bf-).
+- `src/occ.js`: carga única de OpenCascade (replicad-opencascadejs 0.20.2) que comparten Forge y el Redondeo.
+- `src/fillet.js`: Redondear / chaflán como Plasticity (makeShape cose superficies de Forja, edgeList, filletShape, toSurfaces
+  devuelve B-splines recortadas a la caja UV de cada cara + lazos de recorte, previewMesh). Pura geometría, prueba en Node:
+  scratchpad fil/t1.mjs (occ-node.mjs pone require/__dirname para el .js de replicad).
 - `src/ai.js`: módulo IA: generadores paramétricos (tornillo ISO con rosca, tuerca, arandela, mesa, silla) y parsePrompt (español).
 - `docs/capturas/`: capturas de pantalla de cada versión.
 - `docs/alias-referencia.md`: atajos y comportamiento de Alias (de la hoja oficial que pasó el usuario). Consúltalo.
@@ -393,6 +399,26 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (forgeSource.resultId). Al salir de Forge (setLayout) se aplica solo si patternStamp() cambió (forgeSource.applied).
   En la vista de Forge el resultado se oculta mientras se ve la pieza; elegirlo no cambia la pieza.
 - Prueba: scratchpad forja/tapply.mjs dark cad|mesh.
+
+## Hecho (v0.19)
+
+- Menú arriba otra vez (el fallo era el script de publicar, ver Estructura).
+- Forge: el corte NURBS de una piel abierta (una sola superficie) se quedaba colgado: occBooleanSafe exigía sólido y partía
+  el lote en mitades sin fin. Ahora con pieles basta con que el resultado tenga caras. El progreso de "Aplicar al salir de
+  Forge" se ve en el módulo al que se va (#app[data-forge-busy]).
+- Modo Malla (tecla 3) como el wireframe de Alias: las superficies no se pintan (wireMat colorWrite false, siguen sirviendo
+  para elegir y no dan sombra); se ven bordes (p.bound), líneas de parche y curvas sobre superficie en blanco/negro según el
+  tema (wireLineMat). Las mallas muestran solo aristas vivas > 30° (meshFeatures, EdgesGeometry), no triángulos.
+- Ortogonal fija en cualquier vista: botón ORTO bajo el cubo, Shift+O o Vistas › Ortogonal (fija) (toggleOrtho; girar no la quita).
+- Redondear (tecla B como Plasticity, Superficies › Redondear / chaflán aristas, Puck › Editar › Redondear): startFillet cose las
+  superficies elegidas (o todas las visibles) con OCC; aristas candidatas en gris (las tangentes no); clic elige,
+  Ctrl/Shift/medio añade o quita; punto amarillo: arrastrar hacia dentro = redondeo, hacia fuera = chaflán (Alt: de 5 en 5 mm);
+  V = punto de radio variable bajo el cursor (en la 1.ª arista, radios en la ventana); vista previa = malla de OCC con el
+  sombreado de evaluación; Enter / clic derecho / Aceptar: las superficies de origen se sustituyen por NURBS exactas (nombre,
+  material, capa y grupo del origen; "Redondeo n" las nuevas) y cada lazo de recorte es una curva sobre superficie
+  (cos.edge = true, sin peine). Esc cancela. Formas Cónica/G2/Chordal de Plasticity: OCC solo hace redondeo circular y chaflán.
+  Referencia: github.com/nkallen/plasticity-document pages/solid/fillet-shell.en.mdx.
+- Pruebas: forja/tfillet.mjs (caja de 6 planos), tmisc.mjs (Malla + ortogonal), tapply.mjs dark cad1 (piel abierta).
 
 ## Siguiente paso
 

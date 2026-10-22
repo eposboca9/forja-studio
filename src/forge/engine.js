@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { mergeVertices, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+import { getOCC } from '../occ.js';
 
 export async function startForge(ctx) {
 
@@ -3852,7 +3853,10 @@ function occValid(oc, s) { const c = new oc.BRepCheck_Analyzer(s, true, false), 
 /* Booleana robusta: si el resultado no es válido se reintenta con tolerancia difusa y, si sigue mal,
    se parte el lote en dos hasta aislar la herramienta conflictiva, que se omite. */
 function occBooleanSafe(oc, shape, faceRegion, tools, op, newRegion) {
-  const tryOp = (fz) => { try { const r = occBoolean(oc, shape, faceRegion, tools, op, newRegion, fz); return occValid(oc, r.shape) && occCount(oc, r.shape, oc.TopAbs_ShapeEnum.TopAbs_SOLID) ? r : null; } catch (e) { return null; } };
+  // una piel abierta (una sola superficie, sin sólido) también se corta: basta con que el resultado tenga caras
+  const T = oc.TopAbs_ShapeEnum, solid = occCount(oc, shape, T.TopAbs_SOLID) > 0;
+  const ok = (r) => solid ? occValid(oc, r.shape) && occCount(oc, r.shape, T.TopAbs_SOLID) : occCount(oc, r.shape, T.TopAbs_FACE) > 0;
+  const tryOp = (fz) => { try { const r = occBoolean(oc, shape, faceRegion, tools, op, newRegion, fz); return ok(r) ? r : null; } catch (e) { return null; } };
   const r = tryOp(0) || tryOp(1e-4);
   if (r) return { ...r, skipped: 0 };
   if (tools.length === 1) return { shape, faceRegion, skipped: 1 };
@@ -3863,39 +3867,7 @@ function occBooleanSafe(oc, shape, faceRegion, tools, op, newRegion) {
 }
 
 
-const OCC_VER = '0.20.2';
-const OCC_JS = `https://cdn.jsdelivr.net/npm/replicad-opencascadejs@${OCC_VER}/src/replicad_single.js`;
-const OCC_WASM = ['src/forge/replicad_single.wasm', `https://cdn.jsdelivr.net/npm/replicad-opencascadejs@${OCC_VER}/src/replicad_single.wasm`];
-let occPromise = null;
-async function fetchBytes(url, progress) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const total = +r.headers.get('content-length') || 0;
-  if (!r.body || !total) return new Uint8Array(await r.arrayBuffer());
-  const rd = r.body.getReader(), parts = [];
-  let got = 0;
-  for (;;) {
-    const { done, value } = await rd.read();
-    if (done) break;
-    parts.push(value); got += value.length; progress(Math.min(1, got / total));
-  }
-  const out = new Uint8Array(got);
-  let o = 0; for (const p of parts) { out.set(p, o); o += p.length; }
-  return out;
-}
-function getOCC(progress = () => {}) {
-  if (!occPromise) {
-    occPromise = (async () => {
-      const mod = await import(OCC_JS);
-      let bin = null, err = null;
-      for (const u of OCC_WASM) { try { bin = await fetchBytes(u, progress); break; } catch (e) { err = e; } }
-      if (!bin) throw new Error('no se pudo cargar el núcleo CAD (' + (err && err.message ? err.message : err) + ')');
-      return mod.default({ wasmBinary: bin });
-    })();
-    occPromise.catch(() => { occPromise = null; });
-  }
-  return occPromise;
-}
+// el núcleo de OpenCascade se comparte con el resto de Forja (src/occ.js)
 
 let cad = null, lastFileKind = 'mesh', cadBusy = false;
 const cadSel = new Set();
