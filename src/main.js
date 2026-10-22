@@ -1421,7 +1421,7 @@ function howFor(e) {
 renderer.domElement.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); }); // sin autodesplazamiento
 renderer.domElement.addEventListener('pointerdown', (e) => {
   dragPane = paneAt(e.clientX);
-  if (carousel || extrudeDrag || layout === 'forge') { down = null; return; }   // en Forge los clics son de Forge
+  if (carousel || extrudeDrag || (layout === 'forge' && forge?.picking())) { down = null; return; }   // en Forge, elegir caras / pincel es de Forge
   if (navHeld || (e.button !== 0 && !(navStyle === 'alias' && tool === 'select'))) { down = null; return; }
   const canBox = tool === 'select' && !gizmo.axis && (navStyle === 'alias' || e.shiftKey);
   down = { x: e.clientX, y: e.clientY, box: canBox, boxing: false };
@@ -4579,7 +4579,12 @@ const forgeCtx = {
   renderer, camera, root: forgeRoot,
   controls: { target: pivot, autoRotate: false, enabled: true, update: () => false, addEventListener() {} },
   toast: (msg) => toast(msg),
-  setView: (pos, target) => { pivot.copy(target); camera.position.copy(pos); camera.lookAt(target); },
+  // Forge da la vista en sus unidades: se pasa a la escena de Forja con la colocación de la pieza
+  setView: (pos, target) => {
+    placeForge(); forgeRoot.updateMatrixWorld(true);
+    pos.applyMatrix4(forgeRoot.matrixWorld); target.applyMatrix4(forgeRoot.matrixWorld);
+    pivot.copy(target); camera.position.copy(pos); camera.lookAt(target);
+  },
   setExposure: (v) => { forgeExposure = v; },
   setTone: (k) => { forgeTone = k === 'agx' ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping; },
   active: () => layout === 'forge' && !carousel,
@@ -4599,10 +4604,35 @@ function ensureForge() {
     .catch((e) => { console.error(e); toast(`Forge no pudo arrancar: ${e.message}`); forgeLoading = null; });
   return forgeLoading;
 }
-// Forge dibuja solo su pieza (los objetos de Forja quedan ocultos en este módulo), con su exposición y tono
+// La pieza de Forge vive en la escena de Forja, a su tamaño real (mm de Forge → dm de Forja). Si salió de objetos de
+// Forja ("Traer de Forja") ocupa su mismo lugar y esos objetos se ocultan mientras se trabaja; si es una forma de Forge
+// (cubo, esfera...) se pone sobre el suelo, al lado de la escena.
+let forgeSource = null;   // { ids, box } de lo que se trajo de Forja
+const _fb = new THREE.Vector3(), _fc = new THREE.Vector3();
+function placeForge() {
+  const b = forge?.pieceBox();
+  if (!b || b.isEmpty()) return;
+  const size = b.getSize(_fb), c = b.getCenter(_fc), big = Math.max(size.x, size.y, size.z) || 1;
+  if (forgeSource && forge.fromFile()) {
+    const sb = forgeSource.box, ss = sb.getSize(new THREE.Vector3()), s = Math.max(ss.x, ss.y, ss.z) / big;
+    forgeRoot.scale.setScalar(s);
+    forgeRoot.position.copy(sb.getCenter(new THREE.Vector3())).addScaledVector(c, -s);
+  } else {
+    const s = forge.sizeMm() / 100 / big, vis = objects.filter((o) => o.visible), sb = boundsOf(vis);
+    const x = sb.isEmpty() ? 0 : sb.max.x + 0.3 + (size.x * s) / 2, z = sb.isEmpty() ? 0 : (sb.min.z + sb.max.z) / 2;
+    forgeRoot.scale.setScalar(s);
+    forgeRoot.position.set(x - c.x * s, -b.min.y * s, z - c.z * s);
+  }
+}
+const forgeHidesSource = () => forgeSource && forge?.fromFile();
+// la vista de Forge: los objetos de Forja con sus materiales (como Visu) y la pieza de Forge con su exposición y tono
 function renderForgePane(p) {
-  const hidden = [];
-  for (const c of scene.children) if (c !== forgeRoot && c.visible) { c.visible = false; hidden.push(c); }
+  if (forge) { placeForge(); forge.ground.visible = false; forge.grid.visible = false; }
+  const hid = [];
+  objects.forEach((o) => {
+    if (o.kind !== 'curve') o.parts.mesh.material = materials[o.mat];
+    if (forgeHidesSource() && forgeSource.ids.includes(o.id)) for (const part of Object.values(o.parts)) if (part.visible) { part.visible = false; hid.push(part); }
+  });
   forgeRoot.visible = true;
   scene.background = null;
   scene.environment = envTexture('studio');
@@ -4612,7 +4642,7 @@ function renderForgePane(p) {
   if (carousel || !forgeCtx.onFrame?.()) renderer.render(scene, camera);
   renderer.toneMappingExposure = expo;
   forgeRoot.visible = false;
-  hidden.forEach((c) => (c.visible = true));
+  hid.forEach((x) => (x.visible = true));
 }
 // la selección de Forja (o todo lo visible) pasa a Forge como su pieza: superficies NURBS en STEP (modo exacto), mallas en STL
 async function forgeFromForja() {
@@ -4621,6 +4651,7 @@ async function forgeFromForja() {
   const api = await ensureForge();
   if (!api) return;
   const o = { unit: 'mm', zUp: true }, nurbs = list.filter((x) => x.kind === 'surface');
+  forgeSource = { ids: list.map((x) => x.id), box: boundsOf(list) };
   const file = nurbs.length === list.length
     ? new File([X.writeSTEP(nurbs, o, `${baseName()}.step`)], `${baseName()}.step`)
     : new File([new STLExporter().parse(meshExportScene(list, o), { binary: true })], `${baseName()}.stl`);

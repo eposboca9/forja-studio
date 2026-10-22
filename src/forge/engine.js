@@ -5090,5 +5090,11 @@ return {
   openFile: async (file) => { const dt = new DataTransfer(); dt.items.add(file); $('modelFile').files = dt.files; $('modelFile').dispatchEvent(new Event('change')); },
   resetCamera,
   invalidate,
+  // para colocar la pieza en la escena de Forja: caja de la pieza (unidades de Forge), tamaño real y de dónde viene
+  pieceBox: () => { if (!mesh || !baseGeo) return null; if (!baseGeo.boundingBox) baseGeo.computeBoundingBox(); return baseGeo.boundingBox.clone().translate(mesh.position); },
+  sizeMm: () => state.sizeMm,
+  fromFile: () => state.shape === 'file' || state.shape === 'cad',
+  picking: () => !!pickMode,
+  ground, grid,
 };
 }

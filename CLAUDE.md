@@ -366,6 +366,12 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - index.html: .bf-ui (estilos de los controles con el aspecto de Forja: títulos en mayúsculas espaciadas, botones planos,
   azul #2f7bff, sin fondos, texto negro/blanco por fila en INK_SEL), .bf-hud (datos de la pieza abajo a la izquierda) y
   .bf-loader. Las reglas generales de Forja (.hint, .seg button nowrap/mayúsculas, .chip) se anulan dentro de .bf-ui.
+- (v0.18.1) Pedido del usuario: los objetos de Forja también se ven en Forge (como en Visu e IA). renderForgePane dibuja la
+  escena con los materiales de Visu + forgeRoot. placeForge() cada cuadro: la pieza de Forge va a tamaño real (sizeMm/100 dm);
+  si salió de "Traer de Forja" (forgeSource {ids, box}) y Forge está en modo archivo/NURBS, ocupa la caja del original y esos
+  objetos se ocultan en esta vista; si es una forma de Forge (cubo, esfera...) se apoya en el suelo a la derecha de la escena.
+  setView de Forge pasa por la matriz de forgeRoot. La selección de Forja funciona en Forge salvo mientras Forge elige
+  caras / pinta (api.picking()). El suelo y la rejilla propios de Forge se ocultan (se usa el suelo de Forja).
 - Prueba: scratchpad forja/tbump.mjs [dark|light] [pull] [push] (jsdelivr bloqueado aquí: sirve paquetes de npm desde
   scratchpad/npmcdn). Resultado: arranca (cubo de ladrillos, 580.800 triángulos, hermética); el vaso de Forja llega como 4 caras
   NURBS, sólido cerrado; "Enviar a Forja" deja el STL horneado (841.208 triángulos) en la escena.
