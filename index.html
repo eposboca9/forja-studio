@@ -7,7 +7,7 @@
 <title>Forja Studio</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Crect x='5' y='0' width='2' height='12' fill='%232f7bff'/%3E%3Crect x='0' y='5' width='12' height='2' fill='%232f7bff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500&family=Outfit:wght@500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500&family=Outfit:wght@500&family=IBM+Plex+Mono:wght@400;500&family=Archivo+Black&family=Bebas+Neue&family=Pacifico&family=Playfair+Display:wght@900&family=Stardos+Stencil:wght@700&display=swap">
 <style>
   /* Layout: muro de hormigón visto a pantalla completa. La vista 3D es un vano con marco de acero;
      herramientas y menús son símbolos grabados en el muro; las propiedades salen como una losa. */
@@ -759,11 +759,98 @@
   .soft-veil { display: none !important; }
   .float-win { background: transparent !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 0 !important; }
   .panel .sec h2, .panel .muted, .fw-count, .ly-n { color: inherit; }
-  /* Módulo Forge: su app dentro de la vista, debajo de la cabecera y dejando libre la franja derecha del panel */
-  .forge-frame { position: fixed; top: 56px; left: 0; width: calc(100vw - 56px); height: calc(100vh - 86px); border: 0; z-index: 3; background: transparent; }
-  body.forge-on #pane-mode { display: none; }
-  body.forge-on :is(#layers-win, #toolwin, #quickpick, #rel-labels, .proj-btn, .cube-probe) { display: none !important; }
-  .forge-frame[hidden] { display: none; }
+  /* ===== Módulo FORGE en el panel de Forja: los controles de BumpForge con el aspecto de Forja =====
+     Títulos como las secciones (mayúsculas espaciadas), botones planos, segmentados con el azul de Forja, sin fondos;
+     el texto pasa a negro o blanco por fila (INK_SEL). Todo va dentro de .bf-ui para no tocar el resto de Forja. */
+  .bf-ui { display: flex; flex-direction: column; }
+  .bf-ui details.grp { padding: 0; }
+  .bf-ui details.grp > summary { list-style: none; cursor: pointer; user-select: none; padding: 14px 16px 8px; margin: 0;
+    font-size: 10px; font-weight: 500; letter-spacing: .22em; text-transform: uppercase; color: var(--fg); }
+  .bf-ui details.grp > summary::-webkit-details-marker { display: none; }
+  .bf-ui details.grp > summary::after { content: " ▸"; opacity: .6; }
+  .bf-ui details.grp[open] > summary::after { content: " ▾"; }
+  .bf-ui .grp-body { padding: 0 16px 12px; display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: var(--fg); }
+  .bf-ui .sub-h { font-size: 9.5px; font-weight: 500; letter-spacing: .18em; text-transform: uppercase; color: var(--fg); opacity: .85; padding-top: 6px; }
+  .bf-ui .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; background: none; border: 0; padding: 0; margin: 0; border-radius: 0; }
+  .bf-ui .seg.wrap, .bf-ui .seg.wrap3 { grid-auto-flow: row; grid-template-columns: repeat(3, 1fr); }
+  .bf-ui .seg.wrap4 { grid-auto-flow: row; grid-template-columns: repeat(4, 1fr); }
+  .bf-ui .seg button { border: 0; border-radius: 0; background: rgba(127,127,127,.16); color: var(--fg); font: inherit; font-size: 11.5px; font-weight: 500;
+    padding: 6px 3px; cursor: pointer; min-width: 0; box-shadow: none; line-height: 1.2; }
+  .bf-ui .seg.mono button { font-family: var(--font-mono); font-size: 10.5px; }
+  .bf-ui .seg button[aria-pressed="true"] { background: #2f7bff; color: #fff; box-shadow: none; }
+  .bf-ui .btn { border: 0; border-radius: 0; background: rgba(127,127,127,.18); color: var(--fg); font: inherit; font-size: 12px; font-weight: 500;
+    padding: 7px 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+  .bf-ui .btn:hover { background: rgba(127,127,127,.28); }
+  .bf-ui .btn.sm { font-size: 11px; padding: 5px 6px; }
+  .bf-ui :is(.btn.primary, .btn.active, .btn[aria-pressed="true"]) { background: #2f7bff; color: #fff; }
+  .bf-ui .btn.primary { padding: 10px; letter-spacing: .06em; }
+  .bf-ui .btn:disabled { opacity: .5; cursor: progress; }
+  .bf-ui input[type=file] { display: none; }
+  .bf-ui .row2, .bf-ui .row3 { display: grid; gap: 6px; } .bf-ui .row2 { grid-template-columns: 1fr 1fr; } .bf-ui .row3 { grid-template-columns: repeat(3, 1fr); }
+  .bf-ui .ctl { display: flex; flex-direction: column; gap: 4px; }
+  .bf-ui .ctl-top, .bf-ui .sublabel, .bf-ui .color-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; }
+  .bf-ui .ctl-top output { font-family: var(--font-mono); font-size: 10.5px; white-space: nowrap; }
+  .bf-ui input[type=range] { width: 100%; margin: 0; accent-color: #2f7bff; }
+  .bf-ui .hint { position: static; transform: none; left: auto; bottom: auto; background: none; border: 0; padding: 0; margin: 0; white-space: normal;
+    font-size: 11.5px; line-height: 1.45; color: var(--fg); opacity: .8; letter-spacing: 0; }
+  .bf-ui .info, .bf-ui .layer-sum, .bf-ui .stats, .bf-ui .status-line { font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5; color: var(--fg); }
+  .bf-ui .info .warn { color: #e0612b; }
+  .bf-ui .stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; } .bf-ui .stats b { text-align: right; font-weight: 500; }
+  .bf-ui .status-line { display: flex; gap: 8px; align-items: center; } .bf-ui .status-line .dot { width: 7px; height: 7px; background: currentColor; opacity: .4; }
+  .bf-ui .status-line.ok .dot { background: #2fb36b; opacity: 1; } .bf-ui .status-line.warn .dot { background: #e0a32b; opacity: 1; }
+  .bf-ui .switch { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; cursor: pointer; position: relative; }
+  .bf-ui .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .bf-ui .switch .knob { width: 30px; height: 16px; background: rgba(127,127,127,.35); position: relative; flex: none; }
+  .bf-ui .switch .knob::after { content: ""; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px; background: var(--fg); transition: transform .15s; }
+  .bf-ui .switch input:checked + .knob { background: #2f7bff; } .bf-ui .switch input:checked + .knob::after { transform: translateX(14px); background: #fff; }
+  .bf-ui .presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+  .bf-ui .preset, .bf-ui .mat, .bf-ui .ltabs button, .bf-ui .regions button { border: 0; border-radius: 0; background: rgba(127,127,127,.16); color: var(--fg);
+    font: inherit; font-size: 11px; font-weight: 500; cursor: pointer; padding: 7px 5px; text-align: center; }
+  .bf-ui .preset:hover, .bf-ui .mat:hover { background: rgba(127,127,127,.28); }
+  .bf-ui :is(.preset, .mat, .regions button)[aria-pressed="true"], .bf-ui .ltabs button[aria-selected="true"] { background: #2f7bff; color: #fff; }
+  .bf-ui .ltabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+  .bf-ui .ltabs button { display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .bf-ui .ltabs .ld { width: 6px; height: 6px; background: currentColor; opacity: .35; } .bf-ui .ltabs button.on .ld { background: #2fb36b; opacity: 1; }
+  .bf-ui .layer-body { display: flex; flex-direction: column; gap: 10px; } .bf-ui .layer-body.off { opacity: .45; }
+  .bf-ui .tex-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+  .bf-ui .tex { border: 0; padding: 0; background: #000; cursor: pointer; position: relative; aspect-ratio: 1; overflow: hidden; }
+  .bf-ui .tex canvas { width: 100%; height: 100%; display: block; }
+  .bf-ui .tex span { position: absolute; inset: auto 0 0; font-size: 8px; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.85)); padding: 6px 2px 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bf-ui .tex[aria-pressed="true"] { box-shadow: 0 0 0 2px #2f7bff; }
+  .bf-ui .mats { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+  .bf-ui .mat { display: flex; align-items: center; gap: 8px; text-align: left; min-width: 0; }
+  .bf-ui .mat small { display: block; font-weight: 400; opacity: .7; font-size: 10px; }
+  .bf-ui .mat .sw { width: 20px; height: 20px; border-radius: 50%; flex: none; }
+  .bf-ui .mat.painted::after { content: ""; width: 6px; height: 6px; background: #2f7bff; margin-left: auto; flex: none; }
+  .bf-ui .regions { display: flex; flex-wrap: wrap; gap: 2px; max-height: 150px; overflow-y: auto; }
+  .bf-ui .regions button small { font-family: var(--font-mono); font-size: 9.5px; opacity: .7; margin-left: 4px; }
+  .bf-ui .custom-row { display: flex; align-items: center; gap: 6px; font-size: 12px; } .bf-ui .custom-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bf-ui .custom-row .sw { width: 10px; height: 10px; background: #2f7bff; flex: none; }
+  .bf-ui textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 40px; background: rgba(127,127,127,.16); color: var(--fg); border: 0; border-radius: 0; padding: 6px 8px; font: 500 14px var(--font-ui); }
+  .bf-ui input[type=color] { width: 40px; height: 24px; border: 0; padding: 0; background: none; cursor: pointer; }
+  .bf-ui #bf-maskCv, .bf-ui #bf-curveCv { width: 100%; display: block; background: rgba(0,0,0,.5); } .bf-ui #bf-maskCv { height: 130px; } .bf-ui #bf-curveCv { height: 120px; cursor: ns-resize; touch-action: none; }
+  .bf-ui .curve-axis { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 9.5px; opacity: .7; }
+  .bf-ui .dis { opacity: .4; pointer-events: none; }
+  /* datos de la pieza abajo a la izquierda de la vista, como la información de Forja; y el aviso de progreso */
+  .bf-hud { position: absolute; left: 18px; bottom: 34px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; z-index: 5; pointer-events: none; }
+  .app:not([data-layout-now="forge"]) .bf-hud, .app:not([data-layout-now="forge"]) .bf-loader { display: none !important; }
+  .bf-hud .chip { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .06em; color: var(--fg); }
+  .bf-hud .chip[hidden] { display: none; }
+  .bf-hud .chip .dot { width: 7px; height: 7px; background: currentColor; opacity: .4; } .bf-hud .chip.ok .dot { background: #2fb36b; opacity: 1; } .bf-hud .chip.bad .dot { background: #e0612b; opacity: 1; }
+  .bf-hud .chip button { border: 0; background: #2f7bff; color: #fff; font: inherit; font-size: 10px; padding: 3px 8px; cursor: pointer; }
+  .bf-loader { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 6px;
+    min-width: 260px; color: var(--fg); font-size: 12px; }
+  .bf-loader[hidden] { display: none; }
+  .bf-loader b:first-child { font-size: 10.5px; font-weight: 500; letter-spacing: .22em; text-transform: uppercase; }
+  .bf-ld-bar { width: 100%; height: 2px; background: rgba(127,127,127,.3); } .bf-ld-bar b { display: block; height: 100%; width: 0; background: #2f7bff; transition: width .15s; }
+  #bf-ldPct { font-family: var(--font-mono); font-size: 10.5px; }
+  canvas.bf-picking { cursor: crosshair !important; }
+  .bf-ui .seg button, .bf-ui .btn, .bf-ui .preset, .bf-ui .mat { text-transform: none !important; letter-spacing: 0 !important; }
+  .bf-ui .seg.mono button { letter-spacing: .02em !important; }
+  .bf-ui .seg button { white-space: normal !important; overflow-wrap: anywhere; }
+  .app[data-layout-now="forge"] #pane-mode { display: none; }
+  .bf-ui .hint { position: static !important; transform: none !important; left: auto !important; bottom: auto !important; background: none !important; white-space: normal !important; }
+  .bf-hud .chip { background: none !important; border: 0 !important; padding: 0 !important; box-shadow: none !important; backdrop-filter: none !important; border-radius: 0 !important; }
 </style>
 </head>
 <body>
@@ -828,6 +915,17 @@
     <div class="marquee" id="marquee" hidden></div>
     <div class="toast" id="toast" hidden></div>
     <div class="hint" id="hint"></div>
+    <!-- FORGE: datos de la pieza y avisos de elección (como la información de la vista de Forja) -->
+    <div class="bf-hud" id="bf-hud">
+      <div class="chip" id="bf-chipPT" hidden><span id="bf-chipPTTxt"></span><button id="bf-ptStop">Salir</button></div>
+      <div class="chip" id="bf-chipPick" hidden><span id="bf-chipPickTxt"></span><button id="bf-pickDone">Listo</button></div>
+      <div class="chip" id="bf-chipMesh"><span class="dot"></span><span id="bf-chipMeshTxt">Generando malla…</span></div>
+      <div class="chip"><span id="bf-chipDims">50 × 50 × 50 mm</span></div>
+    </div>
+    <div class="bf-loader" id="bf-loader" hidden>
+      <b id="bf-ldTitle">Horneando relieve</b><span id="bf-ldStep">Preparando…</span>
+      <div class="bf-ld-bar"><b id="bf-ldBar"></b></div><span id="bf-ldPct">0%</span>
+    </div>
   </main>
 
   <div class="wall-right" aria-label="Menús">
@@ -877,13 +975,630 @@
     </div>
 
     <div class="panel-body" id="panel-body">
-    <section class="sec" data-module="forge">
-      <h2>Forge</h2>
-      <p class="muted">Relieves, texturas, patrones y cortes exactos para impresión 3D. Manda aquí lo que tengas en Forja;
-        lo que exportes en Forge (STL, STEP) vuelve a la escena de Forja.</p>
-      <button class="btn primary" id="forge-send">Enviar selección a Forge</button>
-      <p class="muted">Si no hay nada elegido se envía todo lo visible. Superficies NURBS van como STEP (modo NURBS exacto de Forge); mallas, como STL.</p>
-    </section>
+<div class="bf-ui" data-module="forge">
+      <!-- FORGE: relieve físico por capas, patrones y cortes exactos (código de modelado de BumpForge, src/forge/engine.js) -->
+      <details class="grp" open>
+        <summary>Forja</summary>
+        <div class="grp-body">
+          <div class="row2">
+            <button class="btn" id="bf-pullForja" title="Pasa lo elegido en Forja (o todo lo visible) a Forge como su pieza: NURBS en modo exacto, mallas como malla">Traer de Forja</button>
+            <button class="btn" id="bf-pushForja" title="Hornea el relieve y deja el resultado como objeto en la escena de Forja">Enviar a Forja</button>
+          </div>
+          <div class="row3">
+            <button class="btn sm" id="bf-autoRot" aria-pressed="false" title="Rotación automática">Girar</button>
+            <button class="btn sm" id="bf-resetCam" title="Recentrar la cámara en la pieza">Encuadrar</button>
+            <button class="btn sm" id="bf-ptTool" aria-pressed="false" title="Render realista (trazado de rayos)">Render</button>
+          </div>
+        </div>
+      </details>
+      <details class="grp" open>
+        <summary>Forma base </summary>
+        <div class="grp-body">
+          <div class="seg" id="bf-shapeSeg">
+            <button data-shape="cube" aria-pressed="true">Cubo</button>
+            <button data-shape="sphere" aria-pressed="false">Esfera</button>
+            <button data-shape="plane" aria-pressed="false">Placa</button>
+            <button data-shape="cylinder" aria-pressed="false">Cilindro</button>
+            <button data-shape="file" aria-pressed="false">Mi modelo</button>
+          </div>
+          <input type="file" id="bf-modelFile" accept=".stl,.obj,.ply,.glb,.gltf,.3mf,.step,.stp">
+
+          <div id="bf-latticeGrp" class="ctl">
+            <div class="sublabel"><span>Segmentos por eje (malla base)</span><span id="bf-vertsLabel"></span></div>
+            <div class="seg small mono" id="bf-resSeg">
+              <button data-res="120" aria-pressed="false">120</button>
+              <button data-res="180" aria-pressed="false">180</button>
+              <button data-res="220" aria-pressed="true">220</button>
+              <button data-res="250" aria-pressed="false">250</button>
+            </div>
+          </div>
+
+          <div id="bf-customGrp" class="ctl" hidden>
+            <div id="bf-fileRow" class="ctl">
+              <div class="row2">
+                <label class="btn" for="bf-modelFile">Subir modelo</label>
+                <button class="btn" id="bf-sampleKnot">Ejemplo: nudo</button>
+              </div>
+              <p class="hint">STEP (NURBS de Alias, CATIA, Rhino…) abre el modo NURBS exacto. STL, OBJ, 3MF, PLY o GLB abren el modo malla. Unidades en milímetros.</p>
+              <div class="sublabel" id="bf-upLabel"><span>Eje vertical del archivo</span></div>
+              <div class="seg small mono" id="bf-upSeg">
+                <button data-up="z" aria-pressed="true">Z arriba (CAD / STL)</button>
+                <button data-up="y" aria-pressed="false">Y arriba</button>
+              </div>
+            </div>
+            <div class="ctl" id="bf-edgeMmCtl">
+              <div class="ctl-top"><span>Tamaño de triángulo (resolución)</span><output id="bf-edgeMmOut"></output></div>
+              <input type="range" id="bf-edgeMm" min="0.2" max="2" step="0.05">
+            </div>
+            <div class="ctl" id="bf-angleCtl">
+              <div class="ctl-top"><span>Ángulo para separar superficies</span><output id="bf-angleOut"></output></div>
+              <input type="range" id="bf-angle" min="10" max="80" step="1">
+            </div>
+            <div class="info" id="bf-modelInfo"></div>
+          </div>
+        </div>
+      </details>
+
+
+      <details class="grp" id="bf-cadGrp" open hidden>
+        <summary>Patrón NURBS (STEP) </summary>
+        <div class="grp-body">
+          <div class="info" id="bf-cadInfo"></div>
+
+          <div class="sub-h">1 · Caras y mapeo</div>
+          <button class="btn" id="bf-pickCadFace">Elegir caras con clic</button>
+          <label class="switch" for="bf-cadTangent"><span>Incluir caras tangentes (cadena G1)</span><input type="checkbox" id="bf-cadTangent" checked><span class="knob"></span></label>
+          <div class="row2">
+            <button class="btn sm" id="bf-cadSelNone">Quitar selección</button>
+            <button class="btn sm" id="bf-pickCadCenter">Centro con clic</button>
+          </div>
+          <p class="hint" id="bf-cadFaceHint"></p>
+          <div class="sublabel"><span>Mapeo sobre la superficie</span></div>
+          <div class="seg small" id="bf-cadMapSeg">
+            <button data-v="auto" aria-pressed="true">Auto</button>
+            <button data-v="uv" aria-pressed="false">Superficie UV</button>
+            <button data-v="cyl" aria-pressed="false">Cilindro 360°</button>
+            <button data-v="plane" aria-pressed="false">Plano</button>
+          </div>
+          <p class="hint" id="bf-cadMapHint">Superficie UV desenrolla las caras elegidas (mapa conforme) para repartir el patrón en milímetros reales. Cilindro 360° da la vuelta completa y cierra la costura.</p>
+
+          <div class="sub-h">2 · Distribución</div>
+          <div class="seg small wrap3" id="bf-cadLayoutSeg">
+            <button data-v="hex" aria-pressed="true">Panal</button>
+            <button data-v="grid" aria-pressed="false">Rejilla</button>
+            <button data-v="brick" aria-pressed="false">Ladrillo</button>
+            <button data-v="radial" aria-pressed="false">Bocina (radial)</button>
+            <button data-v="random" aria-pressed="false">Aleatorio</button>
+          </div>
+          <div class="row2">
+            <div class="ctl">
+              <div class="ctl-top"><span>Paso U</span><output id="bf-cadPitchOut"></output></div>
+              <input type="range" id="bf-cadPitch" min="1" max="40" step="0.1">
+            </div>
+            <div class="ctl">
+              <div class="ctl-top"><span>Paso V</span><output id="bf-cadPitchVOut"></output></div>
+              <input type="range" id="bf-cadPitchV" min="1" max="40" step="0.1">
+            </div>
+          </div>
+          <div class="ctl">
+            <div class="ctl-top"><span>Giro del patrón</span><output id="bf-cadRotOut"></output></div>
+            <input type="range" id="bf-cadRot" min="-90" max="90" step="1">
+          </div>
+          <div class="row2">
+            <div class="ctl">
+              <div class="ctl-top"><span>Desfase U</span><output id="bf-cadOffUOut"></output></div>
+              <input type="range" id="bf-cadOffU" min="0" max="1" step="0.01">
+            </div>
+            <div class="ctl">
+              <div class="ctl-top"><span>Desfase V</span><output id="bf-cadOffVOut"></output></div>
+              <input type="range" id="bf-cadOffV" min="0" max="1" step="0.01">
+            </div>
+          </div>
+
+          <div class="sub-h">3 · Elemento</div>
+          <div class="seg small wrap4" id="bf-cadShapeSeg">
+            <button data-v="circle" aria-pressed="true">Círculo</button>
+            <button data-v="rect" aria-pressed="false">Rectángulo</button>
+            <button data-v="diamond" aria-pressed="false">Rombo</button>
+            <button data-v="triangle" aria-pressed="false">Triángulo</button>
+            <button data-v="hex" aria-pressed="false">Hexágono</button>
+            <button data-v="slot" aria-pressed="false">Ranura</button>
+            <button data-v="logo" aria-pressed="false">Logo</button>
+            <button data-v="object" aria-pressed="false">Objeto 3D</button>
+          </div>
+          <div id="bf-cadObjCtl" class="ctl" hidden>
+            <label class="btn" for="bf-cadObjFile">Subir objeto (STEP, STL, OBJ)</label>
+            <input type="file" id="bf-cadObjFile" accept=".step,.stp,.stl,.obj" hidden>
+            <p class="hint" id="bf-cadObjHint">Sube una pieza pequeña (un diamante, una pirámide, un botón…). Se coloca en cada punto del patrón, orientada con la superficie.</p>
+            <div class="row3">
+              <div class="ctl"><div class="ctl-top"><span>Escala X</span><output id="bf-cadSXOut"></output></div><input type="range" id="bf-cadSX" min="0.1" max="4" step="0.01"></div>
+              <div class="ctl"><div class="ctl-top"><span>Escala Y</span><output id="bf-cadSYOut"></output></div><input type="range" id="bf-cadSY" min="0.1" max="4" step="0.01"></div>
+              <div class="ctl"><div class="ctl-top"><span>Escala Z</span><output id="bf-cadSZOut"></output></div><input type="range" id="bf-cadSZ" min="0.1" max="4" step="0.01"></div>
+            </div>
+            <div class="ctl">
+              <div class="ctl-top"><span>Hundir en la superficie</span><output id="bf-cadSinkOut"></output></div>
+              <input type="range" id="bf-cadSink" min="0" max="5" step="0.05">
+            </div>
+          </div>
+          <div id="bf-cadLogoCtl" class="ctl" hidden>
+            <div class="row2">
+              <label class="btn" for="bf-cadLogoFile">Subir logo</label>
+              <label class="btn" for="bf-cadLogoCam">Cámara</label>
+            </div>
+            <input type="file" id="bf-cadLogoFile" accept="image/*" hidden>
+            <input type="file" id="bf-cadLogoCam" accept="image/*" capture="environment" hidden>
+            <div class="ctl">
+              <div class="ctl-top"><span>Umbral de la silueta</span><output id="bf-cadLevelOut"></output></div>
+              <input type="range" id="bf-cadLevel" min="0.1" max="0.9" step="0.01">
+            </div>
+            <p class="hint" id="bf-cadLogoHint">Sube un logo: su contorno se convierte en curvas B-spline (con las esquinas detectadas) y se corta sobre las caras elegidas.</p>
+          </div>
+          <div id="bf-cadDimCtl">
+            <div class="row2">
+              <div class="ctl">
+                <div class="ctl-top"><span id="bf-cadSizeLabel">Ancho</span><output id="bf-cadSizeOut"></output></div>
+                <input type="range" id="bf-cadSize" min="0.5" max="30" step="0.1">
+              </div>
+              <div class="ctl" id="bf-cadHeightCtl">
+                <div class="ctl-top"><span>Alto</span><output id="bf-cadHeightOut"></output></div>
+                <input type="range" id="bf-cadHeight" min="0.5" max="30" step="0.1">
+              </div>
+            </div>
+            <div class="ctl" id="bf-cadRadiusCtl">
+              <div class="ctl-top"><span>Redondeo de esquinas</span><output id="bf-cadRadiusOut"></output></div>
+              <input type="range" id="bf-cadRadius" min="0" max="1" step="0.01">
+            </div>
+          </div>
+          <div class="ctl">
+            <div class="ctl-top"><span>Giro del elemento</span><output id="bf-cadElRotOut"></output></div>
+            <input type="range" id="bf-cadElRot" min="-180" max="180" step="1">
+          </div>
+
+          <div class="sub-h">4 · Corte</div>
+          <div class="seg small" id="bf-cadDepthSeg">
+            <button data-v="through" aria-pressed="true">Pasante</button>
+            <button data-v="blind" aria-pressed="false">Ciego / grabar</button>
+            <button data-v="emboss" aria-pressed="false">Relieve / unir</button>
+          </div>
+          <div class="ctl" id="bf-cadDepthCtl" hidden>
+            <div class="ctl-top"><span id="bf-cadDepthLabel">Profundidad</span><output id="bf-cadDepthOut"></output></div>
+            <input type="range" id="bf-cadDepth" min="0.2" max="10" step="0.1">
+          </div>
+          <div class="row2" id="bf-cadEdgeCtl">
+            <div class="ctl">
+              <div class="ctl-top"><span>Chaflán</span><output id="bf-cadChamferOut"></output></div>
+              <input type="range" id="bf-cadChamfer" min="0" max="3" step="0.05">
+            </div>
+            <div class="ctl">
+              <div class="ctl-top"><span>Inclinación</span><output id="bf-cadTaperOut"></output></div>
+              <input type="range" id="bf-cadTaper" min="0" max="40" step="0.5">
+            </div>
+          </div>
+          <div class="ctl">
+            <div class="ctl-top"><span>Margen al borde de la cara</span><output id="bf-cadMarginOut"></output></div>
+            <input type="range" id="bf-cadMargin" min="0" max="6" step="0.1">
+          </div>
+          <div class="seg small" id="bf-cadDirSeg">
+            <button data-v="normal" aria-pressed="true">Normal a la cara</button>
+            <button data-v="proj" aria-pressed="false">Proyección (desmoldeo)</button>
+          </div>
+          <div class="seg small mono" id="bf-cadAxisSeg" hidden>
+            <button data-v="auto" aria-pressed="true">Auto</button>
+            <button data-v="x" aria-pressed="false">X</button>
+            <button data-v="y" aria-pressed="false">Y</button>
+            <button data-v="z" aria-pressed="false">Z</button>
+          </div>
+
+          <div id="bf-cadGradBlock">
+            <div class="sub-h">5 · Variación (tipo Grasshopper)</div>
+            <div class="seg small wrap4" id="bf-cadGradSeg">
+              <button data-v="none" aria-pressed="true">Uniforme</button>
+              <button data-v="u" aria-pressed="false">A lo largo (U)</button>
+              <button data-v="v" aria-pressed="false">A lo alto (V)</button>
+              <button data-v="radial" aria-pressed="false">Radial</button>
+              <button data-v="attr" aria-pressed="false">Atractor</button>
+              <button data-v="random" aria-pressed="false">Aleatorio</button>
+              <button data-v="image" aria-pressed="false">Imagen</button>
+            </div>
+            <div id="bf-cadGradCtl" class="ctl" hidden>
+              <div class="sublabel"><span>La variación cambia</span></div>
+              <div class="seg small" id="bf-cadTgtSeg">
+                <button data-t="w" aria-pressed="true">Ancho</button>
+                <button data-t="h" aria-pressed="true">Alto</button>
+                <button data-t="z" aria-pressed="false">Profundidad</button>
+                <button data-t="rot" aria-pressed="false">Giro</button>
+              </div>
+              <div class="seg small wrap4" id="bf-cadCurveSeg"></div>
+              <div class="ctl">
+                <div class="ctl-top"><span>Mínimo</span><output id="bf-cadMinOut"></output></div>
+                <input type="range" id="bf-cadMin" min="0" max="1" step="0.01">
+              </div>
+              <div class="ctl" id="bf-cadRotVarCtl" hidden>
+                <div class="ctl-top"><span>Giro máximo</span><output id="bf-cadRotVarOut"></output></div>
+                <input type="range" id="bf-cadRotVar" min="0" max="180" step="1">
+              </div>
+              <label class="switch" for="bf-cadInv"><span>Invertir</span><input type="checkbox" id="bf-cadInv"><span class="knob"></span></label>
+              <div id="bf-cadAttrCtl" class="ctl" hidden>
+                <button class="btn sm" id="bf-pickCadAttr">Colocar atractor con clic</button>
+                <div class="ctl">
+                  <div class="ctl-top"><span>Radio del atractor</span><output id="bf-cadAttrROut"></output></div>
+                  <input type="range" id="bf-cadAttrR" min="2" max="150" step="1">
+                </div>
+              </div>
+              <div id="bf-cadSeedCtl" class="ctl" hidden>
+                <button class="btn sm" id="bf-cadReseed">Otra semilla</button>
+              </div>
+              <div id="bf-cadMapCtl" class="ctl" hidden>
+                <div class="row2">
+                  <label class="btn" for="bf-cadMapFile">Imagen de densidad</label>
+                  <label class="btn" for="bf-cadMapCam">Cámara</label>
+                </div>
+                <input type="file" id="bf-cadMapFile" accept="image/*" hidden>
+                <input type="file" id="bf-cadMapCam" accept="image/*" capture="environment" hidden>
+                <p class="hint" id="bf-cadMapImgHint">Las zonas claras dan elementos grandes y las oscuras, pequeños. Por debajo de 0,3 mm el elemento desaparece: una foto o un degradado dibujan el patrón.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="status-line" id="bf-cadCount"><span class="dot"></span><span></span></div>
+          <button class="btn primary" id="bf-cadApply">Aplicar en NURBS (exacto)</button>
+          <div class="row2">
+            <button class="btn sm" id="bf-cadUndo">Deshacer</button>
+            <button class="btn sm" id="bf-cadReset">Volver al original</button>
+          </div>
+          <p class="hint">La vista previa es inmediata. "Aplicar" corta la pieza con booleanas exactas de OpenCascade (unas 0,15 s por elemento). Puedes encadenar patrones y exportar a STEP para volver a Alias.</p>
+        </div>
+      </details>
+
+      <details class="grp" id="bf-surfGrp">
+        <summary>Superficies de la pieza </summary>
+        <div class="grp-body">
+          <p class="hint">Divide la pieza en superficies a tu medida. Cada superficie nueva se puede usar en las capas ("Solo las elegidas") y para pintar materiales y colores.</p>
+          <div class="seg small" id="bf-toolSeg">
+            <button data-t="grow" aria-pressed="true">Crecer</button>
+            <button data-t="brush" aria-pressed="false">Pincel</button>
+            <button data-t="band" aria-pressed="false">Franja</button>
+          </div>
+          <div id="bf-tGrow" class="ctl">
+            <div class="ctl">
+              <div class="ctl-top"><span>Tolerancia de ángulo</span><output id="bf-growAngleOut"></output></div>
+              <input type="range" id="bf-growAngle" min="3" max="90" step="1">
+            </div>
+            <button class="btn" id="bf-pickGrow">Crecer desde un clic en la pieza</button>
+            <p class="hint">Toma todo lo conectado al punto del clic cuya inclinación difiera menos que la tolerancia. 5–15° separa caras planas; 40–60° toma superficies curvas enteras.</p>
+          </div>
+          <div id="bf-tBrush" class="ctl" hidden>
+            <div class="ctl">
+              <div class="ctl-top"><span>Radio del pincel</span><output id="bf-brushMmOut"></output></div>
+              <input type="range" id="bf-brushMm" min="0.5" max="20" step="0.5">
+            </div>
+            <button class="btn" id="bf-pickBrush">Pintar zona con el ratón</button>
+            <p class="hint">Mantén pulsado y arrastra sobre la pieza. Al soltar se crea una superficie nueva. La cámara queda fija mientras pintas.</p>
+          </div>
+          <div id="bf-tBand" class="ctl" hidden>
+            <div class="seg small mono" id="bf-bandAxisSeg">
+              <button data-a="x" aria-pressed="false">X</button>
+              <button data-a="y" aria-pressed="true">Y (altura)</button>
+              <button data-a="z" aria-pressed="false">Z</button>
+            </div>
+            <div class="row2">
+              <div class="ctl">
+                <div class="ctl-top"><span>Desde</span><output id="bf-band0Out"></output></div>
+                <input type="range" id="bf-band0" min="-1" max="1" step="0.005">
+              </div>
+              <div class="ctl">
+                <div class="ctl-top"><span>Hasta</span><output id="bf-band1Out"></output></div>
+                <input type="range" id="bf-band1" min="-1" max="1" step="0.005">
+              </div>
+            </div>
+            <button class="btn" id="bf-makeBand">Crear superficie con esta franja</button>
+          </div>
+          <div class="sub-h">Superficies creadas</div>
+          <div class="ctl" id="bf-customList"></div>
+          <div class="row2">
+            <button class="btn sm" id="bf-undoOp">Deshacer última</button>
+            <button class="btn sm" id="bf-clearOps">Borrar todas</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="grp" id="bf-presetGrp" open>
+        <summary>Recetas de un clic </summary>
+        <div class="grp-body">
+          <div class="presets" id="bf-presets"></div>
+          <p class="hint">Cada receta configura las 3 capas de golpe. Después puedes retocar cualquier capa a mano.</p>
+        </div>
+      </details>
+
+      <details class="grp" id="bf-layerGrp" open>
+        <summary>Capas de patrón </summary>
+        <div class="grp-body" id="bf-layerEditor">
+          <div class="ltabs" id="bf-ltabs" role="tablist">
+            <button role="tab" data-l="0" aria-selected="true">Capa 1<span class="ld"></span></button>
+            <button role="tab" data-l="1" aria-selected="false">Capa 2<span class="ld"></span></button>
+            <button role="tab" data-l="2" aria-selected="false">Capa 3<span class="ld"></span></button>
+          </div>
+          <div class="layer-sum" id="bf-layerSum"></div>
+          <label class="switch" for="bf-L_on"><span>Capa activa</span><input type="checkbox" id="bf-L_on" data-k="on"><span class="knob"></span></label>
+
+          <div class="layer-body" id="bf-layerBody">
+            <div class="sub-h">Patrón</div>
+            <div class="tex-grid" id="bf-texGrid"></div>
+            <div class="row2">
+              <label class="btn" for="bf-fileGallery">Galería</label>
+              <label class="btn" for="bf-fileCamera">Cámara</label>
+            </div>
+            <input type="file" id="bf-fileGallery" accept="image/png,image/jpeg,image/webp,image/*">
+            <input type="file" id="bf-fileCamera" accept="image/*" capture="environment">
+            <button class="btn" id="bf-reseed" hidden>Nueva semilla de ruido</button>
+
+            <div id="bf-grpText" class="ctl" hidden>
+              <div class="ctl-top"><span>Texto (Enter = nueva línea)</span></div>
+              <textarea id="bf-L_text" data-k="text" rows="2" spellcheck="false"></textarea>
+              <div class="seg small wrap" data-k="font" id="bf-fontSeg">
+                <button data-v="Archivo Black" style="font-family:'Archivo Black',sans-serif">Sans</button>
+                <button data-v="Bebas Neue" style="font-family:'Bebas Neue',sans-serif;font-size:14px">Condensada</button>
+                <button data-v="Stardos Stencil" style="font-family:'Stardos Stencil',serif">Stencil</button>
+                <button data-v="Playfair Display" style="font-family:'Playfair Display',serif">Serif</button>
+                <button data-v="Pacifico" style="font-family:'Pacifico',cursive">Script</button>
+                <button data-v="IBM Plex Mono" style="font-family:'IBM Plex Mono',monospace">Mono</button>
+              </div>
+            </div>
+
+            <div id="bf-grpImg" class="ctl" hidden>
+              <div class="ctl">
+                <div class="ctl-top"><span>Silueta detectada</span><output id="bf-maskInfo"></output></div>
+                <canvas id="bf-maskCv" aria-label="Vista previa de la silueta que se va a usar"></canvas>
+              </div>
+              <label class="switch" for="bf-L_vector"><span><b>Sólido vectorial exacto (CAD)</b></span><input type="checkbox" id="bf-L_vector" data-k="vector"><span class="knob"></span></label>
+              <div id="bf-vectorCtl" class="ctl" hidden>
+                <p class="hint">El contorno se convierte en curvas y se extruye como un sólido real, independiente de la malla. Al exportar se une (o se resta, con "Grabar") a la pieza con booleanas exactas.</p>
+                <div class="ctl">
+                  <div class="ctl-top"><span>Bisel del sólido</span><output id="bf-L_vBevelOut"></output></div>
+                  <input type="range" id="bf-L_vBevel" data-k="vBevel" min="0" max="1" step="0.02">
+                </div>
+                <div class="ctl-top"><span>Proyectar desde</span></div>
+                <div class="seg small mono wrap4" data-k="vAxis" id="bf-vAxisSeg">
+                  <button data-v="auto">Auto</button>
+                  <button data-v="+z">+Z</button>
+                  <button data-v="-z">−Z</button>
+                  <button data-v="+x">+X</button>
+                  <button data-v="-x">−X</button>
+                  <button data-v="+y">+Y</button>
+                  <button data-v="-y">−Y</button>
+                </div>
+                <p class="hint">En superficies curvas el logo se proyecta desde esa dirección y se envuelve siguiendo la curvatura. "Auto" en cilindros y esferas proyecta desde el lado que estás mirando (pulsa otra vez el interruptor tras girar la cámara, o elige un eje).</p>
+                <div class="info" id="bf-vectorInfo"></div>
+              </div>
+              <div class="seg small" data-k="fit" id="bf-fitSeg">
+                <button data-v="contain">Contener</button>
+                <button data-v="cover">Cubrir</button>
+              </div>
+              <div class="ctl">
+                <div class="ctl-top"><span>Margen</span><output id="bf-L_marginOut"></output></div>
+                <input type="range" id="bf-L_margin" data-k="margin" min="0" max="0.4" step="0.01">
+              </div>
+              <label class="switch" for="bf-L_autoBg" id="bf-autoBgRow"><span>Detectar logo por color de fondo</span><input type="checkbox" id="bf-L_autoBg" data-k="autoBg"><span class="knob"></span></label>
+              <label class="switch" for="bf-L_thresh"><span>Contorno nítido (umbral + bisel)</span><input type="checkbox" id="bf-L_thresh" data-k="thresh"><span class="knob"></span></label>
+              <div id="bf-threshCtl" class="ctl">
+                <div class="ctl">
+                  <div class="ctl-top"><span>Umbral</span><output id="bf-L_levelOut"></output></div>
+                  <input type="range" id="bf-L_level" data-k="level" min="0.05" max="0.95" step="0.01">
+                </div>
+                <div class="ctl" id="bf-rasterBevelRow">
+                  <div class="ctl-top"><span>Ancho de bisel</span><output id="bf-L_bevelOut"></output></div>
+                  <input type="range" id="bf-L_bevel" data-k="bevel" min="0" max="0.06" step="0.001">
+                </div>
+                <div class="seg small" data-k="profile" id="bf-profileSeg">
+                  <button data-v="flat">Recto</button>
+                  <button data-v="chamfer">Chaflán</button>
+                  <button data-v="round">Redondo</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="sub-h">Superficies donde se aplica</div>
+            <div class="seg small" data-k="surf" id="bf-surfSeg">
+              <button data-v="all">Toda la pieza</button>
+              <button data-v="sel">Solo las elegidas</button>
+            </div>
+            <div id="bf-surfCtl" class="ctl" hidden>
+              <button class="btn" id="bf-pickSurf">Elegir superficies con clic en la pieza</button>
+              <div class="regions" id="bf-regionList"></div>
+              <div class="row3">
+                <button class="btn sm" id="bf-selAll">Todas</button>
+                <button class="btn sm" id="bf-selNone">Ninguna</button>
+                <button class="btn sm" id="bf-selInv">Invertir</button>
+              </div>
+              <p class="hint" id="bf-surfHint"></p>
+            </div>
+
+            <div class="sub-h">Tamaño y posición</div>
+            <div class="ctl">
+              <div class="ctl-top"><span id="bf-scaleLabel">Escala (repeticiones por cara)</span><output id="bf-L_scaleOut"></output></div>
+              <input type="range" id="bf-L_scale" data-k="scale" min="0.5" max="12" step="0.05">
+            </div>
+            <div class="ctl">
+              <div class="ctl-top"><span>Rotación</span><output id="bf-L_rotOut"></output></div>
+              <input type="range" id="bf-L_rot" data-k="rot" min="0" max="180" step="1">
+            </div>
+            <div class="row2">
+              <div class="ctl">
+                <div class="ctl-top"><span>Offset X</span><output id="bf-L_offXOut"></output></div>
+                <input type="range" id="bf-L_offX" data-k="offX" min="-1" max="1" step="0.005">
+              </div>
+              <div class="ctl">
+                <div class="ctl-top"><span>Offset Y</span><output id="bf-L_offYOut"></output></div>
+                <input type="range" id="bf-L_offY" data-k="offY" min="-1" max="1" step="0.005">
+              </div>
+            </div>
+            <label class="switch" for="bf-L_repeat"><span>Repetir patrón (tiling)</span><input type="checkbox" id="bf-L_repeat" data-k="repeat"><span class="knob"></span></label>
+
+            <div class="sub-h">Relieve</div>
+            <div class="ctl">
+              <div class="ctl-top"><span>Profundidad</span><output id="bf-L_depthOut"></output></div>
+              <input type="range" id="bf-L_depth" data-k="depth" min="0" max="3" step="0.05">
+            </div>
+            <div class="ctl">
+              <div class="ctl-top"><span>Combinar con capas anteriores</span></div>
+              <div class="seg small" data-k="blend" id="bf-blendSeg">
+                <button data-v="add">Sumar</button>
+                <button data-v="max">Máximo</button>
+                <button data-v="sub">Grabar</button>
+                <button data-v="replace">Reemplazar</button>
+              </div>
+            </div>
+            <label class="switch" for="bf-L_invert"><span>Invertir patrón</span><input type="checkbox" id="bf-L_invert" data-k="invert"><span class="knob"></span></label>
+            <div class="ctl">
+              <div class="ctl-top"><span>Suavizado del mapa</span><output id="bf-L_blurOut"></output></div>
+              <input type="range" id="bf-L_blur" data-k="blur" min="0" max="8" step="1">
+            </div>
+            <label class="switch" for="bf-L_seamTex"><span>Sellar bordes de la textura</span><input type="checkbox" id="bf-L_seamTex" data-k="seamTex"><span class="knob"></span></label>
+            <div class="ctl" id="bf-seamTexCtl">
+              <div class="ctl-top"><span>Marco de desvanecimiento</span><output id="bf-L_seamTexWOut"></output></div>
+              <input type="range" id="bf-L_seamTexW" data-k="seamTexW" min="0.01" max="0.25" step="0.01">
+            </div>
+
+            <div class="sub-h">Variación (graph mapper)</div>
+            <div class="seg small" data-k="field" id="bf-fieldSeg">
+              <button data-v="none">Uniforme</button>
+              <button data-v="grad">Gradiente</button>
+              <button data-v="attr">Atractor</button>
+            </div>
+            <div id="bf-fGrad" class="ctl" hidden>
+              <div class="seg small mono" data-k="axis" id="bf-axisSeg">
+                <button data-v="x">X</button>
+                <button data-v="y">Y</button>
+                <button data-v="z">Z</button>
+                <button data-v="r">Radial</button>
+              </div>
+              <div class="row2">
+                <div class="ctl">
+                  <div class="ctl-top"><span>Empieza en</span><output id="bf-L_g0Out"></output></div>
+                  <input type="range" id="bf-L_g0" data-k="g0" min="-1" max="1" step="0.01">
+                </div>
+                <div class="ctl">
+                  <div class="ctl-top"><span>Termina en</span><output id="bf-L_g1Out"></output></div>
+                  <input type="range" id="bf-L_g1" data-k="g1" min="-1" max="1" step="0.01">
+                </div>
+              </div>
+            </div>
+            <div id="bf-fAttr" class="ctl" hidden>
+              <button class="btn" id="bf-pickAttr">Colocar atractor con clic en la pieza</button>
+              <div class="ctl">
+                <div class="ctl-top"><span>Radio de influencia</span><output id="bf-L_radOut"></output></div>
+                <input type="range" id="bf-L_rad" data-k="rad" min="0.1" max="3" step="0.01">
+              </div>
+            </div>
+            <div id="bf-fCurve" class="ctl" hidden>
+              <div class="curve-wrap"><canvas id="bf-curveCv" aria-label="Curva de variación: arrastra los puntos"></canvas></div>
+              <div class="curve-axis"><span id="bf-curveX0">inicio</span><span>arrastra los puntos ↕</span><span id="bf-curveX1">fin</span></div>
+              <div class="seg small wrap4" id="bf-curvePresets"></div>
+              <div class="ctl-top"><span>La curva controla</span></div>
+              <div class="seg small" data-k="target" id="bf-targetSeg">
+                <button data-v="amp">Altura</button>
+                <button data-v="size">Grosor</button>
+                <button data-v="scale">Escala</button>
+              </div>
+              <div class="row2">
+                <div class="ctl">
+                  <div class="ctl-top"><span>Mínimo</span><output id="bf-L_rMinOut"></output></div>
+                  <input type="range" id="bf-L_rMin" data-k="rMin" min="0" max="1" step="0.01">
+                </div>
+                <div class="ctl">
+                  <div class="ctl-top"><span>Máximo</span><output id="bf-L_rMaxOut"></output></div>
+                  <input type="range" id="bf-L_rMax" data-k="rMax" min="0" max="1" step="0.01">
+                </div>
+              </div>
+              <p class="hint" id="bf-targetHint"></p>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="grp" id="bf-edgeGrp">
+        <summary>Aristas y proyección </summary>
+        <div class="grp-body">
+          <div class="ctl">
+            <div class="ctl-top"><span>Sellado de aristas (seam blending)</span><output id="bf-seamEdgeOut"></output></div>
+            <input type="range" id="bf-seamEdge" min="0" max="0.3" step="0.01">
+            <p class="hint">Atenúa el relieve cerca de las aristas vivas para que las superficies vecinas se encuentren a la misma altura.</p>
+          </div>
+          <div class="ctl">
+            <div class="ctl-top"><span>Nitidez de la proyección triplanar</span><output id="bf-sharpOut"></output></div>
+            <input type="range" id="bf-sharp" min="1" max="16" step="0.5">
+            <p class="hint">Valores bajos mezclan las tres proyecciones en superficies curvas. Valores altos dan transiciones más cortas.</p>
+          </div>
+        </div>
+      </details>
+
+      <details class="grp" open>
+        <summary>Material y render </summary>
+        <div class="grp-body">
+          <div class="seg small" id="bf-matModeSeg">
+            <button data-mm="all" aria-pressed="true">Toda la pieza</button>
+            <button data-mm="paint" aria-pressed="false">Pintar superficies</button>
+          </div>
+          <div id="bf-paintCtl" class="ctl" hidden>
+            <button class="btn" id="bf-pickMat">Pintar con clic en la pieza</button>
+            <p class="hint" id="bf-paintHint"></p>
+            <button class="btn sm" id="bf-clearPaint">Quitar materiales pintados</button>
+          </div>
+          <div class="mats" id="bf-mats"></div>
+          <div class="color-row"><span id="bf-matColorLabel">Color del material</span><input type="color" id="bf-matColor"></div>
+          <button class="btn" id="bf-ptBtn">Render realista (trazado de rayos)</button>
+          <p class="hint">El render realista calcula la luz como Cycles: rebotes, reflejos y sombras físicas. Mejora con cada muestra mientras la cámara está quieta.</p>
+          <div class="ctl">
+            <div class="ctl-top"><span>Exposición</span><output id="bf-exposureOut"></output></div>
+            <input type="range" id="bf-exposure" min="0.4" max="2" step="0.02">
+          </div>
+          <div class="seg small" id="bf-toneSeg">
+            <button data-tone="aces" aria-pressed="true">ACES Filmic</button>
+            <button data-tone="agx" aria-pressed="false">AgX</button>
+          </div>
+          <label class="switch" for="bf-aoOn"><span>Oclusión ambiental (GTAO)</span><input type="checkbox" id="bf-aoOn"><span class="knob"></span></label>
+          <div class="ctl" id="bf-aoCtl">
+            <div class="ctl-top"><span>Intensidad de oclusión</span><output id="bf-aoIntOut"></output></div>
+            <input type="range" id="bf-aoInt" min="0" max="1.5" step="0.05">
+          </div>
+        </div>
+      </details>
+
+      <details class="grp" open>
+        <summary><span id="bf-exportTitle">Detalle, horneado y STL</span> </summary>
+        <div class="grp-body">
+          <div class="ctl" id="bf-sizeCtl">
+            <div class="ctl-top"><span>Tamaño de la pieza (lado mayor)</span><output id="bf-sizeOut"></output></div>
+            <input type="range" id="bf-size" min="5" max="300" step="1">
+          </div>
+          <label class="switch" for="bf-refineOn" id="bf-refineSwitch"><span>Refinado adaptativo de bordes</span><input type="checkbox" id="bf-refineOn"><span class="knob"></span></label>
+          <div id="bf-refineCtl" class="ctl">
+            <div class="ctl">
+              <div class="ctl-top"><span>Tolerancia de contorno</span><output id="bf-tolOut"></output></div>
+              <input type="range" id="bf-tol" min="0.01" max="0.2" step="0.005">
+            </div>
+            <div class="sublabel"><span>Presupuesto de triángulos</span></div>
+            <div class="seg small mono" id="bf-budgetSeg">
+              <button data-b="1000000">1 M</button>
+              <button data-b="2000000">2 M</button>
+              <button data-b="3000000">3 M</button>
+            </div>
+            <button class="btn" id="bf-refineBtn">Refinar vista ahora</button>
+            <div class="status-line" id="bf-refineStatus"><span class="dot"></span><span></span></div>
+            <p class="hint">Subdivide solo los triángulos que cruzan un contorno (letras, logos, bordes del patrón). Cada arista partida se comparte entre sus dos triángulos, así que la malla sigue sin huecos.</p>
+          </div>
+          <div class="sublabel"><span>Formato</span></div>
+          <div class="seg small" id="bf-fmtSeg">
+            <button data-f="stl" aria-pressed="true">STL (una pieza)</button>
+            <button data-f="3mf" aria-pressed="false">3MF multicolor</button>
+            <button data-f="step" aria-pressed="false" hidden>STEP (NURBS)</button>
+          </div>
+          <p class="hint" id="bf-fmtHint">STL: un solo cuerpo, sin colores.</p>
+          <button class="btn primary" id="bf-exportBtn">Hornear y exportar</button>
+          <div class="stats" id="bf-stats"></div>
+        </div>
+      </details>
+      </div>
     <section class="sec" data-module="ai">
       <h2>Pide un objeto</h2>
       <div class="ai-chat" id="ai-chat" aria-live="polite"></div>
@@ -1028,7 +1743,6 @@
   </div>
   <div class="quickpick" id="quickpick" hidden></div>
 
-  <iframe class="forge-frame" id="forge-frame" hidden title="Forge" allow="camera; clipboard-write"></iframe>
   <div class="float-win" id="layers-win" role="dialog" aria-label="Capas">
     <div class="fw-head" id="layers-head" title="Arrastra para mover">
       <b>Capas</b><span class="fw-count" id="scene-count"></span>
@@ -1129,7 +1843,10 @@
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+  "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.6/build/index.module.js",
+  "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
 } }
 </script>
 <script type="module" src="./src/main.js"></script>

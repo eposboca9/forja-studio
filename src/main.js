@@ -301,7 +301,7 @@ function hasTransformable() {
   return selectedCVRefs().length > 0 || (pickMode === 'object' && selObjs.some((o) => o.kind === 'mesh' && o.visible));
 }
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (!mouseXform || prefs.xform === 'gizmo' || carousel || tool !== 'select' || pivotEdit || navHeld || (e.ctrlKey && e.shiftKey) || e.button > 2) return;
+  if (!mouseXform || prefs.xform === 'gizmo' || carousel || layout === 'forge' || tool !== 'select' || pivotEdit || navHeld || (e.ctrlKey && e.shiftKey) || e.button > 2) return;
   if ((gizmo.axis && e.button === 0) || !hasTransformable()) return;
   e.stopImmediatePropagation(); e.preventDefault();
   attachGizmo();
@@ -566,8 +566,6 @@ function setTheme(t) {
   document.querySelectorAll('[data-theme-btn]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeBtn === t)));
   repaintWall();
   applyTheme3D();
-  const ff = document.getElementById('forge-frame');   // (setTheme corre antes de que exista forgeFrame)
-  if (ff?.src) ff.contentWindow?.postMessage({ type: 'forja:theme', theme: t }, '*');
 }
 document.querySelectorAll('[data-theme-btn]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeBtn)));
 
@@ -1423,7 +1421,7 @@ function howFor(e) {
 renderer.domElement.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); }); // sin autodesplazamiento
 renderer.domElement.addEventListener('pointerdown', (e) => {
   dragPane = paneAt(e.clientX);
-  if (carousel || extrudeDrag) { down = null; return; }
+  if (carousel || extrudeDrag || layout === 'forge') { down = null; return; }   // en Forge los clics son de Forge
   if (navHeld || (e.button !== 0 && !(navStyle === 'alias' && tool === 'select'))) { down = null; return; }
   const canBox = tool === 'select' && !gizmo.axis && (navStyle === 'alias' || e.shiftKey);
   down = { x: e.clientX, y: e.clientY, box: canBox, boxing: false };
@@ -1584,8 +1582,6 @@ addEventListener('pointermove', (e) => {
   const busy = e.buttons !== 0;
   // El muro derecho (últimos 56 px) abre la losa; se cierra al alejarse de ella
   const edge = innerWidth - 56;
-  // en Forge el borde derecho abre el panel de Forge (que tiene la información de Forge), no el de Forja
-  if (layout === 'forge' && !forgeFrame.hidden) { if (e.clientX > edge && e.clientY > 58 && e.clientY < innerHeight - 34) forgeFrame.contentWindow?.postMessage({ type: 'forja:panel', show: true }, '*'); return; }
   if (e.clientX > edge && e.clientY > 58 && e.clientY < innerHeight - 34) panel.classList.add('show');
   else if (!busy && panel.classList.contains('show') && e.clientX < edge - panel.offsetWidth - 40) panel.classList.remove('show');
   if (e.clientX < r.left + 64 && e.clientY > r.top && e.clientY < r.bottom) tools.classList.add('show');
@@ -2011,6 +2007,8 @@ async function flipPanel(l) {
 }
 function setLayout(l) {
   layout = l;
+  if (l === 'forge') ensureForge();
+  gizmo.enabled = l !== 'forge';
   $('app').dataset.layoutNow = l;
   document.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.layout === l)));
   $('pane-diag').hidden = l === 'render';
@@ -2828,7 +2826,11 @@ const PUCK_CMDS = {
     { k: 'cube', label: 'Silla', run: () => runAI('una silla') }, { k: 'cube', label: 'Taza', run: () => runAI('una taza') }, { k: 'cube', label: 'Botella', run: () => runAI('una botella') }] },
   // comunes
   undo: { k: 'undo', label: 'Deshacer', key: 'Ctrl+Z', run: undo, sub: [{ k: 'redo', label: 'Rehacer', run: redo }] },
-  forgeSend: { k: 'object', label: 'A Forge', run: () => sendToForge() },
+  forgeIn: { k: 'object', label: 'De Forja', run: () => forgeFromForja() },
+  forgeOut: { k: 'dup', label: 'A Forja', run: () => $('bf-pushForja').click() },
+  forgeExport: { k: 'object', label: 'Exportar', run: () => $('bf-exportBtn').click() },
+  forgeFrame: { k: 'frame', label: 'Encuadrar', run: () => forge?.resetCamera() },
+  forgeRender: { k: 'sun', label: 'Render', run: () => $('bf-ptTool').click() },
   frame: { k: 'frame', label: 'Encuadrar', key: 'F', run: frameSelection, sub: [{ k: 'frame', label: 'Todo', run: () => frameObjects([]) }, { k: 'top', label: 'Vista sup.', run: topView }] },
   layers: { k: 'layers', label: 'Capas', run: () => layersWin.show(), sub: [
     { k: 'layers', label: 'Nueva capa', run: newLayer }, { k: 'layers', label: 'Pasar selección', run: () => assignToLayer() }] },
@@ -2841,7 +2843,7 @@ const PUCK_DEFAULT = {
   diag: ['curve', 'surface', 'edit', 'pick', 'xform', 'dup', 'show', 'del'],
   render: ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'render', 'frame'],
   ai: ['aiNew', 'aiPhoto', 'aiEx', 'frame', 'undo', 'layers'],
-  forge: ['forgeSend', 'frame', 'undo', 'layers'],
+  forge: ['forgeIn', 'forgeOut', 'forgeExport', 'forgeFrame', 'forgeRender'],
 };
 const PUCK_MODULES = { diag: 'Modelado', render: 'Visu', ai: 'IA', forge: 'Forge' };
 // qué comandos caben en el Puck de cada módulo (VISU solo visualización; nada que cambie de módulo sin querer)
@@ -2849,7 +2851,7 @@ const CMD_MODS = {
   diag: ['curve', 'surface', 'edit', 'pick', 'xform', 'dup', 'show', 'del', 'eval', 'undo', 'frame', 'layers', 'modules', 'prefs'],
   render: ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'render', 'frame', 'prefs'],
   ai: ['aiNew', 'aiPhoto', 'aiEx', 'undo', 'frame', 'layers', 'prefs'],
-  forge: ['forgeSend', 'undo', 'frame', 'layers', 'prefs'],
+  forge: ['forgeIn', 'forgeOut', 'forgeExport', 'forgeFrame', 'forgeRender', 'prefs'],
 };
 const puckIds = (mod) => (prefs.puck?.[mod] || PUCK_DEFAULT[mod]).filter((id) => PUCK_CMDS[id] && CMD_MODS[mod].includes(id));
 // Marking menus (Ctrl+Shift + botón del ratón), con la misma forma pero otra información
@@ -4499,6 +4501,7 @@ function renderPane(p) {
   renderer.setViewport(p.x, 0, p.w, p.h);
   renderer.setScissor(p.x, 0, p.w, p.h);
   useAspect(p);
+  if (p.kind === 'forge') return renderForgePane(p);
   const diag = p.kind !== 'render';                 // MODELADO e IA usan los shaders de evaluación
   const dm = diagMaterial();
   objects.forEach((o) => { if (o.kind !== 'curve') o.parts.mesh.material = diag ? dm : materials[o.mat]; });
@@ -4529,7 +4532,7 @@ function updateXfPrompt() {
 // Color del texto de los menús según lo que tiene detrás: se leen los píxeles de la vista bajo cada rótulo
 // (donde no hay objeto se ve el muro) y el texto pasa entero a negro o a blanco.
 let inkT = 0;
-const INK_SEL = '.cube-probe:not([hidden]), .proj-btn, .app .panel .sec > *, .app .panel .panel-head, #toolwin:not([hidden]) .tw-head, #toolwin:not([hidden]) .tw-body > *, #quickpick:not([hidden]) > b, #layers-win:not([hidden]) .fw-head, #layers-win:not([hidden]) .ly-head, #layers-win:not([hidden]) .ly-item, #layers-win:not([hidden]) .ol-item, #layers-win:not([hidden]) .fw-body > p, .puck:not([hidden]) .puck-item span, .puck:not([hidden]) .puck-center, #rel-labels:not([hidden]) .rel-label, .top .brand, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
+const INK_SEL = '.cube-probe:not([hidden]), .proj-btn, .app .panel .sec > *, .app .panel .panel-head, .app[data-layout-now="forge"] .panel .bf-ui details.grp > summary, .app[data-layout-now="forge"] .panel .bf-ui .grp-body > *, .app[data-layout-now="forge"] .bf-hud .chip:not([hidden]), .app[data-layout-now="forge"] .bf-loader:not([hidden]), #toolwin:not([hidden]) .tw-head, #toolwin:not([hidden]) .tw-body > *, #quickpick:not([hidden]) > b, #layers-win:not([hidden]) .fw-head, #layers-win:not([hidden]) .ly-head, #layers-win:not([hidden]) .ly-item, #layers-win:not([hidden]) .ol-item, #layers-win:not([hidden]) .fw-body > p, .puck:not([hidden]) .puck-item span, .puck:not([hidden]) .puck-center, #rel-labels:not([hidden]) .rel-label, .top .brand, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
 function adaptInk(now) {
   if (now - inkT < 250) return;
   inkT = now;
@@ -4565,54 +4568,68 @@ function placePanelVeil() {
   panelVeil.hidden = !on;
   if (on) Object.assign(panelVeil.style, { left: r.left - 30 + 'px', top: r.top - 30 + 'px', width: r.width + 60 + 'px', height: r.height + 60 + 'px' });
 }
-// ---------- Módulo FORGE (BumpForge: relieves, patrones y cortes exactos para impresión 3D) ----------
-// Es su propia app (forge/index.html) dentro de la vista. Se carga la primera vez que se entra al módulo.
-// Puente con Forja (postMessage): "Enviar a Forge" manda la selección (STEP si son NURBS, STL si son mallas) y lo que
-// Forge exporta vuelve a la escena de Forja como objeto nuevo. La tecla V dentro de Forge también abre el carrusel.
-const forgeFrame = $('forge-frame');
-let forgeReady = null;
-function updateForgeFrame() {
-  const on = layout === 'forge' && !carousel;
-  if (on && !forgeFrame.src) {
-    forgeReady = new Promise((res) => forgeFrame.addEventListener('load', () => { postForgeTheme(); res(); }, { once: true }));
-    forgeFrame.src = 'forge/index.html?forja=1';
-  }
-  if (forgeFrame.hidden === on) { forgeFrame.hidden = !on; document.body.classList.toggle('forge-on', on); }
+// ---------- Módulo FORGE: relieve físico, patrones y cortes exactos para impresión 3D ----------
+// El modelado es el código de BumpForge (src/forge/engine.js); el visor, la cámara, el fondo, el panel y los menús son
+// los de Forja. Sus objetos viven en forgeRoot, que solo se dibuja en la vista del módulo Forge (y en su lugar del carrusel).
+const forgeRoot = new THREE.Group();
+forgeRoot.visible = false;
+scene.add(forgeRoot);
+let forge = null, forgeLoading = null, forgeExposure = 1, forgeTone = THREE.ACESFilmicToneMapping, forgeToScene = false;
+const forgeCtx = {
+  renderer, camera, root: forgeRoot,
+  controls: { target: pivot, autoRotate: false, enabled: true, update: () => false, addEventListener() {} },
+  toast: (msg) => toast(msg),
+  setView: (pos, target) => { pivot.copy(target); camera.position.copy(pos); camera.lookAt(target); },
+  setExposure: (v) => { forgeExposure = v; },
+  setTone: (k) => { forgeTone = k === 'agx' ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping; },
+  active: () => layout === 'forge' && !carousel,
+  // lo que Forge exporta se descarga como en Forja, o entra en la escena con "Enviar a Forja"
+  deliver: async (base, bytes, ext) => {
+    const name = `${base}.${ext}`;
+    if (forgeToScene) { forgeToScene = false; await importFile(new File([bytes], name)); return `${name} está en la escena de Forja (Modelado / Visu)`; }
+    await saveFile(name, new Blob([bytes]));
+    return `Guardado ${name}`;
+  },
+};
+function ensureForge() {
+  if (forge) return Promise.resolve(forge);
+  forgeLoading ||= import('./forge/engine.js')
+    .then((m) => m.startForge(forgeCtx))
+    .then((api) => { forge = api; return api; })
+    .catch((e) => { console.error(e); toast(`Forge no pudo arrancar: ${e.message}`); forgeLoading = null; });
+  return forgeLoading;
 }
-$('forge-send').addEventListener('click', () => sendToForge());
-// Forge toma el tema de Forja (claro u oscuro): su lienzo es transparente y deja ver el muro
-function postForgeTheme() { forgeFrame.contentWindow?.postMessage({ type: 'forja:theme', theme }, '*'); }
-async function sendToForge() {
-  const list = (selObjs.length ? selObjs : objects).filter((o) => o.visible);
-  if (!list.length) return toast('Forge: no hay nada visible que enviar.');
-  const nurbs = list.filter((o) => o.kind === 'surface'), o = { unit: 'mm', zUp: true };
-  let name, data;
-  if (nurbs.length && nurbs.length === list.filter((x) => x.kind !== 'curve').length) {
-    name = `${baseName()}.step`; data = new TextEncoder().encode(X.writeSTEP(nurbs, o, name));
-  } else {
-    name = `${baseName()}.stl`; data = new Uint8Array(new STLExporter().parse(meshExportScene(list, o), { binary: true }).buffer);
-  }
-  if (layout !== 'forge') switchLayout('forge');
-  updateForgeFrame();
-  await forgeReady;
-  forgeFrame.contentWindow.postMessage({ type: 'forja:open', name, bytes: data }, '*');
-  toast(`Enviado a Forge: ${name} (${list.length} ${list.length === 1 ? 'objeto' : 'objetos'})`);
+// Forge dibuja solo su pieza (los objetos de Forja quedan ocultos en este módulo), con su exposición y tono
+function renderForgePane(p) {
+  const hidden = [];
+  for (const c of scene.children) if (c !== forgeRoot && c.visible) { c.visible = false; hidden.push(c); }
+  forgeRoot.visible = true;
+  scene.background = null;
+  scene.environment = envTexture('studio');
+  const expo = renderer.toneMappingExposure;
+  renderer.toneMapping = forgeTone; renderer.toneMappingExposure = forgeExposure;
+  camera.layers.set(0);
+  if (carousel || !forgeCtx.onFrame?.()) renderer.render(scene, camera);
+  renderer.toneMappingExposure = expo;
+  forgeRoot.visible = false;
+  hidden.forEach((c) => (c.visible = true));
 }
-addEventListener('message', async (e) => {
-  if (e.source !== forgeFrame.contentWindow || !e.data) return;
-  const m = e.data;
-  if (m.type === 'forge:request') sendToForge();
-  if (m.type === 'forge:key' && m.code === 'KeyV') { if (m.down) holdCarousel(); else releaseCarousel(); }
-  if (m.type === 'forge:result') {
-    try {
-      await importFile(new File([m.bytes], m.name));
-      toast(`Llegó de Forge: ${m.name} · está en la escena (Modelado / Visu)`);
-    } catch (err) { toast(`No se pudo traer ${m.name} de Forge: ${err.message}`); }
-  }
-});
-
+// la selección de Forja (o todo lo visible) pasa a Forge como su pieza: superficies NURBS en STEP (modo exacto), mallas en STL
+async function forgeFromForja() {
+  const list = (selObjs.length ? selObjs : objects).filter((o) => o.visible && o.kind !== 'curve');
+  if (!list.length) return toast('No hay superficies ni mallas visibles para pasar a Forge.');
+  const api = await ensureForge();
+  if (!api) return;
+  const o = { unit: 'mm', zUp: true }, nurbs = list.filter((x) => x.kind === 'surface');
+  const file = nurbs.length === list.length
+    ? new File([X.writeSTEP(nurbs, o, `${baseName()}.step`)], `${baseName()}.step`)
+    : new File([new STLExporter().parse(meshExportScene(list, o), { binary: true })], `${baseName()}.stl`);
+  await api.openFile(file);
+}
+$('bf-pullForja').addEventListener('click', forgeFromForja);
+$('bf-pushForja').addEventListener('click', () => { forgeToScene = true; $('bf-exportBtn').click(); });
 function renderFrame(now) {
-  updateForgeFrame();
+  if (layout === 'forge' && !carousel && forgeCtx.controls.autoRotate) tumble(1.2, 0);   // "Girar" de Forge
   stepCamAnim(now);
   placePanelVeil();
   updateViewName();
@@ -4629,7 +4646,6 @@ function renderFrame(now) {
   placeRelLabels();
   renderer.shadowMap.needsUpdate = true;
   if (carousel) renderCarousel(now);
-  else if (!forgeFrame.hidden) { const p = panes()[0]; renderer.setViewport(p.x, 0, p.w, p.h); renderer.setScissor(p.x, 0, p.w, p.h); renderer.clear(); }  // en Forge solo el muro
   else { panes().forEach(renderPane); panes().forEach(renderViewCube); }
   scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
   // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
@@ -4692,7 +4708,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, sendToForge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

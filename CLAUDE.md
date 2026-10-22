@@ -32,8 +32,9 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - `src/logo.js`: logotipo Nodo.
 - `src/freeform.js`: Freeform Blend / Skin por estaciones, curvas sobre superficie (proyectar), recortes (trimGeometry) y Extender. Pura matemática.
 - `src/history.js`: historial de construcción (Align G0–G3, Blend G1/G2, Offset, Simetría, diagnóstico de unión). Pura matemática.
-- `forge/index.html` + `forge/occ/replicad_single.wasm`: app BumpForge ("Forge") del usuario, copiada de su artifact
-  https://claude.ai/artifact/S7MagYHBjK4qJ9bKmJjo3y. Es el cuarto módulo del carrusel (iframe). Solo se le añadió el puente con Forja.
+- `src/forge/engine.js` + `src/forge/replicad_single.wasm`: motor de FORGE = el código de modelado de BumpForge (app del usuario,
+  https://claude.ai/artifact/S7MagYHBjK4qJ9bKmJjo3y) como módulo nativo de Forja (startForge(ctx)). Sus controles están en index.html
+  dentro de <div class="bf-ui" data-module="forge"> (ids con prefijo bf-).
 - `src/ai.js`: módulo IA: generadores paramétricos (tornillo ISO con rosca, tuerca, arandela, mesa, silla) y parsePrompt (español).
 - `docs/capturas/`: capturas de pantalla de cada versión.
 - `docs/alias-referencia.md`: atajos y comportamiento de Alias (de la hoja oficial que pasó el usuario). Consúltalo.
@@ -345,32 +346,29 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   hijos de .panel .sec, filas de .tw-body, cabecera y filas de Capas). El Puck conserva su velo gaussiano.
   Cubo: se oculta mientras el panel derecho está abierto (panelOpen) y, con el panel fijado, se corre a su izquierda (cubeRight).
 
-## Hecho (v0.18) — módulo FORGE (cuarto módulo del carrusel)
+## Hecho (v0.18) — módulo FORGE (cuarto módulo del carrusel), nativo
 
-- RING = diag, render, ai, forge (RING_NAMES / MODULE_TITLES / PUCK_MODULES / CMD_MODS / PUCK_DEFAULT con 'forge'); botón
-  FORGE en la cabecera, menús Vistas y de visualización. layout 'forge' dibuja la escena como diag durante el giro; al
-  terminar, #forge-frame (iframe forge/index.html?forja=1, se carga la primera vez) cubre la vista: width calc(100vw − 56px)
-  y height calc(100vh − 86px) (un iframe NO se estira con top/left/right/bottom). body.forge-on oculta Capas, ventana de
-  herramienta, etiquetas y cubo.
-- Puente (postMessage): Forja → Forge {type 'forja:open', name, bytes}: sendToForge() manda la selección (o todo lo visible)
-  como STEP mm Z arriba si son superficies NURBS (Forge las abre en su modo NURBS exacto con OpenCascade y las cose en sólido)
-  o STL si hay mallas; en Forge se mete en #modelFile con DataTransfer y se dispara 'change'. Forge → Forja: con
-  window.FORJA_BRIDGE, deliver() manda {type 'forge:result', name, bytes} y Forja hace importFile (STL entra como malla; STEP
-  pasa por occt-import-js). V dentro de Forge reenvía {type 'forge:key'} para el carrusel. Panel derecho: sección Forge con
-  "Enviar selección a Forge"; Puck de Forge: A Forge, Encuadrar, Deshacer, Capas.
-- Prueba: scratchpad forja/tforge.mjs. Aquí jsdelivr y cdnjs están bloqueados (CONNECT 403): la prueba sirve los paquetes de
-  npm (npm pack funciona) desde scratchpad/npmcdn/<pkg>@<ver>/package/... Resultado: el vaso llega a Forge como 4 caras
-  NURBS, sólido cerrado, 386.9 mm; un STL devuelto por Forge entra en la escena.
-
-- (v0.18.1) Forge con la interfaz de Forja (pedido del usuario): con FORJA_BRIDGE la página pone html.forja y una hoja
-  <style id="forja-skin">: lienzo 3D transparente (WebGLRenderer alpha, scene.background null) → se ve el muro de Forja (Forja
-  solo hace clear mientras Forge está a la vista); sin fondos ni marcos, letra Jost, acento azul, botones planos como Forja;
-  panel a la derecha que sale al acercar el ratón al borde (también desde la franja de 56 px de Forja: 'forja:panel') y
-  botón Fijar; sección "Forja" con "Traer selección de Forja" ('forge:request'); datos (hud) abajo a la izquierda.
-  Tema: Forja manda 'forja:theme' al cargar y en setTheme (color-scheme del iframe = el de Forja, si no el iframe se pinta opaco).
-  Texto negro/blanco: window.forjaInk lee el lienzo de Forge justo después de composer.render (transparente = muro);
-  se vuelve a medir solo al cambiar tema o al terminar de abrir/cerrar el panel (__forgeDirty). NO forzar cuadros
-  periódicos: en swiftshader cada cuadro de Forge (GTAO) tarda segundos y la página se congela.
+- El usuario NO quiere BumpForge como app metida (se probó con iframe y se quitó). Forge = solo el código de modelado de
+  BumpForge dentro de Forja, con el visor, la cámara, el fondo, el panel, el Puck y los menús de Forja.
+- src/forge/engine.js: el <script type="module"> de BumpForge envuelto en `export async function startForge(ctx)`.
+  Cambios: $ = getElementById con prefijo 'bf-' (idempotente); querySelector('#x') → '#bf-x'; sin renderer, cámara,
+  OrbitControls, compositor ni GTAO propios (ctx.renderer, ctx.camera, ctx.controls = {target: pivot, autoRotate, enabled});
+  `scene` = ctx.root (Group forgeRoot en la escena de Forja); toast → ctx.toast; resetCamera → ctx.setView; exposición y
+  tono → ctx.setExposure/setTone; deliver (descargas) → ctx.deliver; clics en el lienzo solo si ctx.active(); el bucle es
+  ctx.onFrame (devuelve true si dibujó el trazador de rayos); OCC_WASM = 'src/forge/replicad_single.wasm'. Sin iconos Font Awesome.
+  Devuelve { openFile(file), resetCamera, invalidate }.
+- Forja (main.js, bloque "Módulo FORGE"): ensureForge() importa el motor al entrar al módulo; renderPane(kind 'forge') →
+  renderForgePane: oculta los demás hijos de la escena, dibuja forgeRoot con entorno 'studio', fondo null (muro), tono y
+  exposición de Forge. En layout 'forge' la selección / recuadro / mover de Forja están desactivados y el gizmo apagado.
+  "Traer de Forja" (forgeFromForja: STEP mm Z arriba si son superficies, STL si hay mallas → api.openFile) y "Enviar a Forja"
+  (forgeToScene + bf-exportBtn: el horneado entra en la escena con importFile). Puck de Forge: De Forja, A Forja, Exportar,
+  Encuadrar, Render. Import map con three-mesh-bvh y three-gpu-pathtracer (render realista de Forge).
+- index.html: .bf-ui (estilos de los controles con el aspecto de Forja: títulos en mayúsculas espaciadas, botones planos,
+  azul #2f7bff, sin fondos, texto negro/blanco por fila en INK_SEL), .bf-hud (datos de la pieza abajo a la izquierda) y
+  .bf-loader. Las reglas generales de Forja (.hint, .seg button nowrap/mayúsculas, .chip) se anulan dentro de .bf-ui.
+- Prueba: scratchpad forja/tbump.mjs [dark|light] [pull] [push] (jsdelivr bloqueado aquí: sirve paquetes de npm desde
+  scratchpad/npmcdn). Resultado: arranca (cubo de ladrillos, 580.800 triángulos, hermética); el vaso de Forja llega como 4 caras
+  NURBS, sólido cerrado; "Enviar a Forja" deja el STL horneado (841.208 triángulos) en la escena.
 
 ## Siguiente paso
 

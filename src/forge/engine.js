@@ -1,1014 +1,13 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
-<title>BumpForge</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=Archivo+Black&family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=Pacifico&family=Playfair+Display:wght@900&family=Stardos+Stencil:wght@700&display=swap">
-<style>
-/* Layout: visor 3D a pantalla completa + panel de control flotante (hoja inferior en móvil) + HUD técnico. */
-:root {
-  color-scheme: dark;
-  --bg: #121315;
-  --panel: rgba(24, 25, 28, 0.88);
-  --panel-solid: #18191c;
-  --raise: #222428;
-  --line: #2f3237;
-  --fg: #e9e6e1;
-  --muted: #9a978f;
-  --dim: #6d6b66;
-  --accent: #ff9f43;      /* naranja filamento PLA */
-  --accent-ink: #1b1206;
-  --accent-wash: #2a2520;
-  --ok: #5fd39a;
-  --warn: #ffcc4d;
-  --bad: #ff6b6b;
-  --font-ui: "Archivo", "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
-  --r: 10px;
-}
-[hidden] { display: none !important; }
-html, body { height: 100%; }
-body { background: var(--bg); color: var(--fg); font-family: var(--font-ui); overflow: hidden; -webkit-tap-highlight-color: transparent; }
-#stage { position: fixed; inset: 0; }
-#stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
-#stage.picking canvas { cursor: crosshair; }
-
-/* ---------- Panel ---------- */
-#panel {
-  position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); left: calc(14px + env(safe-area-inset-left, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-  width: 364px; display: flex; flex-direction: column;
-  background: var(--panel); backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2);
-  border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 18px 50px rgba(0,0,0,.45);
-  z-index: 5; overflow: hidden;
-}
-.brand { display: flex; align-items: center; gap: 12px; padding: 14px 18px 12px; border-bottom: 1px solid var(--line); }
-.brand-mark { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-size: 16px; }
-.brand h1 { margin: 0; font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
-.brand p { margin: 2px 0 0; font-size: 11.5px; color: var(--muted); }
-.brand .close-sheet { margin-left: auto; display: none; }
-.scroll { overflow-y: auto; flex: 1; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
-
-details.grp { border-bottom: 1px solid var(--line); }
-details.grp > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 13px 18px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); user-select: none; }
-details.grp > summary::-webkit-details-marker { display: none; }
-details.grp > summary > svg:first-child { color: var(--accent); width: 13px; }
-details.grp > summary .chev { margin-left: auto; transition: transform .2s; color: var(--dim); }
-details.grp[open] > summary .chev { transform: rotate(180deg); }
-details.grp > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.grp-body { padding: 0 18px 16px; display: flex; flex-direction: column; gap: 12px; }
-.sub-h { font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); padding-top: 10px; border-top: 1px dashed var(--line); margin-top: 2px; display: flex; align-items: center; gap: 7px; }
-.sub-h svg { color: var(--accent); }
-
-.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; background: var(--raise); padding: 4px; border-radius: var(--r); }
-.seg button { appearance: none; border: 0; background: transparent; color: var(--muted); font: 600 12px var(--font-ui); padding: 9px 2px; border-radius: 7px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 5px; transition: background .15s, color .15s; min-width: 0; }
-.seg button svg { font-size: 15px; }
-.seg button:hover { color: var(--fg); }
-.seg button[aria-pressed="true"] { background: var(--fg); color: #141414; }
-.seg.small button { flex-direction: row; justify-content: center; padding: 7px 3px; font-size: 11.5px; }
-.seg.mono button { font-family: var(--font-mono); font-weight: 500; }
-.seg.wrap { grid-auto-flow: row; grid-template-columns: repeat(3, 1fr); }
-.seg.wrap4 { grid-auto-flow: row; grid-template-columns: repeat(4, 1fr); }
-.seg.wrap3 { grid-auto-flow: row; grid-template-columns: repeat(3, 1fr); }
-#shapeSeg button { font-size: 11px; }
-.sublabel { font-size: 11.5px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
-.info { font: 400 11px var(--font-mono); color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
-.info b { color: var(--fg); font-weight: 500; }
-.info .warn { color: var(--warn); }
-
-.presets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.preset { appearance: none; border: 1px solid var(--line); background: var(--raise); color: var(--fg); border-radius: 9px; padding: 10px 6px 9px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px; font: 600 11px var(--font-ui); text-align: center; line-height: 1.2; transition: border-color .15s, transform .1s; }
-.preset svg { color: var(--accent); font-size: 15px; }
-.preset:hover { border-color: var(--accent); }
-.preset:active { transform: scale(.97); }
-
-.ltabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.ltabs button { appearance: none; border: 1px solid var(--line); background: var(--raise); color: var(--muted); border-radius: 8px; padding: 8px 6px; font: 700 12px var(--font-ui); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 7px; }
-.ltabs button .ld { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
-.ltabs button.on .ld { background: var(--ok); }
-.ltabs button[aria-selected="true"] { border-color: var(--accent); color: var(--fg); background: var(--accent-wash); }
-.layer-sum { font: 400 11px var(--font-mono); color: var(--muted); margin-top: -4px; }
-.layer-body { display: flex; flex-direction: column; gap: 12px; transition: opacity .15s; }
-.layer-body.off { opacity: .45; }
-
-.tex-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
-.tex { appearance: none; border: 1px solid var(--line); background: #000; border-radius: 7px; padding: 0; cursor: pointer; position: relative; aspect-ratio: 1; overflow: hidden; max-width: 100%; }
-.tex canvas { width: 100%; height: 100%; display: block; }
-.tex span { position: absolute; left: 0; right: 0; bottom: 0; font: 600 8.5px var(--font-ui); letter-spacing: .03em; color: #fff; background: linear-gradient(transparent, rgba(0,0,0,.85)); padding: 8px 2px 3px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tex[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
-
-.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; }
-.row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.btn { appearance: none; border: 1px solid var(--line); background: var(--raise); color: var(--fg); font: 600 12px var(--font-ui); padding: 9px 10px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: border-color .15s, background .15s; text-align: center; }
-.btn:hover { border-color: var(--muted); }
-.btn.icon { width: 38px; height: 38px; padding: 0; }
-.btn.sm { padding: 6px 6px; font-size: 11px; }
-.btn.active { border-color: var(--accent); color: var(--accent-ink); background: var(--accent); }
-.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-size: 14px; font-weight: 800; padding: 14px; width: 100%; }
-.btn.primary:hover { filter: brightness(1.08); }
-.btn:disabled { opacity: .55; cursor: progress; }
-input[type=file] { display: none; }
-textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 46px; background: var(--raise); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 700 15px var(--font-ui); letter-spacing: .02em; }
-textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-.ctl { display: flex; flex-direction: column; gap: 6px; }
-.ctl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 12.5px; font-weight: 500; }
-.ctl-top output { font: 500 11.5px var(--font-mono); color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.hint { font-size: 11px; color: var(--dim); line-height: 1.45; margin: -2px 0 0; }
-.dis { opacity: .4; pointer-events: none; }
-
-input[type=range] { --p: 50%; -webkit-appearance: none; appearance: none; width: 100%; height: 20px; background: transparent; cursor: pointer; margin: 0; }
-input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 4px; background: linear-gradient(to right, var(--accent) var(--p), var(--line) var(--p)); }
-input[type=range]::-moz-range-track { height: 4px; border-radius: 4px; background: var(--line); }
-input[type=range]::-moz-range-progress { height: 4px; border-radius: 4px; background: var(--accent); }
-input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6px; border-radius: 50%; background: var(--fg); border: 3px solid var(--panel-solid); box-shadow: 0 0 0 1px var(--accent); transition: transform .12s; }
-input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--fg); border: 3px solid var(--panel-solid); box-shadow: 0 0 0 1px var(--accent); }
-input[type=range]:active::-webkit-slider-thumb { transform: scale(1.2); }
-input[type=range]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-button:focus-visible, label.btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-.switch { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; font-weight: 500; cursor: pointer; position: relative; }
-.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.switch .knob { width: 34px; height: 20px; border-radius: 20px; background: var(--line); position: relative; flex: none; transition: background .15s; }
-.switch .knob::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--fg); transition: transform .15s; }
-.switch input:checked + .knob { background: var(--accent); }
-.switch input:checked + .knob::after { transform: translateX(14px); background: var(--accent-ink); }
-.switch input:focus-visible + .knob { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-.custom-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
-.custom-row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.custom-row .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--accent); flex: none; }
-.regions { display: flex; flex-wrap: wrap; gap: 5px; max-height: 150px; overflow-y: auto; }
-.regions button { appearance: none; border: 1px solid var(--line); background: var(--raise); color: var(--muted); border-radius: 999px; padding: 5px 10px; font: 600 11px var(--font-ui); cursor: pointer; white-space: nowrap; }
-.regions button small { font: 400 10px var(--font-mono); color: var(--dim); margin-left: 4px; }
-.regions button[aria-pressed="true"] { border-color: var(--accent); color: var(--fg); background: var(--accent-wash); }
-.regions button[aria-pressed="true"] small { color: var(--accent); }
-
-.curve-wrap { position: relative; }
-#maskCv { width: 100%; height: 150px; display: block; border-radius: 8px; border: 1px solid var(--line); background: #000; }
-#curveCv { width: 100%; height: 140px; display: block; background: var(--raise); border: 1px solid var(--line); border-radius: 8px; touch-action: none; cursor: ns-resize; }
-.curve-axis { display: flex; justify-content: space-between; font: 400 10px var(--font-mono); color: var(--dim); margin-top: 4px; }
-
-.mats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
-.mat { appearance: none; border: 1px solid var(--line); background: var(--raise); color: var(--fg); border-radius: 9px; padding: 8px; display: flex; align-items: center; gap: 9px; cursor: pointer; text-align: left; font: 600 12px var(--font-ui); min-width: 0; }
-.mat small { display: block; font-weight: 400; color: var(--muted); font-size: 10.5px; margin-top: 1px; }
-.mat .sw { width: 26px; height: 26px; border-radius: 50%; flex: none; }
-.mat[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-wash); }
-.color-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; font-weight: 500; }
-input[type=color] { width: 44px; height: 28px; border: 1px solid var(--line); border-radius: 7px; background: var(--raise); padding: 2px; cursor: pointer; }
-
-.stats { font: 400 11px var(--font-mono); color: var(--muted); display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-variant-numeric: tabular-nums; }
-.stats b { color: var(--fg); font-weight: 500; text-align: right; }
-.status-line { display: flex; align-items: center; gap: 8px; font: 400 11px var(--font-mono); color: var(--muted); }
-.status-line .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
-.status-line.ok .dot { background: var(--ok); }
-.status-line.warn .dot { background: var(--warn); }
-
-/* ---------- HUD ---------- */
-#hud { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 4; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
-.chip { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; font: 500 11.5px var(--font-mono); color: var(--fg); font-variant-numeric: tabular-nums; }
-.chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
-.chip.ok .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-.chip.bad .dot { background: var(--bad); }
-#chipPick { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-#chipPT { border-color: var(--accent); }
-#chipPT button { appearance: none; border: 0; background: var(--accent); color: var(--accent-ink); border-radius: 999px; font: 700 11px var(--font-ui); padding: 4px 9px; cursor: pointer; }
-.mat.painted::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: auto; flex: none; }
-#chipPick button { appearance: none; border: 0; background: var(--accent-ink); color: var(--accent); border-radius: 999px; font: 700 11px var(--font-ui); padding: 4px 9px; cursor: pointer; }
-#tools { position: fixed; top: calc(14px + env(safe-area-inset-top, 0px)); right: calc(14px + env(safe-area-inset-right, 0px)); z-index: 4; display: flex; gap: 6px; }
-#tools .btn { background: var(--panel); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-#tools .btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
-#sheetToggle { display: none; }
-
-/* ---------- Loader ---------- */
-#loader { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: rgba(10,10,12,.62); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
-.ld-card { width: min(340px, calc(100vw - 40px)); background: var(--panel-solid); border: 1px solid var(--line); border-radius: 14px; padding: 26px 24px 22px; display: flex; flex-direction: column; align-items: center; gap: 12px; box-shadow: 0 30px 80px rgba(0,0,0,.6); }
-.ld-print { position: relative; width: 96px; height: 70px; }
-.ld-nozzle { position: absolute; top: 0; width: 18px; height: 16px; background: var(--fg); clip-path: polygon(0 0, 100% 0, 70% 70%, 60% 100%, 40% 100%, 30% 70%); animation: nozzle 1.1s ease-in-out infinite alternate; }
-.ld-layers { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column-reverse; gap: 3px; }
-.ld-layers b { display: block; height: 5px; border-radius: 2px; background: var(--accent); transform-origin: left; animation: layer 2.4s ease-in-out infinite; opacity: .9; }
-.ld-layers b:nth-child(2) { animation-delay: .3s; width: 92%; margin-left: 4%; }
-.ld-layers b:nth-child(3) { animation-delay: .6s; width: 84%; margin-left: 8%; }
-.ld-layers b:nth-child(4) { animation-delay: .9s; width: 76%; margin-left: 12%; }
-.ld-layers b:nth-child(5) { animation-delay: 1.2s; width: 68%; margin-left: 16%; }
-@keyframes layer { 0% { transform: scaleX(0); } 40%, 85% { transform: scaleX(1); } 100% { transform: scaleX(1); opacity: 0; } }
-@keyframes nozzle { from { left: 0; } to { left: 78px; } }
-.ld-title { font-weight: 800; font-size: 16px; }
-.ld-step { font-size: 12px; color: var(--muted); text-align: center; min-height: 1.4em; }
-.ld-bar { width: 100%; height: 6px; border-radius: 6px; background: var(--raise); overflow: hidden; }
-.ld-bar b { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
-.ld-pct { font: 500 11.5px var(--font-mono); color: var(--accent); font-variant-numeric: tabular-nums; }
-
-#toast { position: fixed; left: 50%; top: calc(18px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 30; background: var(--panel-solid); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; font-size: 12.5px; max-width: min(480px, calc(100vw - 32px)); box-shadow: 0 12px 30px rgba(0,0,0,.4); display: flex; gap: 9px; align-items: flex-start; line-height: 1.4; }
-#toast.ok svg { color: var(--ok); }
-#toast.bad svg { color: var(--bad); }
-
-@media (prefers-reduced-motion: reduce) {
-  .ld-layers b, .ld-nozzle { animation: none; }
-  .ld-layers b { transform: none; }
-}
-
-/* ---------- Móvil: hoja inferior ---------- */
-@media (max-width: 760px) {
-  #panel { top: auto; left: 0; right: 0; bottom: 0; width: auto; max-height: 64%; border-radius: 16px 16px 0 0; border-bottom: 0; transition: transform .25s ease; padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
-  #panel.collapsed { transform: translateY(105%); }
-  .brand { padding: 12px 16px; }
-  .brand .close-sheet { display: inline-flex; }
-  details.grp > summary { padding: 12px 16px; }
-  .grp-body { padding: 0 16px 14px; }
-  #sheetToggle { display: inline-flex; position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 4; padding: 12px 18px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 800; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
-  #hud { bottom: auto; top: calc(62px + env(safe-area-inset-top, 0px)); }
-}
-</style>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/js/all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script type="importmap">
-{ "imports": {
-  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-  "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
-  "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.6/build/index.module.js",
-  "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
-} }
-</script>
-
-<div id="stage"></div>
-
-<aside id="panel" aria-label="Panel de control">
-  <div class="brand">
-    <div class="brand-mark"><i class="fa-solid fa-layer-group"></i></div>
-    <div>
-      <h1>BumpForge</h1>
-      <p>Relieve físico para impresión 3D</p>
-    </div>
-    <button class="btn icon close-sheet" id="closeSheet" aria-label="Ocultar panel"><i class="fa-solid fa-chevron-down"></i></button>
-  </div>
-
-  <div class="scroll">
-    <details class="grp" open>
-      <summary><i class="fa-solid fa-cube"></i> Forma base <i class="fa-solid fa-chevron-down chev"></i></summary>
-      <div class="grp-body">
-        <div class="seg" id="shapeSeg">
-          <button data-shape="cube" aria-pressed="true"><i class="fa-solid fa-cube"></i>Cubo</button>
-          <button data-shape="sphere" aria-pressed="false"><i class="fa-solid fa-circle"></i>Esfera</button>
-          <button data-shape="plane" aria-pressed="false"><i class="fa-solid fa-square"></i>Placa</button>
-          <button data-shape="cylinder" aria-pressed="false"><i class="fa-solid fa-database"></i>Cilindro</button>
-          <button data-shape="file" aria-pressed="false"><i class="fa-solid fa-file-import"></i>Mi modelo</button>
-        </div>
-        <input type="file" id="modelFile" accept=".stl,.obj,.ply,.glb,.gltf,.3mf,.step,.stp">
-
-        <div id="latticeGrp" class="ctl">
-          <div class="sublabel"><span>Segmentos por eje (malla base)</span><span id="vertsLabel"></span></div>
-          <div class="seg small mono" id="resSeg">
-            <button data-res="120" aria-pressed="false">120</button>
-            <button data-res="180" aria-pressed="false">180</button>
-            <button data-res="220" aria-pressed="true">220</button>
-            <button data-res="250" aria-pressed="false">250</button>
-          </div>
-        </div>
-
-        <div id="customGrp" class="ctl" hidden>
-          <div id="fileRow" class="ctl">
-            <div class="row2">
-              <label class="btn" for="modelFile"><i class="fa-solid fa-upload"></i> Subir modelo</label>
-              <button class="btn" id="sampleKnot"><i class="fa-solid fa-infinity"></i> Ejemplo: nudo</button>
-            </div>
-            <p class="hint">STEP (NURBS de Alias, CATIA, Rhino…) abre el modo NURBS exacto. STL, OBJ, 3MF, PLY o GLB abren el modo malla. Unidades en milímetros.</p>
-            <div class="sublabel" id="upLabel"><span>Eje vertical del archivo</span></div>
-            <div class="seg small mono" id="upSeg">
-              <button data-up="z" aria-pressed="true">Z arriba (CAD / STL)</button>
-              <button data-up="y" aria-pressed="false">Y arriba</button>
-            </div>
-          </div>
-          <div class="ctl" id="edgeMmCtl">
-            <div class="ctl-top"><span>Tamaño de triángulo (resolución)</span><output id="edgeMmOut"></output></div>
-            <input type="range" id="edgeMm" min="0.2" max="2" step="0.05">
-          </div>
-          <div class="ctl" id="angleCtl">
-            <div class="ctl-top"><span>Ángulo para separar superficies</span><output id="angleOut"></output></div>
-            <input type="range" id="angle" min="10" max="80" step="1">
-          </div>
-          <div class="info" id="modelInfo"></div>
-        </div>
-      </div>
-    </details>
-
-
-    <details class="grp" id="cadGrp" open hidden>
-      <summary><i class="fa-solid fa-bezier-curve"></i> Patrón NURBS (STEP) <i class="fa-solid fa-chevron-down chev"></i></summary>
-      <div class="grp-body">
-        <div class="info" id="cadInfo"></div>
-
-        <div class="sub-h"><i class="fa-solid fa-hand-pointer"></i> 1 · Caras y mapeo</div>
-        <button class="btn" id="pickCadFace"><i class="fa-solid fa-arrow-pointer"></i> Elegir caras con clic</button>
-        <label class="switch" for="cadTangent"><span>Incluir caras tangentes (cadena G1)</span><input type="checkbox" id="cadTangent" checked><span class="knob"></span></label>
-        <div class="row2">
-          <button class="btn sm" id="cadSelNone"><i class="fa-solid fa-xmark"></i> Quitar selección</button>
-          <button class="btn sm" id="pickCadCenter"><i class="fa-solid fa-crosshairs"></i> Centro con clic</button>
-        </div>
-        <p class="hint" id="cadFaceHint"></p>
-        <div class="sublabel"><span>Mapeo sobre la superficie</span></div>
-        <div class="seg small" id="cadMapSeg">
-          <button data-v="auto" aria-pressed="true">Auto</button>
-          <button data-v="uv" aria-pressed="false">Superficie UV</button>
-          <button data-v="cyl" aria-pressed="false">Cilindro 360°</button>
-          <button data-v="plane" aria-pressed="false">Plano</button>
-        </div>
-        <p class="hint" id="cadMapHint">Superficie UV desenrolla las caras elegidas (mapa conforme) para repartir el patrón en milímetros reales. Cilindro 360° da la vuelta completa y cierra la costura.</p>
-
-        <div class="sub-h"><i class="fa-solid fa-table-cells"></i> 2 · Distribución</div>
-        <div class="seg small wrap3" id="cadLayoutSeg">
-          <button data-v="hex" aria-pressed="true">Panal</button>
-          <button data-v="grid" aria-pressed="false">Rejilla</button>
-          <button data-v="brick" aria-pressed="false">Ladrillo</button>
-          <button data-v="radial" aria-pressed="false">Bocina (radial)</button>
-          <button data-v="random" aria-pressed="false">Aleatorio</button>
-        </div>
-        <div class="row2">
-          <div class="ctl">
-            <div class="ctl-top"><span>Paso U</span><output id="cadPitchOut"></output></div>
-            <input type="range" id="cadPitch" min="1" max="40" step="0.1">
-          </div>
-          <div class="ctl">
-            <div class="ctl-top"><span>Paso V</span><output id="cadPitchVOut"></output></div>
-            <input type="range" id="cadPitchV" min="1" max="40" step="0.1">
-          </div>
-        </div>
-        <div class="ctl">
-          <div class="ctl-top"><span>Giro del patrón</span><output id="cadRotOut"></output></div>
-          <input type="range" id="cadRot" min="-90" max="90" step="1">
-        </div>
-        <div class="row2">
-          <div class="ctl">
-            <div class="ctl-top"><span>Desfase U</span><output id="cadOffUOut"></output></div>
-            <input type="range" id="cadOffU" min="0" max="1" step="0.01">
-          </div>
-          <div class="ctl">
-            <div class="ctl-top"><span>Desfase V</span><output id="cadOffVOut"></output></div>
-            <input type="range" id="cadOffV" min="0" max="1" step="0.01">
-          </div>
-        </div>
-
-        <div class="sub-h"><i class="fa-solid fa-shapes"></i> 3 · Elemento</div>
-        <div class="seg small wrap4" id="cadShapeSeg">
-          <button data-v="circle" aria-pressed="true">Círculo</button>
-          <button data-v="rect" aria-pressed="false">Rectángulo</button>
-          <button data-v="diamond" aria-pressed="false">Rombo</button>
-          <button data-v="triangle" aria-pressed="false">Triángulo</button>
-          <button data-v="hex" aria-pressed="false">Hexágono</button>
-          <button data-v="slot" aria-pressed="false">Ranura</button>
-          <button data-v="logo" aria-pressed="false">Logo</button>
-          <button data-v="object" aria-pressed="false">Objeto 3D</button>
-        </div>
-        <div id="cadObjCtl" class="ctl" hidden>
-          <label class="btn" for="cadObjFile"><i class="fa-solid fa-gem"></i> Subir objeto (STEP, STL, OBJ)</label>
-          <input type="file" id="cadObjFile" accept=".step,.stp,.stl,.obj" hidden>
-          <p class="hint" id="cadObjHint">Sube una pieza pequeña (un diamante, una pirámide, un botón…). Se coloca en cada punto del patrón, orientada con la superficie.</p>
-          <div class="row3">
-            <div class="ctl"><div class="ctl-top"><span>Escala X</span><output id="cadSXOut"></output></div><input type="range" id="cadSX" min="0.1" max="4" step="0.01"></div>
-            <div class="ctl"><div class="ctl-top"><span>Escala Y</span><output id="cadSYOut"></output></div><input type="range" id="cadSY" min="0.1" max="4" step="0.01"></div>
-            <div class="ctl"><div class="ctl-top"><span>Escala Z</span><output id="cadSZOut"></output></div><input type="range" id="cadSZ" min="0.1" max="4" step="0.01"></div>
-          </div>
-          <div class="ctl">
-            <div class="ctl-top"><span>Hundir en la superficie</span><output id="cadSinkOut"></output></div>
-            <input type="range" id="cadSink" min="0" max="5" step="0.05">
-          </div>
-        </div>
-        <div id="cadLogoCtl" class="ctl" hidden>
-          <div class="row2">
-            <label class="btn" for="cadLogoFile"><i class="fa-solid fa-image"></i> Subir logo</label>
-            <label class="btn" for="cadLogoCam"><i class="fa-solid fa-camera"></i> Cámara</label>
-          </div>
-          <input type="file" id="cadLogoFile" accept="image/*" hidden>
-          <input type="file" id="cadLogoCam" accept="image/*" capture="environment" hidden>
-          <div class="ctl">
-            <div class="ctl-top"><span>Umbral de la silueta</span><output id="cadLevelOut"></output></div>
-            <input type="range" id="cadLevel" min="0.1" max="0.9" step="0.01">
-          </div>
-          <p class="hint" id="cadLogoHint">Sube un logo: su contorno se convierte en curvas B-spline (con las esquinas detectadas) y se corta sobre las caras elegidas.</p>
-        </div>
-        <div id="cadDimCtl">
-          <div class="row2">
-            <div class="ctl">
-              <div class="ctl-top"><span id="cadSizeLabel">Ancho</span><output id="cadSizeOut"></output></div>
-              <input type="range" id="cadSize" min="0.5" max="30" step="0.1">
-            </div>
-            <div class="ctl" id="cadHeightCtl">
-              <div class="ctl-top"><span>Alto</span><output id="cadHeightOut"></output></div>
-              <input type="range" id="cadHeight" min="0.5" max="30" step="0.1">
-            </div>
-          </div>
-          <div class="ctl" id="cadRadiusCtl">
-            <div class="ctl-top"><span>Redondeo de esquinas</span><output id="cadRadiusOut"></output></div>
-            <input type="range" id="cadRadius" min="0" max="1" step="0.01">
-          </div>
-        </div>
-        <div class="ctl">
-          <div class="ctl-top"><span>Giro del elemento</span><output id="cadElRotOut"></output></div>
-          <input type="range" id="cadElRot" min="-180" max="180" step="1">
-        </div>
-
-        <div class="sub-h"><i class="fa-solid fa-arrows-down-to-line"></i> 4 · Corte</div>
-        <div class="seg small" id="cadDepthSeg">
-          <button data-v="through" aria-pressed="true">Pasante</button>
-          <button data-v="blind" aria-pressed="false">Ciego / grabar</button>
-          <button data-v="emboss" aria-pressed="false">Relieve / unir</button>
-        </div>
-        <div class="ctl" id="cadDepthCtl" hidden>
-          <div class="ctl-top"><span id="cadDepthLabel">Profundidad</span><output id="cadDepthOut"></output></div>
-          <input type="range" id="cadDepth" min="0.2" max="10" step="0.1">
-        </div>
-        <div class="row2" id="cadEdgeCtl">
-          <div class="ctl">
-            <div class="ctl-top"><span>Chaflán</span><output id="cadChamferOut"></output></div>
-            <input type="range" id="cadChamfer" min="0" max="3" step="0.05">
-          </div>
-          <div class="ctl">
-            <div class="ctl-top"><span>Inclinación</span><output id="cadTaperOut"></output></div>
-            <input type="range" id="cadTaper" min="0" max="40" step="0.5">
-          </div>
-        </div>
-        <div class="ctl">
-          <div class="ctl-top"><span>Margen al borde de la cara</span><output id="cadMarginOut"></output></div>
-          <input type="range" id="cadMargin" min="0" max="6" step="0.1">
-        </div>
-        <div class="seg small" id="cadDirSeg">
-          <button data-v="normal" aria-pressed="true">Normal a la cara</button>
-          <button data-v="proj" aria-pressed="false">Proyección (desmoldeo)</button>
-        </div>
-        <div class="seg small mono" id="cadAxisSeg" hidden>
-          <button data-v="auto" aria-pressed="true">Auto</button>
-          <button data-v="x" aria-pressed="false">X</button>
-          <button data-v="y" aria-pressed="false">Y</button>
-          <button data-v="z" aria-pressed="false">Z</button>
-        </div>
-
-        <div id="cadGradBlock">
-          <div class="sub-h"><i class="fa-solid fa-chart-line"></i> 5 · Variación (tipo Grasshopper)</div>
-          <div class="seg small wrap4" id="cadGradSeg">
-            <button data-v="none" aria-pressed="true">Uniforme</button>
-            <button data-v="u" aria-pressed="false">A lo largo (U)</button>
-            <button data-v="v" aria-pressed="false">A lo alto (V)</button>
-            <button data-v="radial" aria-pressed="false">Radial</button>
-            <button data-v="attr" aria-pressed="false">Atractor</button>
-            <button data-v="random" aria-pressed="false">Aleatorio</button>
-            <button data-v="image" aria-pressed="false">Imagen</button>
-          </div>
-          <div id="cadGradCtl" class="ctl" hidden>
-            <div class="sublabel"><span>La variación cambia</span></div>
-            <div class="seg small" id="cadTgtSeg">
-              <button data-t="w" aria-pressed="true">Ancho</button>
-              <button data-t="h" aria-pressed="true">Alto</button>
-              <button data-t="z" aria-pressed="false">Profundidad</button>
-              <button data-t="rot" aria-pressed="false">Giro</button>
-            </div>
-            <div class="seg small wrap4" id="cadCurveSeg"></div>
-            <div class="ctl">
-              <div class="ctl-top"><span>Mínimo</span><output id="cadMinOut"></output></div>
-              <input type="range" id="cadMin" min="0" max="1" step="0.01">
-            </div>
-            <div class="ctl" id="cadRotVarCtl" hidden>
-              <div class="ctl-top"><span>Giro máximo</span><output id="cadRotVarOut"></output></div>
-              <input type="range" id="cadRotVar" min="0" max="180" step="1">
-            </div>
-            <label class="switch" for="cadInv"><span>Invertir</span><input type="checkbox" id="cadInv"><span class="knob"></span></label>
-            <div id="cadAttrCtl" class="ctl" hidden>
-              <button class="btn sm" id="pickCadAttr"><i class="fa-solid fa-magnet"></i> Colocar atractor con clic</button>
-              <div class="ctl">
-                <div class="ctl-top"><span>Radio del atractor</span><output id="cadAttrROut"></output></div>
-                <input type="range" id="cadAttrR" min="2" max="150" step="1">
-              </div>
-            </div>
-            <div id="cadSeedCtl" class="ctl" hidden>
-              <button class="btn sm" id="cadReseed"><i class="fa-solid fa-dice"></i> Otra semilla</button>
-            </div>
-            <div id="cadMapCtl" class="ctl" hidden>
-              <div class="row2">
-                <label class="btn" for="cadMapFile"><i class="fa-solid fa-image"></i> Imagen de densidad</label>
-                <label class="btn" for="cadMapCam"><i class="fa-solid fa-camera"></i> Cámara</label>
-              </div>
-              <input type="file" id="cadMapFile" accept="image/*" hidden>
-              <input type="file" id="cadMapCam" accept="image/*" capture="environment" hidden>
-              <p class="hint" id="cadMapImgHint">Las zonas claras dan elementos grandes y las oscuras, pequeños. Por debajo de 0,3 mm el elemento desaparece: una foto o un degradado dibujan el patrón.</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="status-line" id="cadCount"><span class="dot"></span><span></span></div>
-        <button class="btn primary" id="cadApply"><i class="fa-solid fa-scissors"></i> Aplicar en NURBS (exacto)</button>
-        <div class="row2">
-          <button class="btn sm" id="cadUndo"><i class="fa-solid fa-rotate-left"></i> Deshacer</button>
-          <button class="btn sm" id="cadReset"><i class="fa-solid fa-clock-rotate-left"></i> Volver al original</button>
-        </div>
-        <p class="hint">La vista previa es inmediata. "Aplicar" corta la pieza con booleanas exactas de OpenCascade (unas 0,15 s por elemento). Puedes encadenar patrones y exportar a STEP para volver a Alias.</p>
-      </div>
-    </details>
-
-    <details class="grp" id="surfGrp">
-      <summary><i class="fa-solid fa-object-ungroup"></i> Superficies de la pieza <i class="fa-solid fa-chevron-down chev"></i></summary>
-      <div class="grp-body">
-        <p class="hint">Divide la pieza en superficies a tu medida. Cada superficie nueva se puede usar en las capas ("Solo las elegidas") y para pintar materiales y colores.</p>
-        <div class="seg small" id="toolSeg">
-          <button data-t="grow" aria-pressed="true">Crecer</button>
-          <button data-t="brush" aria-pressed="false">Pincel</button>
-          <button data-t="band" aria-pressed="false">Franja</button>
-        </div>
-        <div id="tGrow" class="ctl">
-          <div class="ctl">
-            <div class="ctl-top"><span>Tolerancia de ángulo</span><output id="growAngleOut"></output></div>
-            <input type="range" id="growAngle" min="3" max="90" step="1">
-          </div>
-          <button class="btn" id="pickGrow"><i class="fa-solid fa-wand-magic"></i> Crecer desde un clic en la pieza</button>
-          <p class="hint">Toma todo lo conectado al punto del clic cuya inclinación difiera menos que la tolerancia. 5–15° separa caras planas; 40–60° toma superficies curvas enteras.</p>
-        </div>
-        <div id="tBrush" class="ctl" hidden>
-          <div class="ctl">
-            <div class="ctl-top"><span>Radio del pincel</span><output id="brushMmOut"></output></div>
-            <input type="range" id="brushMm" min="0.5" max="20" step="0.5">
-          </div>
-          <button class="btn" id="pickBrush"><i class="fa-solid fa-paintbrush"></i> Pintar zona con el ratón</button>
-          <p class="hint">Mantén pulsado y arrastra sobre la pieza. Al soltar se crea una superficie nueva. La cámara queda fija mientras pintas.</p>
-        </div>
-        <div id="tBand" class="ctl" hidden>
-          <div class="seg small mono" id="bandAxisSeg">
-            <button data-a="x" aria-pressed="false">X</button>
-            <button data-a="y" aria-pressed="true">Y (altura)</button>
-            <button data-a="z" aria-pressed="false">Z</button>
-          </div>
-          <div class="row2">
-            <div class="ctl">
-              <div class="ctl-top"><span>Desde</span><output id="band0Out"></output></div>
-              <input type="range" id="band0" min="-1" max="1" step="0.005">
-            </div>
-            <div class="ctl">
-              <div class="ctl-top"><span>Hasta</span><output id="band1Out"></output></div>
-              <input type="range" id="band1" min="-1" max="1" step="0.005">
-            </div>
-          </div>
-          <button class="btn" id="makeBand"><i class="fa-solid fa-grip-lines"></i> Crear superficie con esta franja</button>
-        </div>
-        <div class="sub-h"><i class="fa-solid fa-list"></i> Superficies creadas</div>
-        <div class="ctl" id="customList"></div>
-        <div class="row2">
-          <button class="btn sm" id="undoOp"><i class="fa-solid fa-rotate-left"></i> Deshacer última</button>
-          <button class="btn sm" id="clearOps"><i class="fa-solid fa-trash"></i> Borrar todas</button>
-        </div>
-      </div>
-    </details>
-
-    <details class="grp" id="presetGrp" open>
-      <summary><i class="fa-solid fa-wand-magic-sparkles"></i> Recetas de un clic <i class="fa-solid fa-chevron-down chev"></i></summary>
-      <div class="grp-body">
-        <div class="presets" id="presets"></div>
-        <p class="hint">Cada receta configura las 3 capas de golpe. Después puedes retocar cualquier capa a mano.</p>
-      </div>
-    </details>
-
-    <details class="grp" id="layerGrp" open>
-      <summary><i class="fa-solid fa-layer-group"></i> Capas de patrón <i class="fa-solid fa-chevron-down chev"></i></summary>
-      <div class="grp-body" id="layerEditor">
-        <div class="ltabs" id="ltabs" role="tablist">
-          <button role="tab" data-l="0" aria-selected="true">Capa 1<span class="ld"></span></button>
-          <button role="tab" data-l="1" aria-selected="false">Capa 2<span class="ld"></span></button>
-          <button role="tab" data-l="2" aria-selected="false">Capa 3<span class="ld"></span></button>
-        </div>
-        <div class="layer-sum" id="layerSum"></div>
-        <label class="switch" for="L_on"><span>Capa activa</span><input type="checkbox" id="L_on" data-k="on"><span class="knob"></span></label>
-
-        <div class="layer-body" id="layerBody">
-          <div class="sub-h"><i class="fa-solid fa-swatchbook"></i> Patrón</div>
-          <div class="tex-grid" id="texGrid"></div>
-          <div class="row2">
-            <label class="btn" for="fileGallery"><i class="fa-solid fa-image"></i> Galería</label>
-            <label class="btn" for="fileCamera"><i class="fa-solid fa-camera"></i> Cámara</label>
-          </div>
-          <input type="file" id="fileGallery" accept="image/png,image/jpeg,image/webp,image/*">
-          <input type="file" id="fileCamera" accept="image/*" capture="environment">
-          <button class="btn" id="reseed" hidden><i class="fa-solid fa-dice"></i> Nueva semilla de ruido</button>
-
-          <div id="grpText" class="ctl" hidden>
-            <div class="ctl-top"><span>Texto (Enter = nueva línea)</span></div>
-            <textarea id="L_text" data-k="text" rows="2" spellcheck="false"></textarea>
-            <div class="seg small wrap" data-k="font" id="fontSeg">
-              <button data-v="Archivo Black" style="font-family:'Archivo Black',sans-serif">Sans</button>
-              <button data-v="Bebas Neue" style="font-family:'Bebas Neue',sans-serif;font-size:14px">Condensada</button>
-              <button data-v="Stardos Stencil" style="font-family:'Stardos Stencil',serif">Stencil</button>
-              <button data-v="Playfair Display" style="font-family:'Playfair Display',serif">Serif</button>
-              <button data-v="Pacifico" style="font-family:'Pacifico',cursive">Script</button>
-              <button data-v="IBM Plex Mono" style="font-family:'IBM Plex Mono',monospace">Mono</button>
-            </div>
-          </div>
-
-          <div id="grpImg" class="ctl" hidden>
-            <div class="ctl">
-              <div class="ctl-top"><span>Silueta detectada</span><output id="maskInfo"></output></div>
-              <canvas id="maskCv" aria-label="Vista previa de la silueta que se va a usar"></canvas>
-            </div>
-            <label class="switch" for="L_vector"><span><b>Sólido vectorial exacto (CAD)</b></span><input type="checkbox" id="L_vector" data-k="vector"><span class="knob"></span></label>
-            <div id="vectorCtl" class="ctl" hidden>
-              <p class="hint">El contorno se convierte en curvas y se extruye como un sólido real, independiente de la malla. Al exportar se une (o se resta, con "Grabar") a la pieza con booleanas exactas.</p>
-              <div class="ctl">
-                <div class="ctl-top"><span>Bisel del sólido</span><output id="L_vBevelOut"></output></div>
-                <input type="range" id="L_vBevel" data-k="vBevel" min="0" max="1" step="0.02">
-              </div>
-              <div class="ctl-top"><span>Proyectar desde</span></div>
-              <div class="seg small mono wrap4" data-k="vAxis" id="vAxisSeg">
-                <button data-v="auto">Auto</button>
-                <button data-v="+z">+Z</button>
-                <button data-v="-z">−Z</button>
-                <button data-v="+x">+X</button>
-                <button data-v="-x">−X</button>
-                <button data-v="+y">+Y</button>
-                <button data-v="-y">−Y</button>
-              </div>
-              <p class="hint">En superficies curvas el logo se proyecta desde esa dirección y se envuelve siguiendo la curvatura. "Auto" en cilindros y esferas proyecta desde el lado que estás mirando (pulsa otra vez el interruptor tras girar la cámara, o elige un eje).</p>
-              <div class="info" id="vectorInfo"></div>
-            </div>
-            <div class="seg small" data-k="fit" id="fitSeg">
-              <button data-v="contain">Contener</button>
-              <button data-v="cover">Cubrir</button>
-            </div>
-            <div class="ctl">
-              <div class="ctl-top"><span>Margen</span><output id="L_marginOut"></output></div>
-              <input type="range" id="L_margin" data-k="margin" min="0" max="0.4" step="0.01">
-            </div>
-            <label class="switch" for="L_autoBg" id="autoBgRow"><span>Detectar logo por color de fondo</span><input type="checkbox" id="L_autoBg" data-k="autoBg"><span class="knob"></span></label>
-            <label class="switch" for="L_thresh"><span>Contorno nítido (umbral + bisel)</span><input type="checkbox" id="L_thresh" data-k="thresh"><span class="knob"></span></label>
-            <div id="threshCtl" class="ctl">
-              <div class="ctl">
-                <div class="ctl-top"><span>Umbral</span><output id="L_levelOut"></output></div>
-                <input type="range" id="L_level" data-k="level" min="0.05" max="0.95" step="0.01">
-              </div>
-              <div class="ctl" id="rasterBevelRow">
-                <div class="ctl-top"><span>Ancho de bisel</span><output id="L_bevelOut"></output></div>
-                <input type="range" id="L_bevel" data-k="bevel" min="0" max="0.06" step="0.001">
-              </div>
-              <div class="seg small" data-k="profile" id="profileSeg">
-                <button data-v="flat">Recto</button>
-                <button data-v="chamfer">Chaflán</button>
-                <button data-v="round">Redondo</button>
-              </div>
-            </div>
-          </div>
-
-          <div class="sub-h"><i class="fa-solid fa-hand-pointer"></i> Superficies donde se aplica</div>
-          <div class="seg small" data-k="surf" id="surfSeg">
-            <button data-v="all">Toda la pieza</button>
-            <button data-v="sel">Solo las elegidas</button>
-          </div>
-          <div id="surfCtl" class="ctl" hidden>
-            <button class="btn" id="pickSurf"><i class="fa-solid fa-arrow-pointer"></i> Elegir superficies con clic en la pieza</button>
-            <div class="regions" id="regionList"></div>
-            <div class="row3">
-              <button class="btn sm" id="selAll">Todas</button>
-              <button class="btn sm" id="selNone">Ninguna</button>
-              <button class="btn sm" id="selInv">Invertir</button>
-            </div>
-            <p class="hint" id="surfHint"></p>
-          </div>
-
-          <div class="sub-h"><i class="fa-solid fa-up-right-and-down-left-from-center"></i> Tamaño y posición</div>
-          <div class="ctl">
-            <div class="ctl-top"><span id="scaleLabel">Escala (repeticiones por cara)</span><output id="L_scaleOut"></output></div>
-            <input type="range" id="L_scale" data-k="scale" min="0.5" max="12" step="0.05">
-          </div>
-          <div class="ctl">
-            <div class="ctl-top"><span>Rotación</span><output id="L_rotOut"></output></div>
-            <input type="range" id="L_rot" data-k="rot" min="0" max="180" step="1">
-          </div>
-          <div class="row2">
-            <div class="ctl">
-              <div class="ctl-top"><span>Offset X</span><output id="L_offXOut"></output></div>
-              <input type="range" id="L_offX" data-k="offX" min="-1" max="1" step="0.005">
-            </div>
-            <div class="ctl">
-              <div class="ctl-top"><span>Offset Y</span><output id="L_offYOut"></output></div>
-              <input type="range" id="L_offY" data-k="offY" min="-1" max="1" step="0.005">
-            </div>
-          </div>
-          <label class="switch" for="L_repeat"><span>Repetir patrón (tiling)</span><input type="checkbox" id="L_repeat" data-k="repeat"><span class="knob"></span></label>
-
-          <div class="sub-h"><i class="fa-solid fa-mountain"></i> Relieve</div>
-          <div class="ctl">
-            <div class="ctl-top"><span>Profundidad</span><output id="L_depthOut"></output></div>
-            <input type="range" id="L_depth" data-k="depth" min="0" max="3" step="0.05">
-          </div>
-          <div class="ctl">
-            <div class="ctl-top"><span>Combinar con capas anteriores</span></div>
-            <div class="seg small" data-k="blend" id="blendSeg">
-              <button data-v="add">Sumar</button>
-              <button data-v="max">Máximo</button>
-              <button data-v="sub">Grabar</button>
-              <button data-v="replace">Reemplazar</button>
-            </div>
-          </div>
-          <label class="switch" for="L_invert"><span>Invertir patrón</span><input type="checkbox" id="L_invert" data-k="invert"><span class="knob"></span></label>
-          <div class="ctl">
-            <div class="ctl-top"><span>Suavizado del mapa</span><output id="L_blurOut"></output></div>
-            <input type="range" id="L_blur" data-k="blur" min="0" max="8" step="1">
-          </div>
-          <label class="switch" for="L_seamTex"><span>Sellar bordes de la textura</span><input type="checkbox" id="L_seamTex" data-k="seamTex"><span class="knob"></span></label>
-          <div class="ctl" id="seamTexCtl">
-            <div class="ctl-top"><span>Marco de desvanecimiento</span><output id="L_seamTexWOut"></output></div>
-            <input type="range" id="L_seamTexW" data-k="seamTexW" min="0.01" max="0.25" step="0.01">
-          </div>
-
-          <div class="sub-h"><i class="fa-solid fa-chart-line"></i> Variación (graph mapper)</div>
-          <div class="seg small" data-k="field" id="fieldSeg">
-            <button data-v="none">Uniforme</button>
-            <button data-v="grad">Gradiente</button>
-            <button data-v="attr">Atractor</button>
-          </div>
-          <div id="fGrad" class="ctl" hidden>
-            <div class="seg small mono" data-k="axis" id="axisSeg">
-              <button data-v="x">X</button>
-              <button data-v="y">Y</button>
-              <button data-v="z">Z</button>
-              <button data-v="r">Radial</button>
-            </div>
-            <div class="row2">
-              <div class="ctl">
-                <div class="ctl-top"><span>Empieza en</span><output id="L_g0Out"></output></div>
-                <input type="range" id="L_g0" data-k="g0" min="-1" max="1" step="0.01">
-              </div>
-              <div class="ctl">
-                <div class="ctl-top"><span>Termina en</span><output id="L_g1Out"></output></div>
-                <input type="range" id="L_g1" data-k="g1" min="-1" max="1" step="0.01">
-              </div>
-            </div>
-          </div>
-          <div id="fAttr" class="ctl" hidden>
-            <button class="btn" id="pickAttr"><i class="fa-solid fa-location-crosshairs"></i> Colocar atractor con clic en la pieza</button>
-            <div class="ctl">
-              <div class="ctl-top"><span>Radio de influencia</span><output id="L_radOut"></output></div>
-              <input type="range" id="L_rad" data-k="rad" min="0.1" max="3" step="0.01">
-            </div>
-          </div>
-          <div id="fCurve" class="ctl" hidden>
-            <div class="curve-wrap"><canvas id="curveCv" aria-label="Curva de variación: arrastra los puntos"></canvas></div>
-            <div class="curve-axis"><span id="curveX0">inicio</span><span>arrastra los puntos ↕</span><span id="curveX1">fin</span></div>
-            <div class="seg small wrap4" id="curvePresets"></div>
-            <div class="ctl-top"><span>La curva controla</span></div>
-            <div class="seg small" data-k="target" id="targetSeg">
-              <button data-v="amp">Altura</button>
-              <button data-v="size">Grosor</button>
-              <button data-v="scale">Escala</button>
-            </div>
-            <div class="row2">
-              <div class="ctl">
-                <div class="ctl-top"><span>Mínimo</span><output id="L_rMinOut"></output></div>
-                <input type="range" id="L_rMin" data-k="rMin" min="0" max="1" step="0.01">
-              </div>
-              <div class="ctl">
-                <div class="ctl-top"><span>Máximo</span><output id="L_rMaxOut"></output></div>
-                <input type="range" id="L_rMax" data-k="rMax" min="0" max="1" step="0.01">
-              </div>
-            </div>
-            <p class="hint" id="targetHint"></p>
-          </div>
-        </div>
-      </div>
-    </details>
-
-    <details class="grp" id="edgeGrp">
-      <summary><i class="fa-solid fa-vector-square"></i> Aristas y proyección <i class="fa-solid fa-chevron-down chev"></i></summary>
-      <div class="grp-body">
-        <div class="ctl">
-          <div class="ctl-top"><span>Sellado de aristas (seam blending)</span><output id="seamEdgeOut"></output></div>
-          <input type="range" id="seamEdge" min="0" max="0.3" step="0.01">
-          <p class="hint">Atenúa el relieve cerca de las aristas vivas para que las superficies vecinas se encuentren a la misma altura.</p>
-        </div>
-        <div class="ctl">
-          <div class="ctl-top"><span>Nitidez de la proyección triplanar</span><output id="sharpOut"></output></div>
-          <input type="range" id="sharp" min="1" max="16" step="0.5">
-          <p class="hint">Valores bajos mezclan las tres proyecciones en superficies curvas. Valores altos dan transiciones más cortas.</p>
-        </div>
-      </div>
-    </details>
-
-    <details class="grp" open>
-      <summary><i class="fa-solid fa-palette"></i> Material y render <i class="fa-solid fa-chevron-down chev"></i></summary>
-      <div class="grp-body">
-        <div class="seg small" id="matModeSeg">
-          <button data-mm="all" aria-pressed="true">Toda la pieza</button>
-          <button data-mm="paint" aria-pressed="false">Pintar superficies</button>
-        </div>
-        <div id="paintCtl" class="ctl" hidden>
-          <button class="btn" id="pickMat"><i class="fa-solid fa-paintbrush"></i> Pintar con clic en la pieza</button>
-          <p class="hint" id="paintHint"></p>
-          <button class="btn sm" id="clearPaint"><i class="fa-solid fa-eraser"></i> Quitar materiales pintados</button>
-        </div>
-        <div class="mats" id="mats"></div>
-        <div class="color-row"><span id="matColorLabel">Color del material</span><input type="color" id="matColor"></div>
-        <button class="btn" id="ptBtn"><i class="fa-solid fa-camera-retro"></i> Render realista (trazado de rayos)</button>
-        <p class="hint">El render realista calcula la luz como Cycles: rebotes, reflejos y sombras físicas. Mejora con cada muestra mientras la cámara está quieta.</p>
-        <div class="ctl">
-          <div class="ctl-top"><span>Exposición</span><output id="exposureOut"></output></div>
-          <input type="range" id="exposure" min="0.4" max="2" step="0.02">
-        </div>
-        <div class="seg small" id="toneSeg">
-          <button data-tone="aces" aria-pressed="true">ACES Filmic</button>
-          <button data-tone="agx" aria-pressed="false">AgX</button>
-        </div>
-        <label class="switch" for="aoOn"><span>Oclusión ambiental (GTAO)</span><input type="checkbox" id="aoOn"><span class="knob"></span></label>
-        <div class="ctl" id="aoCtl">
-          <div class="ctl-top"><span>Intensidad de oclusión</span><output id="aoIntOut"></output></div>
-          <input type="range" id="aoInt" min="0" max="1.5" step="0.05">
-        </div>
-      </div>
-    </details>
-
-    <details class="grp" open>
-      <summary><i class="fa-solid fa-fire"></i> <span id="exportTitle">Detalle, horneado y STL</span> <i class="fa-solid fa-chevron-down chev"></i></summary>
-      <div class="grp-body">
-        <div class="ctl" id="sizeCtl">
-          <div class="ctl-top"><span>Tamaño de la pieza (lado mayor)</span><output id="sizeOut"></output></div>
-          <input type="range" id="size" min="5" max="300" step="1">
-        </div>
-        <label class="switch" for="refineOn" id="refineSwitch"><span>Refinado adaptativo de bordes</span><input type="checkbox" id="refineOn"><span class="knob"></span></label>
-        <div id="refineCtl" class="ctl">
-          <div class="ctl">
-            <div class="ctl-top"><span>Tolerancia de contorno</span><output id="tolOut"></output></div>
-            <input type="range" id="tol" min="0.01" max="0.2" step="0.005">
-          </div>
-          <div class="sublabel"><span>Presupuesto de triángulos</span></div>
-          <div class="seg small mono" id="budgetSeg">
-            <button data-b="1000000">1 M</button>
-            <button data-b="2000000">2 M</button>
-            <button data-b="3000000">3 M</button>
-          </div>
-          <button class="btn" id="refineBtn"><i class="fa-solid fa-microscope"></i> Refinar vista ahora</button>
-          <div class="status-line" id="refineStatus"><span class="dot"></span><span></span></div>
-          <p class="hint">Subdivide solo los triángulos que cruzan un contorno (letras, logos, bordes del patrón). Cada arista partida se comparte entre sus dos triángulos, así que la malla sigue sin huecos.</p>
-        </div>
-        <div class="sublabel"><span>Formato</span></div>
-        <div class="seg small" id="fmtSeg">
-          <button data-f="stl" aria-pressed="true">STL (una pieza)</button>
-          <button data-f="3mf" aria-pressed="false">3MF multicolor</button>
-          <button data-f="step" aria-pressed="false" hidden>STEP (NURBS)</button>
-        </div>
-        <p class="hint" id="fmtHint">STL: un solo cuerpo, sin colores.</p>
-        <button class="btn primary" id="exportBtn"><i class="fa-solid fa-download"></i> Hornear y exportar</button>
-        <div class="stats" id="stats"></div>
-      </div>
-    </details>
-  </div>
-</aside>
-
-<div id="tools">
-  <button class="btn icon" id="autoRot" aria-pressed="false" aria-label="Rotación automática" title="Rotación automática"><i class="fa-solid fa-rotate"></i></button>
-  <button class="btn icon" id="resetCam" aria-label="Recentrar cámara" title="Recentrar cámara"><i class="fa-solid fa-crosshairs"></i></button>
-  <button class="btn icon" id="ptTool" aria-pressed="false" aria-label="Render realista" title="Render realista (trazado de rayos)"><i class="fa-solid fa-camera-retro"></i></button>
-</div>
-
-<div id="hud">
-  <div class="chip" id="chipPT" hidden><i class="fa-solid fa-camera-retro"></i><span id="chipPTTxt"></span><button id="ptStop">Salir</button></div>
-  <div class="chip" id="chipPick" hidden><i class="fa-solid fa-arrow-pointer"></i><span id="chipPickTxt"></span><button id="pickDone">Listo</button></div>
-  <div class="chip" id="chipMesh"><span class="dot"></span><span id="chipMeshTxt">Generando malla…</span></div>
-  <div class="chip"><span id="chipDims">50 × 50 × 50 mm</span></div>
-</div>
-
-<button class="btn" id="sheetToggle"><i class="fa-solid fa-sliders"></i> Ajustes</button>
-
-<div id="loader" hidden>
-  <div class="ld-card" role="status" aria-live="polite">
-    <div class="ld-print"><div class="ld-nozzle"></div><div class="ld-layers"><b></b><b></b><b></b><b></b><b></b></div></div>
-    <div class="ld-title" id="ldTitle">Horneando relieve</div>
-    <div class="ld-step" id="ldStep">Preparando…</div>
-    <div class="ld-bar"><b id="ldBar"></b></div>
-    <div class="ld-pct" id="ldPct">0%</div>
-  </div>
-</div>
-<div id="toast" hidden></div>
-
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&family=Outfit:wght@500&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<style id="forja-skin">
-/* ===== Piel de Forja: dentro de Forja (módulo Forge) esta app toma la interfaz de Forja =====
-   Sin fondos ni marcos: se ve el muro de Forja detrás (el lienzo 3D es transparente). Letra Jost, acento azul #2f7bff.
-   El texto pasa a negro o blanco según lo que tenga detrás (forjaInk, como adaptInk de Forja). El panel sale por la
-   derecha al acercar el ratón al borde, como el de Forja, y se puede fijar. */
-html.forja { --bg: transparent; --panel: transparent; --panel-solid: transparent; --raise: rgba(127,127,127,.16); --line: rgba(127,127,127,.28);
-  --accent: #2f7bff; --accent-ink: #fff; --accent-wash: rgba(47,123,255,.18);
-  --font-ui: "Jost", "Futura", system-ui, sans-serif; --font-mono: "IBM Plex Mono", ui-monospace, monospace; --r: 0px; }
-html.forja[data-theme="light"] { --fg: #0b0d10; --muted: rgba(11,13,16,.72); --dim: rgba(11,13,16,.55); --toast: rgba(214,212,207,.92); color-scheme: light; }
-html.forja[data-theme="dark"] { --fg: #f4f5f7; --muted: rgba(244,245,247,.74); --dim: rgba(244,245,247,.55); --toast: rgba(30,30,31,.9); color-scheme: dark; }
-html.forja, html.forja body { background: transparent !important; }
-html.forja body { font-family: var(--font-ui); color: var(--fg); }
-html.forja #panel { top: 2px; bottom: 4px; left: auto; right: 0; width: 300px; background: none; backdrop-filter: none; -webkit-backdrop-filter: none;
-  border: 0; border-radius: 0; box-shadow: none; transform: translateX(calc(100% + 30px)); transition: transform .22s cubic-bezier(.2,.7,.2,1); }
-html.forja #panel.show, html.forja.pinned #panel { transform: none; }
-html.forja .brand { border: 0; padding: 10px 12px 10px 16px; }
-html.forja .brand-mark, html.forja .brand p, html.forja .close-sheet, html.forja #sheetToggle { display: none !important; }
-html.forja .brand h1 { font: 400 11px var(--font-ui); letter-spacing: .3em; text-transform: uppercase; }
-html.forja .forja-pin { margin-left: auto; border: 0; background: none; color: var(--fg); font: 500 10px var(--font-ui); letter-spacing: .14em;
-  text-transform: uppercase; cursor: pointer; opacity: .75; padding: 4px 2px; }
-html.forja .forja-pin[aria-pressed="true"] { color: #2f7bff !important; opacity: 1; }
-html.forja details.grp { border: 0; }
-html.forja details.grp > summary { font: 500 10px var(--font-ui); letter-spacing: .22em; color: var(--fg); padding: 12px 16px 8px; }
-html.forja details.grp > summary svg, html.forja .sub-h svg, html.forja .preset svg { color: currentColor !important; }
-html.forja .grp-body { padding: 0 16px 14px; }
-html.forja .sub-h { border-top: 0; color: var(--fg); font: 500 10px var(--font-ui); letter-spacing: .16em; }
-html.forja .seg { background: none; padding: 0; gap: 2px; border-radius: 0; }
-html.forja .seg button { background: var(--raise); color: var(--fg); border-radius: 0; font-family: var(--font-ui); font-weight: 500; }
-html.forja .seg button[aria-pressed="true"] { background: #2f7bff; color: #fff; }
-html.forja :is(.btn, .preset, .mat, .ltabs button, .regions button, textarea, input[type=color], .tex) { border: 0 !important; border-radius: 0 !important; box-shadow: none; }
-html.forja :is(.btn, .preset, .mat, .ltabs button, .regions button, textarea) { background: var(--raise); color: var(--fg); font-family: var(--font-ui); }
-html.forja :is(.btn.primary, .btn.active) { background: #2f7bff !important; color: #fff !important; font-weight: 500; letter-spacing: .06em; }
-html.forja :is(.preset, .mat)[aria-pressed="true"], html.forja .ltabs button[aria-selected="true"], html.forja .regions button[aria-pressed="true"] { background: rgba(47,123,255,.24); }
-html.forja .tex[aria-pressed="true"] { box-shadow: 0 0 0 2px #2f7bff !important; }
-html.forja .ctl-top { font-weight: 400; }
-html.forja input[type=range]::-webkit-slider-thumb { background: #2f7bff; border: 0; box-shadow: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 0; }
-html.forja .switch .knob, html.forja .switch .knob::after { border-radius: 0; }
-html.forja #hud .chip, html.forja #tools .btn { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; border: 0; box-shadow: none; color: var(--fg); }
-html.forja #hud { right: auto; left: 18px; bottom: 10px; align-items: flex-start; }
-html.forja #tools { right: 14px; top: 10px; }
-html.forja #toast { background: var(--toast); border: 0; border-radius: 0; box-shadow: none; color: var(--fg); font-family: var(--font-ui); }
-html.forja #loader { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
-html.forja .ld-card { background: var(--toast); border: 0; border-radius: 0; box-shadow: none; }
-html.forja .ink-dark, html.forja .ink-dark * { color: #0b0d10 !important; }
-html.forja .ink-light, html.forja .ink-light * { color: #f4f5f7 !important; }
-html.forja :is(.ink-dark, .ink-light) :is([aria-pressed="true"], .primary, .active) { color: #fff !important; }
-</style>
-<script>
-/* Puente con Forja: esta app vive como módulo "Forge" dentro de Forja (forge/index.html?forja=1).
-   - forja:open  → abre la pieza que manda Forja (STEP = modo NURBS exacto, STL = modo malla), como "Subir modelo".
-   - lo exportado vuelve a Forja (ver deliver) en vez de descargarse.
-   - la tecla V (mantener) abre el carrusel de módulos de Forja. */
-window.FORJA_BRIDGE = new URLSearchParams(location.search).has('forja') && window.parent !== window;
-if (window.FORJA_BRIDGE) {
-  addEventListener('message', (e) => {
-    if (e.source !== window.parent || !e.data || e.data.type !== 'forja:open') return;
-    const input = document.getElementById('modelFile'), dt = new DataTransfer();
-    dt.items.add(new File([e.data.bytes], e.data.name));
-    input.files = dt.files;
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-
-  /* --- piel de Forja: tema, panel que sale por la derecha y texto negro/blanco --- */
-  const root = document.documentElement, panel = document.getElementById('panel');
-  root.classList.add('forja'); root.dataset.theme = 'dark';
-  panel.querySelector('.brand h1').textContent = 'Forge';
-  panel.querySelector('.brand').insertAdjacentHTML('beforeend', '<button class="forja-pin" id="forjaPin" aria-pressed="false" title="Fijar el panel (si no, sale al acercar el ratón al borde derecho)">Fijar</button>');
-  panel.querySelector('.scroll').insertAdjacentHTML('afterbegin', '<details class="grp" open><summary>Forja</summary><div class="grp-body">' +
-    '<button class="btn" id="forjaPull">Traer selección de Forja</button>' +
-    '<p class="hint">Lo que exportes aquí (STL, STEP) vuelve a la escena de Forja.</p></div></details>');
-  document.getElementById('forjaPull').addEventListener('click', () => window.parent.postMessage({ type: 'forge:request' }, '*'));
-  const pin = document.getElementById('forjaPin');
-  pin.addEventListener('click', () => { const on = !root.classList.contains('pinned'); root.classList.toggle('pinned', on); pin.setAttribute('aria-pressed', String(on)); });
-  addEventListener('pointermove', (e) => {
-    if (e.buttons) return;
-    if (e.clientX > innerWidth - 36 && e.clientY > 4) panel.classList.add('show');
-    else if (panel.classList.contains('show') && e.clientX < panel.getBoundingClientRect().left - 60) panel.classList.remove('show');
-  });
-  addEventListener('message', (e) => {
-    if (e.source !== window.parent || !e.data) return;
-    if (e.data.type === 'forja:theme') { root.dataset.theme = e.data.theme; remeasure(); }
-    if (e.data.type === 'forja:panel') panel.classList.toggle('show', !!e.data.show);
-  });
-  // Texto negro o blanco según lo que hay detrás (se lee del lienzo justo después de dibujar; transparente = muro de Forja)
-  const INK = '.brand, details.grp > summary, .grp-body > *, #hud .chip, #tools .btn';
-  let inkT = 0, inkNow = false;
-  window.forjaInk = () => {
-    const now = performance.now();
-    if (!inkNow && now - inkT < 250) return;
-    inkT = now; inkNow = false;
-    const r = window.__forgeRenderer;
-    if (!r) return;
-    const gl = r.getContext(), cv = r.domElement, rc = cv.getBoundingClientRect(), k = cv.width / Math.max(1, rc.width);
-    const bgL = root.dataset.theme === 'light' ? 0.86 : 0.1;
-    for (const el of document.querySelectorAll(INK)) {
-      const b = el.getBoundingClientRect();
-      if (!b.width || !b.height) continue;
-      const x0 = Math.max(0, Math.floor((b.left - rc.left) * k)), x1 = Math.min(cv.width, Math.ceil((b.right - rc.left) * k));
-      let sum = 0, n = 0;
-      for (const f of [0.35, 0.65]) {
-        const y = Math.floor(cv.height - (b.top + b.height * f - rc.top) * k);
-        if (x1 <= x0 || y < 0 || y >= cv.height) continue;
-        const buf = new Uint8Array((x1 - x0) * 4);
-        gl.readPixels(x0, y, x1 - x0, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
-        for (let i = 0; i < buf.length; i += 4) { sum += (0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2]) / 255 + (1 - buf[i + 3] / 255) * bgL; n++; }
-      }
-      const L = n ? sum / n : bgL;
-      el.classList.toggle('ink-dark', L > 0.5);
-      el.classList.toggle('ink-light', L <= 0.5);
-    }
-  };
-  // al abrir el panel o pasar el ratón la escena no se redibuja: se vuelve a pedir un cuadro para medir
-  const remeasure = () => { inkNow = true; if (window.__forgeDirty) window.__forgeDirty(); };
-  panel.addEventListener('transitionend', (e) => { if (e.propertyName === 'transform') remeasure(); });
-  const typing = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-  addEventListener('keydown', (e) => { if (e.code === 'KeyV' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e.target)) window.parent.postMessage({ type: 'forge:key', code: 'KeyV', down: true }, '*'); });
-  addEventListener('keyup', (e) => { if (e.code === 'KeyV' && !typing(e.target)) window.parent.postMessage({ type: 'forge:key', code: 'KeyV', down: false }, '*'); });
-}
-</script>
-<script type="module">
+// Motor de FORGE (antes BumpForge, app del usuario): relieve físico por capas sobre una malla, patrones, superficies,
+// horneado y exportación STL, modo NURBS exacto (OpenCascade) con patrones cortados con booleanas.
+// Aquí solo está el modelado: el visor, la cámara, el fondo, los menús y los avisos son los de Forja (ctx).
+//   ctx = { renderer, camera, root (Group en la escena de Forja), controls (target, autoRotate, enabled),
+//           toast(msg, kind), setView(pos, target), setExposure(v), setTone(k), active() }
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeVertices, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+
+export async function startForge(ctx) {
 
 /* =====================================================================
    ESTADO
@@ -1017,8 +16,8 @@ const PROC_RES = 1024;                 // mapas procedurales
 const SHAPE_RES = 2048;                // logos, texto e imágenes propias
 const NL = 3;                          // número de capas
 const NC = 17;                         // puntos de control de la curva
-const isMobile = matchMedia('(max-width: 760px)').matches;
-const $ = (id) => document.getElementById(id);
+const isMobile = false;   // Forja es solo para portátil
+const $ = (id) => document.getElementById(id.startsWith('bf-') ? id : 'bf-' + id);   // los controles de Forge viven en el panel de Forja con prefijo bf-
 const LATTICE = new Set(['cube', 'sphere', 'plane']);
 
 const state = {
@@ -1059,30 +58,11 @@ let active = 0;
 /* =====================================================================
    RENDERER + ESTUDIO (luz de 3 puntos + entorno de softboxes tipo VRED/Corona)
    ===================================================================== */
-let renderer;
-try {
-  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', alpha: !!window.FORJA_BRIDGE });
-  if (window.FORJA_BRIDGE) { renderer.setClearColor(0x000000, 0); window.__forgeRenderer = renderer; }   // dentro de Forja se ve el muro detrás
-} catch (e) {
-  $('chipMeshTxt').textContent = 'WebGL no disponible en este navegador';
-  throw e;
-}
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.outputColorSpace = THREE.SRGBColorSpace;     // sucesor de sRGBEncoding (r152+)
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-$('stage').appendChild(renderer.domElement);
+const renderer = ctx.renderer;
 
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(34, 1, 0.05, 100);
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.minDistance = 1.6;
-controls.maxDistance = 14;
+const scene = ctx.root;   // un grupo dentro de la escena de Forja (solo visible en el módulo Forge)
+const camera = ctx.camera, controls = ctx.controls;
 
-const pmrem = new THREE.PMREMGenerator(renderer);
 /* Estudio HDR equirectangular generado en código (radiancia lineal, sin archivos externos):
    ciclorama oscuro, línea de horizonte y softboxes rectangulares con bordes suaves, como un estudio de VRED.
    El mismo mapa ilumina la vista en tiempo real (vía PMREM) y el trazado de rayos. */
@@ -1126,7 +106,6 @@ function studioEquirect(W = 1024, H = 512) {
   return t;
 }
 const STUDIO = studioEquirect();
-scene.environment = pmrem.fromEquirectangular(STUDIO).texture;
 
 function backdrop(inner, outer) {
   const c = document.createElement('canvas'); c.width = 64; c.height = 512;
@@ -1172,16 +151,8 @@ scene.add(marker);
 const logoGroup = new THREE.Group();          // sólidos vectoriales (logos y texto CAD)
 scene.add(logoGroup);
 
-const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 }));
-composer.addPass(new RenderPass(scene, camera));
-const gtao = new GTAOPass(scene, camera, 1, 1);
-gtao.updateGtaoMaterial({ radius: 0.22, distanceExponent: 1.2, thickness: 1, scale: 1, samples: 16, distanceFallOff: 1 });
-gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 16 });
-composer.addPass(gtao);
-composer.addPass(new OutputPass());
-// el fondo con textura se dibuja como un plano 2×2; sin esto la pasada de normales de la AO lo pinta en el origen
-const gtaoRender = gtao.renderOverride.bind(gtao);
-gtao.renderOverride = (...args) => { const bg = scene.background; scene.background = null; gtaoRender(...args); scene.background = bg; };
+// sin compositor propio: dibuja Forja (la oclusión ambiental de BumpForge no se usa aquí)
+const gtao = { enabled: false, blendIntensity: 1, normalMaterial: new THREE.MeshNormalMaterial() };
 
 /* =====================================================================
    UNIFORMES + SHADER DE DESPLAZAMIENTO (3 capas, superficies, curvas)
@@ -2116,7 +1087,7 @@ function buildGroups(g) {
 
 function applyMaterial() {
   const inspect = state.material === 'inspect';
-  scene.background = window.FORJA_BRIDGE ? null : inspect ? BG_DARK : BG_STUDIO;
+  scene.background = inspect ? BG_DARK : BG_STUDIO;
   grid.visible = inspect;
   gtao.enabled = state.ao && !inspect;
   if (mesh) {
@@ -2130,7 +1101,7 @@ function applyMaterial() {
   $('matColor').value = matColors[ak];
   $('matColorLabel').textContent = `Color · ${MATS[ak].name}`;
   const used = new Set(Object.values(state.regionMat));
-  document.querySelectorAll('#mats .mat').forEach((b) => {
+  document.querySelectorAll('#bf-mats .mat').forEach((b) => {
     b.setAttribute('aria-pressed', String(b.dataset.m === ak));
     b.classList.toggle('painted', state.matMode === 'paint' && used.has(b.dataset.m));
   });
@@ -3319,38 +2290,8 @@ async function bakeAndExport() {
   }
 }
 
-/* Dentro de claude.ai las descargas pasan por la capacidad "downloads" (que no acepta .stl ni .3mf),
-   así que el archivo va dentro de un .zip. Fuera de claude.ai se descarga directamente. */
-async function deliver(base, bytes, ext) {
-  // Dentro de Forja (módulo Forge): lo exportado vuelve a la escena de Forja en vez de descargarse
-  if (window.FORJA_BRIDGE) {
-    const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes.buffer ? bytes.buffer : bytes);
-    window.parent.postMessage({ type: 'forge:result', name: `${base}.${ext}`, bytes: data }, '*');
-    return `Enviado a Forja: ${base}.${ext}`;
-  }
-  let dl = null;
-  try { dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; } catch { dl = null; }
-  if (dl) {
-    const zip = await zipFiles([{ name: `${base}.${ext}`, chunks: [bytes], deflate: ext !== '3mf' }]);
-    try {
-      await dl.save({ filename: base + '.zip', data: new Blob([zip], { type: 'application/zip' }) });
-      return `Guardado ${base}.zip (contiene el .${ext})`;
-    } catch (e) {
-      if (e && e.code === 'declined') { toast('bad', 'Descarga cancelada. El modelo sigue listo para exportarse de nuevo.'); return null; }
-      throw new Error(e && e.message ? e.message : 'descarga no disponible');
-    }
-  }
-  if (window.claude) {
-    toast('bad', 'Este visor no permite descargas. Abre la app fuera del visor para exportar.');
-    return null;
-  }
-  const blob = new Blob([bytes], { type: ext === 'stl' ? 'model/stl' : ext === 'step' ? 'model/step' : 'model/3mf' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `${base}.${ext}`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-  return `Descargado ${base}.${ext}`;
-}
+// la descarga (o el envío a la escena de Forja) la hace Forja
+async function deliver(base, bytes, ext) { return ctx.deliver(base, bytes, ext); }
 
 const CRC_TABLE = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function crc32(b, c = 0xFFFFFFFF) { for (let i = 0; i < b.length; i++) c = CRC_TABLE[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return c; }
@@ -3539,7 +2480,7 @@ function setRangeLimits(L) {
   for (const id of ['L_g0', 'L_g1']) { const el = $(id); el.min = r ? 0 : -1; el.max = r ? 1.75 : 1; }
 }
 
-const layerControls = [...document.querySelectorAll('#layerEditor [data-k]')];
+const layerControls = [...document.querySelectorAll('#bf-layerEditor [data-k]')];
 function loadLayerToUI() {
   const L = layers[active];
   setRangeLimits(L);
@@ -3550,7 +2491,7 @@ function loadLayerToUI() {
     else if (el.type === 'range') { el.value = L[k]; paintRange(el); $(el.id + 'Out').textContent = LFMT[k](parseFloat(el.value), L); }
     else if (el.tagName === 'TEXTAREA') { if (el.value !== L[k]) el.value = L[k]; }
   }
-  document.querySelectorAll('#ltabs button').forEach((b) => b.setAttribute('aria-selected', String(+b.dataset.l === active)));
+  document.querySelectorAll('#bf-ltabs button').forEach((b) => b.setAttribute('aria-selected', String(+b.dataset.l === active)));
   syncTexButtons();
   drawUploadThumb();
   renderRegions();
@@ -3588,7 +2529,7 @@ const PATTERN_NAMES = { ...Object.fromEntries(Object.entries(PATTERNS).map(([k, 
 const FIELD_NAMES = { none: 'uniforme', grad: 'gradiente', attr: 'atractor' };
 const TARGET_NAMES = { amp: 'altura', size: 'grosor', scale: 'escala' };
 function renderLayerTabs() {
-  document.querySelectorAll('#ltabs button').forEach((b) => b.classList.toggle('on', layers[+b.dataset.l].on));
+  document.querySelectorAll('#bf-ltabs button').forEach((b) => b.classList.toggle('on', layers[+b.dataset.l].on));
   const L = layers[active];
   const where = L.surf === 'sel' ? `${L.regions.length} superficie${L.regions.length === 1 ? '' : 's'}` : 'toda la pieza';
   $('layerSum').textContent = L.on ? `${PATTERN_NAMES[L.pattern]} · ${L.depth.toFixed(2)} mm · ${where} · ${FIELD_NAMES[L.field]}${L.field !== 'none' ? ' → ' + TARGET_NAMES[L.target] : ''}` : 'Capa apagada. Elige un patrón para activarla.';
@@ -3767,12 +2708,15 @@ function addBrushPoint(hit) {
   dirty = true;
 }
 renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!ctx.active()) return;
   if (pickMode !== 'brush') return;
   const hit = brushHit(e); if (!hit) return;
   painting = true; brushPts = []; renderer.domElement.setPointerCapture(e.pointerId); addBrushPoint(hit);
 });
-renderer.domElement.addEventListener('pointermove', (e) => { if (painting) { const hit = brushHit(e); if (hit) addBrushPoint(hit); } });
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!ctx.active()) return; if (painting) { const hit = brushHit(e); if (hit) addBrushPoint(hit); } });
 renderer.domElement.addEventListener('pointerup', () => {
+  if (!ctx.active()) return;
   if (!painting) return;
   painting = false;
   const pts = brushPts; brushPts = [];
@@ -3924,7 +2868,7 @@ function drawUploadThumb() {
   else { t.fillStyle = '#9a978f'; t.font = '600 30px Archivo, Arial'; t.textAlign = 'center'; t.textBaseline = 'middle'; t.fillText('+', 40, 36); }
 }
 function syncTexButtons() {
-  document.querySelectorAll('#texGrid .tex').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tex === layers[active].pattern)));
+  document.querySelectorAll('#bf-texGrid .tex').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tex === layers[active].pattern)));
 }
 function pickPattern(name) {
   const L = layers[active];
@@ -3988,16 +2932,17 @@ function setPick(mode) {
   controls.enabled = mode !== 'brush';
   $('chipPick').hidden = !mode;
   if (mode) $('chipPickTxt').textContent = PICK_TEXT[mode]();
-  $('stage').classList.toggle('picking', !!mode);
-  if (isMobile) $('panel').classList.toggle('collapsed', !!mode);
+  renderer.domElement.classList.toggle('bf-picking', !!mode);
   syncUniforms();
 }
 $('pickSurf').addEventListener('click', () => setPick(pickMode === 'surf' ? null : 'surf'));
 $('pickAttr').addEventListener('click', () => setPick(pickMode === 'attr' ? null : 'attr'));
 $('pickDone').addEventListener('click', () => setPick(null));
 let downAt = null;
-renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!ctx.active()) return; downAt = [e.clientX, e.clientY]; });
 renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!ctx.active()) return;
   if (!pickMode || !downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) return;
   const r = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
@@ -4047,7 +2992,7 @@ for (const id of Object.keys(GFMT)) {
     const v = parseFloat(el.value);
     state[GKEY[id]] = v;
     paintRange(el); $(id + 'Out').textContent = GFMT[id](v);
-    if (id === 'exposure') renderer.toneMappingExposure = v;
+    if (id === 'exposure') ctx.setExposure(v);
     if (id === 'aoInt') gtao.blendIntensity = v;
     if (id === 'seamEdge' || id === 'size' || id === 'sharp') { syncUniforms(); markStale(); loadLayerToUI(); $('seamEdgeOut').textContent = GFMT.seamEdge(state.seamEdge); }
     if (id === 'tol') markStale();
@@ -4056,7 +3001,7 @@ for (const id of Object.keys(GFMT)) {
   // los ajustes de malla de modelos propios se aplican al soltar el control
   if (id === 'edgeMm' || id === 'angle') el.addEventListener('change', () => { if (!LATTICE.has(state.shape)) rebuild(); });
 }
-renderer.toneMappingExposure = state.exposure;
+ctx.setExposure(state.exposure);
 gtao.blendIntensity = state.aoInt;
 
 function bindSeg(segId, attr, onPick) {
@@ -4066,7 +3011,7 @@ function bindSeg(segId, attr, onPick) {
     $(segId).querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
   });
 }
-function markShapeButtons() { document.querySelectorAll('#shapeSeg button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.shape === (state.shape === 'cad' ? 'file' : state.shape)))); }
+function markShapeButtons() { document.querySelectorAll('#bf-shapeSeg button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.shape === (state.shape === 'cad' ? 'file' : state.shape)))); }
 bindSeg('shapeSeg', 'shape', (v) => {
   if (v === 'file' && cad && lastFileKind === 'cad') { if (state.shape !== 'cad') { state.shape = 'cad'; rebuild().then(resetCamera); } return true; }
   if (state.shape === 'cad' && cad) {               // al salir del modo NURBS se recupera el tamaño de las formas de malla
@@ -4083,14 +3028,14 @@ bindSeg('shapeSeg', 'shape', (v) => {
 bindSeg('resSeg', 'res', (v) => { state.res = parseInt(v, 10); rebuild(); });
 bindSeg('upSeg', 'up', (v) => { state.upAxis = v; if (state.shape === 'file') rebuild().then(resetCamera); });
 bindSeg('budgetSeg', 'b', (v) => { state.budget = parseInt(v, 10); markStale(); });
-bindSeg('toneSeg', 'tone', (v) => { state.tone = v; renderer.toneMapping = v === 'agx' ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping; invalidate(); });
-document.querySelectorAll('#resSeg button').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.res === state.res)));
-document.querySelectorAll('#budgetSeg button').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.b === state.budget)));
+bindSeg('toneSeg', 'tone', (v) => { state.tone = v; ctx.setTone(v); invalidate(); });
+document.querySelectorAll('#bf-resSeg button').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.res === state.res)));
+document.querySelectorAll('#bf-budgetSeg button').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.b === state.budget)));
 
 async function loadCustom(src) {
   state.custom = src;
   state.upAxis = src.zUp ? 'z' : 'y';
-  document.querySelectorAll('#upSeg button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.up === state.upAxis)));
+  document.querySelectorAll('#bf-upSeg button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.up === state.upAxis)));
   // tamaño real del archivo (unidades = mm)
   const raw = src.raw; let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
   for (let i = 0; i < raw.length; i += 3) for (let k = 0; k < 3; k++) { const v = raw[i + k]; if (v < mn[k]) mn[k] = v; if (v > mx[k]) mx[k] = v; }
@@ -4167,7 +3112,7 @@ $('matColor').addEventListener('input', (e) => {
     if (k === 'resin') m.attenuationColor.set(e.target.value); else m.color.set(e.target.value);
     if (k === 'pla') m.sheenColor.set(e.target.value).lerp(new THREE.Color(0xffffff), 0.5);
   }
-  const sw = document.querySelector(`#mats .mat[data-m="${k}"] .sw`);
+  const sw = document.querySelector(`#bf-mats .mat[data-m="${k}"] .sw`);
   if (sw && k !== 'inspect') sw.style.background = METALS.has(k) ? `linear-gradient(160deg, #1a1b1e 0%, ${e.target.value} 38%, #ffffff 50%, ${e.target.value} 62%, #2a2b2e 100%)` : `radial-gradient(circle at 35% 30%, #ffffff -20%, ${e.target.value} 45%, #111 120%)`;
   invalidate();
 });
@@ -4213,7 +3158,7 @@ const presetsEl = $('presets');
 for (const p of [...PRESETS, { id: 'random', label: 'Aleatorio', icon: 'fa-shuffle' }]) {
   const b = document.createElement('button');
   b.className = 'preset';
-  b.innerHTML = `<i class="fa-solid ${p.icon}"></i><span></span>`;
+  b.innerHTML = `<span></span>`;
   b.querySelector('span').textContent = p.label;
   b.addEventListener('click', () => p.id === 'random' ? randomize() : applyPreset(p));
   presetsEl.appendChild(b);
@@ -4240,16 +3185,7 @@ function showLoader(title, step, p) { $('ldTitle').textContent = title; setStep(
 function hideLoader() { $('loader').hidden = true; }
 function setStep(step, p) { $('ldStep').textContent = step; if (p != null) setProgress(p); }
 function setProgress(p) { $('ldBar').style.width = (p * 100).toFixed(1) + '%'; $('ldPct').textContent = Math.round(p * 100) + '%'; }
-let toastTimer;
-function toast(kind, msg) {
-  const t = $('toast');
-  t.className = kind;
-  t.innerHTML = `<i class="fa-solid ${kind === 'ok' ? 'fa-circle-check' : 'fa-triangle-exclamation'}"></i><span></span>`;
-  t.querySelector('span').textContent = msg;
-  t.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 7000);
-}
+function toast(kind, msg) { ctx.toast(msg, kind); }
 
 /* ---------- Cámara / render bajo demanda ---------- */
 $('autoRot').addEventListener('click', (e) => {
@@ -4259,29 +3195,12 @@ $('autoRot').addEventListener('click', (e) => {
 function resetCamera() {
   const far = isMobile ? 1.35 : 1;
   const cy = mesh ? mesh.position.y + (baseGeo.boundingBox.min.y + baseGeo.boundingBox.max.y) / 2 : 0;
-  if (state.shape === 'plane') camera.position.set(0.2 * far, 3.4 * far, 3.3 * far);
-  else camera.position.set(3.1 * far, (2.3 + cy) * far, 4.2 * far);
-  controls.target.set(0, cy, 0);
-  controls.update();
+  ctx.setView(state.shape === 'plane' ? new THREE.Vector3(0.2 * far, 3.4 * far, 3.3 * far) : new THREE.Vector3(3.1 * far, (2.3 + cy) * far, 4.2 * far), new THREE.Vector3(0, cy, 0));
   invalidate();
 }
 $('resetCam').addEventListener('click', resetCamera);
-const panel = $('panel');
-$('sheetToggle').addEventListener('click', () => panel.classList.remove('collapsed'));
-$('closeSheet').addEventListener('click', () => panel.classList.add('collapsed'));
-if (isMobile) panel.classList.add('collapsed');
 
-function resize() {
-  const w = window.innerWidth, h = window.innerHeight;
-  renderer.setSize(w, h, false);
-  composer.setPixelRatio(renderer.getPixelRatio());
-  composer.setSize(w, h);
-  camera.aspect = w / h;
-  if (w > 760) camera.setViewOffset(w, h, -180, 0, w, h); else camera.clearViewOffset();
-  camera.updateProjectionMatrix();
-  invalidate();
-}
-window.addEventListener('resize', resize);
+function resize() { invalidate(); }
 
 /* =====================================================================
    RENDER REALISTA: trazado de rayos progresivo (three-gpu-pathtracer, MIT)
@@ -4376,7 +3295,6 @@ $('ptTool').addEventListener('click', togglePT);
 $('ptStop').addEventListener('click', stopPT);
 
 let dirty = true;
-window.__forgeDirty = () => { dirty = true; };   // Forja pide un cuadro para medir el color del texto
 // cualquier edición invalida el render; si el trazado de rayos estaba activo, se vuelve a la vista en tiempo real
 function invalidate() { dirty = true; if (ptActive && !ptBusy) stopPT(); }
 
@@ -4882,7 +3800,7 @@ function occBooleanSafe(oc, shape, faceRegion, tools, op, newRegion) {
 
 const OCC_VER = '0.20.2';
 const OCC_JS = `https://cdn.jsdelivr.net/npm/replicad-opencascadejs@${OCC_VER}/src/replicad_single.js`;
-const OCC_WASM = ['occ/replicad_single.wasm', `https://cdn.jsdelivr.net/npm/replicad-opencascadejs@${OCC_VER}/src/replicad_single.wasm`];
+const OCC_WASM = ['src/forge/replicad_single.wasm', `https://cdn.jsdelivr.net/npm/replicad-opencascadejs@${OCC_VER}/src/replicad_single.wasm`];
 let occPromise = null;
 async function fetchBytes(url, progress) {
   const r = await fetch(url);
@@ -4947,7 +3865,7 @@ async function loadStep(file) {
   lastFileKind = 'cad';
   state.shape = 'cad'; markShapeButtons();
   state.format = 'step';
-  document.querySelectorAll('#fmtSeg button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === 'step')));
+  document.querySelectorAll('#bf-fmtSeg button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === 'step')));
   $('fmtHint').textContent = FMT_HINT.step;
   await rebuild();
   resetCamera();
@@ -5907,14 +4825,14 @@ function applyModeUI() {
   for (const id of ['surfGrp', 'presetGrp', 'layerGrp', 'edgeGrp']) $(id).hidden = isCad;
   $('cadGrp').hidden = !isCad;
   for (const id of ['edgeMmCtl', 'angleCtl', 'upLabel', 'upSeg', 'modelInfo', 'sizeCtl', 'refineSwitch', 'refineCtl']) $(id).hidden = isCad;
-  document.querySelector('#fmtSeg [data-f="step"]').hidden = !isCad;
+  document.querySelector('#bf-fmtSeg [data-f="step"]').hidden = !isCad;
   if (!isCad && state.format === 'step') {
     state.format = 'stl';
-    document.querySelectorAll('#fmtSeg button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === 'stl')));
+    document.querySelectorAll('#bf-fmtSeg button').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === 'stl')));
     $('fmtHint').textContent = FMT_HINT.stl;
   }
   $('exportTitle').textContent = isCad ? 'Exportar' : 'Detalle, horneado y STL';
-  $('exportBtn').innerHTML = `<i class="fa-solid fa-download"></i> ${isCad ? 'Exportar' : 'Hornear y exportar'}`;
+  $('exportBtn').innerHTML = `${isCad ? 'Exportar' : 'Hornear y exportar'}`;
   cadPreview.visible = isCad;
   if (!isCad) { clearCadPreview(); if (pickMode && pickMode.startsWith('cad')) setPick(null); }
   else { renderCadInfo(); renderCadFaces(); syncCadUI(); scheduleCadPreview(0); }
@@ -6151,17 +5069,26 @@ resize();
 await rebuild();
 resetCamera();
 let ptFrame = 0;
-renderer.setAnimationLoop(() => {
-  const moved = controls.update();
+const lastCam = new THREE.Matrix4();
+// Forja llama a esto antes de dibujar la vista de Forge: con el render realista activo dibuja el trazador (true = ya dibujado)
+ctx.onFrame = () => {
+  const moved = !lastCam.equals(camera.matrixWorld);
+  lastCam.copy(camera.matrixWorld);
   if (ptActive) {
     if (moved) pt.updateCamera();
     pt.renderSample();
     if ((ptFrame++ & 7) === 0) $('chipPTTxt').textContent = `Trazado de rayos · ${Math.floor(pt.samples)} muestras`;
-    return;
+    return true;
   }
-  if (moved || dirty || controls.autoRotate) { composer.render(); dirty = false; if (window.forjaInk) window.forjaInk(); }
-});
+  dirty = false;
+  return false;
+};
 await applyPreset(PRESETS[0]);
-document.fonts.ready.then(drawThumbs);
-</script>
-</body></html>
+
+// lo que Forja usa de Forge
+return {
+  openFile: async (file) => { const dt = new DataTransfer(); dt.items.add(file); $('modelFile').files = dt.files; $('modelFile').dispatchEvent(new Event('change')); },
+  resetCamera,
+  invalidate,
+};
+}
