@@ -17,6 +17,17 @@ export function createAO(renderer, scene, camera) {
   pass.updateGtaoMaterial({ radius: 0.7, distanceExponent: 1.4, thickness: 1.5, scale: 1.7, samples: 8, distanceFallOff: 1, screenSpaceRadius: false });
   pass.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 8 });
   pass.blendIntensity = 2.1;
+  // El pase de normales solo debe ver superficies. GTAOPass solo esconde Line y Points, pero las líneas gruesas de Forja (Line2 y
+  // LineSegments2) son mallas: dibujadas con el material de normales salen como planos sueltos en el origen (la raya negra que
+  // aparecía dentro de los objetos). Se esconden también ellas, los sprites y lo que no se pinta (colorWrite apagado).
+  pass.overrideVisibility = function () {
+    const cache = this._visibilityCache;
+    this.scene.traverse((o) => {
+      cache.set(o, o.visible);
+      const m = o.material;
+      if (o.isPoints || o.isLine || o.isLineSegments || o.isLine2 || o.isLineSegments2 || o.isSprite || (m && (m.isLineMaterial || m.isSpriteMaterial || m.colorWrite === false || m.visible === false))) o.visible = false;
+    });
+  };
   let w = 0, h = 0, lastKey = '';
   const HALF = 0.5;   // el cálculo va a media resolución (4 veces menos píxeles); la mezcla final sí es a resolución completa
   return {

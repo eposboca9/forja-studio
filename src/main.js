@@ -173,10 +173,11 @@ scene.add(ground);
 const grid = new THREE.GridHelper(30, 30, 0x8a8781, 0xa3a09a);
 grid.position.y = 0.001;
 grid.layers.set(DIAG);
-grid.material.transparent = true; grid.material.opacity = 0.1035;   // +15 % (antes 0,09), en tema claro y oscuro
+const GRID_OP0 = 0.119;   // +15 % sobre 0,1035 (que ya era +15 % sobre 0,09); ajustable en Preferencias
+grid.material.transparent = true; grid.material.opacity = GRID_OP0;
 scene.add(grid);
 const gridXY = new THREE.GridHelper(30, 30, 0x8a8781, 0xa3a09a);
-gridXY.material.transparent = true; gridXY.material.opacity = 0.1035;
+gridXY.material.transparent = true; gridXY.material.opacity = GRID_OP0;
 gridXY.rotation.x = Math.PI / 2;
 gridXY.layers.set(DIAG);
 gridXY.visible = false;
@@ -1146,7 +1147,7 @@ gizmo.addEventListener('objectChange', () => {
 // Como en Alias: mantener Alt = rejilla, Ctrl = punto, Ctrl+Alt = curva (en Mac, Cmd hace de Alt).
 // Los botones de arriba los dejan activos sin mantener teclas.
 const snapToggles = { grid: false, curve: false, point: false, surface: false };
-let gridStep = 0.25;
+let gridStep = 1;   // snap a la rejilla: 1 dm = 100 mm, igual que las celdas dibujadas (cada celda = 100 × 100 mm)
 const SNAP_PX = 22;
 function snapModes(e) {
   const m = { ...snapToggles };
@@ -1384,7 +1385,7 @@ function setDrawPlane(k) {
 }
 // rejilla del plano de construcción mientras se dibuja
 const gridYZ = new THREE.GridHelper(30, 30, 0x8a8781, 0xa3a09a);
-gridYZ.material.transparent = true; gridYZ.material.opacity = 0.1035;
+gridYZ.material.transparent = true; gridYZ.material.opacity = GRID_OP0;
 gridYZ.rotation.z = Math.PI / 2;
 gridYZ.layers.set(DIAG);
 gridYZ.visible = false;
@@ -1436,6 +1437,8 @@ function setTool(t) {
   setDrawPlane(drawPlaneKind);
   updateHint();
   if (t === 'curve') startDraft();
+  // ventana de opciones de la herramienta Curva (grado y spans)
+  if (typeof TW !== 'undefined') { if (t === 'curve') TW.show(curveSpec()); else if (TW.spec?.curveTool) TW.hide(); }
   attachGizmo();
 }
 
@@ -1462,7 +1465,7 @@ function showDraft() {
   if (!draft) { $('draw-msg').textContent = ''; return; }
   const pts = draft.hover ? [...draft.pts, draft.hover] : draft.pts;
   if (pts.length >= 2) {
-    const crv = N.curveOf(N.curveData(pts)), out = [];
+    const crv = N.curveOf(draftCurveData(pts)), out = [];
     for (let s = 0; s <= 120; s++) { const q = crv.getPoint(s / 120); out.push(q.x, q.y, q.z); }
     setGeo(draftLine, line2Geo(out));
     draftLine.visible = true;
@@ -1472,13 +1475,36 @@ function showDraft() {
   $('draw-msg').textContent = n === 0 ? `Clic: primer punto en ${PLANE_NAMES[resolvePlaneKind()]}` : `${n} ${n === 1 ? 'punto' : 'puntos'} · sigue haciendo clic`;
   $('draw-done').disabled = n < 2;
 }
+// Curva que se dibuja: grado y spans configurables (ventana de la herramienta Curva). Por omisión grado 3 y, como mínimo, 1 span:
+// con menos de grado + 1 puntos se eleva el grado (la forma no cambia) para que siempre sea un span completo del grado elegido.
+// Con "Spans" fijo se reconstruye la curva a ese número de spans; con "Auto" cada punto que pones es un CV.
+function draftCurveData(pts, plane = 'xz') {
+  const deg = toolDef.curveDeg, n = pts.length;
+  if (n < 2) return N.curveData(pts, deg, plane);
+  let c = N.curveData(pts, deg, plane);
+  if (n < deg + 1) c = N.rebuildCurve(N.curveData(pts, n - 1, plane), deg, 1);
+  else if (toolDef.curveSpans > 0 && n - deg !== toolDef.curveSpans) c = N.rebuildCurve(c, deg, toolDef.curveSpans);
+  return c;
+}
+function curveSpec() {
+  const keep = (k, v) => { toolDef[k] = v; saveToolDef(); showDraft(); };
+  return {
+    title: 'Curva', curveTool: true,
+    hint: () => 'Grado y spans de las curvas nuevas. En Auto, cada punto que pones es un CV (con menos puntos de los que pide el grado, el grado se eleva y queda 1 span). "Nada" o Enter terminan la curva; Esc la cancela.',
+    fields: [
+      { type: 'seg', label: 'Grado', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], get: () => toolDef.curveDeg, set: (v) => keep('curveDeg', v) },
+      { type: 'seg', label: 'Spans', opts: [[0, 'Auto'], [1, '1'], [2, '2'], [3, '3'], [4, '4'], [6, '6'], [8, '8']], get: () => toolDef.curveSpans, set: (v) => keep('curveSpans', v) },
+    ],
+    actions: [{ label: 'Terminar curva', primary: true, run: () => finishDraft() }],
+  };
+}
 function finishDraft() {
   if (!draft || draft.pts.length < 2) return;
   // el plano de la curva: el de construcción si todos los puntos están en él (un snap pudo sacarlos)
   let pk = resolvePlaneKind();
   const ax = { xz: 'y', xy: 'z', yz: 'x' }[pk];
   if (ax && draft.pts.some((q) => Math.abs(q[ax] - draft.pts[0][ax]) > 1e-6)) pk = 'free';
-  const obj = addCurve(N.curveData(draft.pts, 3, pk));
+  const obj = addCurve(draftCurveData(draft.pts, pk));
   startDraft();
   toast(`${obj.name} creada`);
 }
@@ -1902,7 +1928,7 @@ function updateStatus() {
   const ns = objects.filter((o) => o.kind === 'surface').length;
   const nc = objects.filter((o) => o.kind === 'curve').length, nm = objects.filter((o) => o.kind === 'mesh').length;
   const plural = (n, a, b) => `${n} ${n === 1 ? a : b}`;
-  $('st-scene').textContent = `DM · ${plural(nc, 'CURVA', 'CURVAS')}`;
+  $('st-scene').textContent = `DM · CELDA 100 MM · ${plural(nc, 'CURVA', 'CURVAS')}`;
   // Información de la vista (arriba a la derecha)
   const cvs = objects.reduce((s, o) => s + (o.data.cvs ? o.data.cvs.flat().length : 0), 0);
   const patches = objects.filter((o) => o.kind === 'surface')
@@ -2809,7 +2835,11 @@ addEventListener('keydown', (e) => {
 });
 
 // ---------- Comandos de los menús radiales ----------
-function pickNothing() { setTool('select'); mouseXform = false; clearSelection(); updateHint(); }
+function pickNothing() {
+  // dibujando una curva, "Nada" la termina (con 2 puntos o más) y sale de la herramienta
+  if (tool === 'curve' && draft && draft.pts.length >= 2) finishDraft();
+  setTool('select'); mouseXform = false; clearSelection(); updateHint();
+}
 const cloneV4 = (v) => new THREE.Vector4(v.x, v.y, v.z, v.w);
 function duplicateSelection() {
   if (pickMode !== 'object' || !selObjs.length) return toast('Duplicar: selecciona objetos (modo Objetos).');
@@ -3271,13 +3301,35 @@ function restore(st) {
   objects.forEach(applyVisibility);
   selectionChanged(); refreshOutliner(); renderLayers(); renderHistory();
 }
+// Al deshacer o rehacer, lo que estaba activo y elegido (objetos, CVs, el pivote en edición) sigue activo y elegido si todavía existe.
+// restore() recrea los objetos con los mismos ids, así que se vuelve a elegir por id y por clave de CV.
+function captureActive() {
+  return { objs: selObjs.map((o) => o.id), cvs: [...selCVs.keys()], targets: [...cvTargets], pivot: pivotEdit };
+}
+function reactivate(st) {
+  const objs = st.objs.map(byId).filter(Boolean);
+  const refs = [];
+  if (st.cvs.length) {
+    const want = new Set(st.cvs);
+    for (const o of objects) for (const h of o.parts.handles.children) if (want.has(h.userData.key)) refs.push(h.userData);
+  }
+  if (!objs.length && !refs.length) return;
+  cvTargets.clear(); st.targets.filter((id) => byId(id)).forEach((id) => cvTargets.add(id));
+  selObjs.length = 0; selCVs.clear();
+  objs.forEach((o) => selObjs.push(o));
+  refs.forEach((r) => selCVs.set(r.key, r));
+  selectionChanged();
+  if (st.pivot && selObjs.length && pickMode === 'object') { pivotEdit = true; gizmo.setMode('translate'); updateXformButtons(); attachGizmo(); renderSelectionPanel(); }
+}
 function undo() {
   if (!undoStack.length) return toast('Nada que deshacer');
-  redoStack.push(snapshot()); restore(undoStack.pop()); toast('Deshacer');
+  const act = captureActive();
+  redoStack.push(snapshot()); restore(undoStack.pop()); reactivate(act); toast('Deshacer');
 }
 function redo() {
   if (!redoStack.length) return toast('Nada que rehacer');
-  undoStack.push(snapshot()); restore(redoStack.pop()); toast('Rehacer');
+  const act = captureActive();
+  undoStack.push(snapshot()); restore(redoStack.pop()); reactivate(act); toast('Rehacer');
 }
 addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey) || e.altKey || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
@@ -3495,6 +3547,9 @@ function initPrefs() {
     const txt = JSON.stringify({ modo: 'forja', ...FJ, ao: { activa: prefs.ao !== false, intensidad: prefs.aoInt ?? 2.1, radio: prefs.aoRad ?? 0.7 } });
     try { await navigator.clipboard.writeText(txt); toast('Valores copiados: pégalos en el chat'); } catch (e) { prompt('Copia estos valores:', txt); }
   });
+  const setGridOp = (v) => { for (const g of [grid, gridXY, gridYZ]) g.material.opacity = v; $('pref-grid-op-o').textContent = (+v).toFixed(3); };
+  $('pref-grid-op').value = prefs.gridOp ?? GRID_OP0; setGridOp(prefs.gridOp ?? GRID_OP0);
+  $('pref-grid-op').addEventListener('input', (e) => { prefs.gridOp = +e.target.value; setGridOp(+e.target.value); savePrefs(); });
   const aoInt = prefs.aoInt ?? 2.1, aoRad = prefs.aoRad ?? 0.7;
   ao.intensity = aoInt; ao.radius = aoRad;
   $('pref-ao').checked = prefs.ao !== false; $('pref-ao-int').value = aoInt; $('pref-ao-rad').value = aoRad;
@@ -3666,7 +3721,7 @@ function removeRelation(id) {
 }
 function addRelation(r) { r.id = nextRelId++; relations.push(r); renderHistory(); return r; }
 // valores que usa cada herramienta la próxima vez (se recuerdan)
-const toolDef = Object.assign({ alignCont: 2, alignTension: 1, blendA: 2, blendB: 2, blendTension: 1, extDir: 'auto', extBoth: false, offsetDist: 0.2, mirrorPlane: 'x' }, prefs.tools || {});
+const toolDef = Object.assign({ curveDeg: 3, curveSpans: 0, alignCont: 2, alignTension: 1, blendA: 2, blendB: 2, blendTension: 1, extDir: 'auto', extBoth: false, offsetDist: 0.2, mirrorPlane: 'x' }, prefs.tools || {});
 const saveToolDef = () => { prefs.tools = toolDef; savePrefs(); };
 
 // --- Ventana de opciones de la herramienta: un desenfoque de lo que hay detrás, sin marco, con los ajustes encima ---
@@ -5252,7 +5307,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

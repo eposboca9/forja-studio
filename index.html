@@ -1719,7 +1719,7 @@
         <button id="plane-xy" data-plane="xy" aria-pressed="false">Frente</button>
         <button data-plane="yz" aria-pressed="false">Lado</button>
       </div>
-      <div class="row"><label for="grid-step">Rejilla</label><select id="grid-step" class="sel"><option value="0.1">0.1 dm</option><option value="0.25" selected>0.25 dm</option><option value="0.5">0.5 dm</option><option value="1">1 dm</option></select><span></span></div>
+      <div class="row"><label for="grid-step">Rejilla</label><select id="grid-step" class="sel"><option value="0.1">10 mm</option><option value="0.25">25 mm</option><option value="0.5">50 mm</option><option value="1" selected>100 mm (1 celda de la rejilla)</option></select><span></span></div>
       <p class="muted">Según la vista: arriba = suelo, frente = XY, lado = YZ; en perspectiva, en el aire. Snap: Alt rejilla, Ctrl puntos, Ctrl+Alt curvas, aristas y líneas de parche, Shift superficies.</p>
     </section>
 
@@ -1836,7 +1836,8 @@
       <label class="check"><input type="checkbox" data-pref-snap="curve"> Curva</label>
       <label class="check"><input type="checkbox" data-pref-snap="point"> Punto</label>
       <h3>Opciones</h3>
-      <div class="row"><label for="pref-grid">Rejilla</label><select id="pref-grid" class="sel"><option value="0.1">0.1 dm</option><option value="0.25">0.25 dm</option><option value="0.5">0.5 dm</option><option value="1">1 dm</option></select><span></span></div>
+      <div class="row"><label for="pref-grid">Rejilla</label><select id="pref-grid" class="sel"><option value="0.1">10 mm</option><option value="0.25">25 mm</option><option value="0.5">50 mm</option><option value="1">100 mm (1 celda de la rejilla)</option></select><span></span></div>
+      <div class="row"><label for="pref-grid-op">Intensidad de la rejilla</label><input type="range" id="pref-grid-op" min="0.05" max="0.5" step="0.005"><output id="pref-grid-op-o"></output></div>
       <div class="row"><label for="pref-div">Divisiones de curva</label><input id="pref-div" type="number" min="0" max="100" step="1" class="sel"><span></span></div>
       <p class="muted">0 = deslizar por la curva. 2 = pegar al punto medio, 3 = a los tercios… (en curvas y en cada borde de superficie).</p>
       <label class="check"><input type="checkbox" id="pref-center"> Snap al centro de las curvas</label>

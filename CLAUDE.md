@@ -470,6 +470,17 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - (v0.20.2) La rejilla aparece sola en la vista ortogonal de cada cara (updateDrawGrids): frente/atrás = XY, derecha/izquierda = YZ,
   arriba/abajo = suelo XZ; en vista libre solo el suelo. gridUser = Mostrar › Rejilla. Las tres rejillas comparten estilo y tema.
   Prueba: forja/tgrid.mjs.
+- (v0.20.3) Raya negra dentro de los objetos al mover la vista: era el AO. El pase de normales dibujaba las líneas gruesas de Forja
+  (Line2 / LineSegments2 son mallas) con el material de normales, y salían como planos sueltos en el origen. src/ao.js sobrescribe
+  overrideVisibility para esconder Line2, LineSegments2, sprites y mallas sin colorWrite. Prueba: forja/tstain.mjs (con y sin AO).
+- (v0.20.3) Rejilla: opacidad 0,119 (+15 % más) y slider en Preferencias › Snap (prefs.gridOp). Cada celda = 1 dm = 100 × 100 mm;
+  el snap a la rejilla es de 100 mm por omisión (opciones 10 / 25 / 50 / 100 mm); la barra de estado dice "CELDA 100 MM".
+- (v0.20.3) Curvas: grado 3 por omisión y configurable en la ventana de la herramienta Curva (toolDef.curveDeg, curveSpans; draftCurveData).
+  Spans "Auto" = cada punto es un CV, y con menos de grado + 1 puntos se eleva el grado (rebuildCurve, sin cambiar la forma) para tener
+  1 span completo; con Spans fijo se reconstruye a ese número. "Nada" (pickNothing) termina la curva en dibujo (≥ 2 puntos) y sale
+  de la herramienta. El snap al dibujar (rejilla, punto, curva, superficie) está probado: forja/tcurve.mjs.
+- (v0.20.3) Deshacer / rehacer conservan lo activo: captureActive() / reactivate() vuelven a elegir objetos, CVs y la edición de
+  pivote por id y clave de CV. Prueba: forja/tundo.mjs.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso
