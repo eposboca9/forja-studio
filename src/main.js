@@ -2007,6 +2007,7 @@ async function flipPanel(l) {
     { duration: 480, easing: 'cubic-bezier(.2,.6,.3,1)' });
 }
 function setLayout(l) {
+  if (layout === 'forge' && l !== 'forge') forgeApply(true);   // lo hecho en Forge pasa a los demás módulos
   layout = l;
   if (l === 'forge') ensureForge();
   gizmo.enabled = l !== 'forge';
@@ -2828,7 +2829,7 @@ const PUCK_CMDS = {
   // comunes
   undo: { k: 'undo', label: 'Deshacer', key: 'Ctrl+Z', run: undo, sub: [{ k: 'redo', label: 'Rehacer', run: redo }] },
   forgeIn: { k: 'object', label: 'Usar selección', run: () => forgeFromForja() },
-  forgeOut: { k: 'dup', label: 'Crear objeto', run: () => $('bf-pushForja').click() },
+  forgeOut: { k: 'dup', label: 'Aplicar', run: () => forgeApply() },
   forgeExport: { k: 'object', label: 'Exportar', run: () => $('bf-exportBtn').click() },
   forgeFrame: { k: 'frame', label: 'Encuadrar', run: () => forge?.resetCamera() },
   forgeRender: { k: 'sun', label: 'Render', run: () => $('bf-ptTool').click() },
@@ -4633,7 +4634,7 @@ function renderForgePane(p) {
   const hid = [];
   objects.forEach((o) => {
     if (o.kind !== 'curve') o.parts.mesh.material = materials[o.mat];
-    if (forgeHidesSource() && forgeSource.ids.includes(o.id)) for (const part of Object.values(o.parts)) if (part.visible) { part.visible = false; hid.push(part); }
+    if (forgeHidesSource() && (forgeSource.ids.includes(o.id) || o.id === forgeSource.resultId)) for (const part of Object.values(o.parts)) if (part.visible) { part.visible = false; hid.push(part); }
   });
   forgeRoot.visible = forgePiece();
   // en Forge no se mueve nada de Forja: sin manipulador ni marcas de pivote
@@ -4653,7 +4654,7 @@ async function forgeFromForja() {
   const list = selObjs.filter((o) => o.visible && o.kind !== 'curve');
   if (!list.length) return toast('Elige con clic un objeto o una superficie de la escena para trabajar sobre él.');
   const key = list.map((x) => x.id).join(',');
-  if (forgeSource?.key === key) return;
+  if (forgeSource?.key === key || (list.length === 1 && list[0].id === forgeSource?.resultId)) return;
   const api = await ensureForge();
   if (!api) return;
   const o = { unit: 'mm', zUp: true }, nurbs = list.filter((x) => x.kind === 'surface');
@@ -4679,7 +4680,52 @@ function forgeSelectionChanged() {
   forgePickT = setTimeout(forgeFromForja, 350);
 }
 $('bf-pullForja').addEventListener('click', forgeFromForja);
-$('bf-pushForja').addEventListener('click', () => { forgeToScene = true; $('bf-exportBtn').click(); });
+$('bf-pushForja').addEventListener('click', () => forgeApply());
+// Aplicar: el patrón de Forge se hornea en geometría real y entra en la escena en el lugar de la pieza. El resultado
+// sustituye a los objetos de origen (se ocultan, Ctrl+Z lo deshace) y se ve en Modelado, Visu e IA. Volver a aplicar
+// sobre la misma pieza actualiza el mismo objeto. Al salir de Forge se aplica solo si el patrón cambió.
+let forgeApplying = false;
+async function forgeApply(auto = false) {
+  if (forgeApplying) return;
+  if (!forgePiece()) { if (!auto) toast('Primero elige con clic el objeto o la superficie en la que quieres el patrón.'); return; }
+  const src = forgeSource;
+  // en modo NURBS el patrón elegido es una vista previa hasta cortarlo: se corta ahora (booleanas exactas)
+  if (forge.pendingCut()) {
+    forgeApplying = true;
+    if (auto) toast('Cortando el patrón NURBS de Forge…');
+    try { await forge.applyCut(); } finally { forgeApplying = false; }
+    if (forgeSource !== src) return;
+  }
+  const stamp = forge.patternStamp();
+  if (!stamp) { if (!auto) toast('No hay ningún patrón activo que aplicar: enciende una capa, un logo o un corte NURBS.'); return; }
+  if (auto && stamp === src.applied) return;
+  forgeApplying = true;
+  if (auto) toast('Aplicando el patrón de Forge a la escena…');
+  try {
+    const g = await forge.resultGeometry();
+    if (!g || forgeSource !== src) return;
+    placeForge(); forgeRoot.updateMatrixWorld(true);
+    g.applyMatrix4(forgeRoot.matrixWorld);
+    if (!g.attributes.normal) g.computeVertexNormals();
+    checkpoint();
+    const old = byId(src.resultId), srcObjs = src.ids.map(byId).filter(Boolean);
+    const layer = activeLayer;
+    if (srcObjs[0]) activeLayer = srcObjs[0].layer;
+    const base = srcObjs.length === 1 ? srcObjs[0].name : 'Pieza';
+    const obj = addMesh(g, `${base} · patrón`);
+    activeLayer = layer;
+    obj.mat = old?.mat || srcObjs[0]?.mat || obj.mat;
+    if (old) { obj.name = old.name; obj.group = old.group; removeObject(old); }
+    obj.parts.mesh.material = materials[obj.mat];
+    srcObjs.forEach((o) => { o.visible = false; applyVisibility(o); });
+    src.resultId = obj.id; src.applied = stamp;
+    applySelection([obj], 'replace');   // lo oculto deja de estar elegido
+    refreshOutliner();
+    toast(`${obj.name}: el patrón ya es geometría 3D (${Math.round((g.index ? g.index.count : g.attributes.position.count) / 3).toLocaleString('es')} triángulos) y se ve en todos los módulos`);
+  } catch (e) {
+    console.error(e); toast(`No se pudo aplicar el patrón: ${e.message || e}`);
+  } finally { forgeApplying = false; }
+}
 function renderFrame(now) {
   if (layout === 'forge' && !carousel && forgeCtx.controls.autoRotate) tumble(1.2, 0);   // "Girar" de Forge
   stepCamAnim(now);

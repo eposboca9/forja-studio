@@ -383,6 +383,17 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   scratchpad/npmcdn). Resultado: arranca (cubo de ladrillos, 580.800 triángulos, hermética); el vaso de Forja llega como 4 caras
   NURBS, sólido cerrado; "Enviar a Forja" deja el STL horneado (841.208 triángulos) en la escena.
 
+## Hecho (v0.18.3) — lo de Forge pasa a la escena
+
+- Pedido del usuario: lo creado en un módulo se ve en los demás; el patrón de Forge debe ser geometría 3D real.
+  "Aplicar a la escena" (bf-pushForja, Puck forgeOut) = forgeApply(): si hay vista previa NURBS sin cortar (forge.pendingCut,
+  cadAppliedKey) corta primero (cadApply); luego forge.resultGeometry() (relieve horneado + logos con Manifold, o el teselado
+  del B-rep en modo NURBS) en coordenadas de forgeRoot → matrixWorld → addMesh "<nombre> · patrón" en la capa del origen.
+  Los objetos de origen se ocultan (Ctrl+Z deshace). Volver a aplicar sobre la misma pieza reemplaza el resultado
+  (forgeSource.resultId). Al salir de Forge (setLayout) se aplica solo si patternStamp() cambió (forgeSource.applied).
+  En la vista de Forge el resultado se oculta mientras se ve la pieza; elegirlo no cambia la pieza.
+- Prueba: scratchpad forja/tapply.mjs dark cad|mesh.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

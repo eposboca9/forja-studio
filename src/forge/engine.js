@@ -2132,6 +2132,71 @@ async function computeFinal(gen) {
   }
 }
 
+/* Pieza resultante (relieve horneado, logos y cortes NURBS) en coordenadas del grupo de Forge,
+   para que Forja la ponga en su escena como un objeto de verdad. */
+function patternStamp() {
+  const on = layers.filter((L) => L.on).map((L) => JSON.stringify({ ...L, image: L.image ? String(L.image.src || L.image).length : 0, curve: L.curve.map((v) => v.toFixed(3)).join() }));
+  const walls = state.shape === 'cad' && cad ? cad.walls.length + ':' + (cad.history?.length || 0) : 0;
+  if (!on.length && !walls && !logoGroup.children.length) return '';
+  return on.join('|') + '#' + walls + '#' + logoGroup.children.length + '#' + state.regionOps.length + '#' + state.refine;
+}
+async function resultGeometry() {
+  if (!mesh) return null;
+  const out = new THREE.BufferGeometry();
+  if (state.shape === 'cad') {
+    const g = mesh.geometry;
+    out.setAttribute('position', g.attributes.position.clone());
+    if (g.attributes.normal) out.setAttribute('normal', g.attributes.normal.clone());
+    if (g.index) out.setIndex(g.index.clone());
+    out.translate(mesh.position.x, mesh.position.y, mesh.position.z);
+    return out;
+  }
+  let g = mesh.geometry;
+  if (state.refine && viewState !== 'refined') {
+    showLoader('Aplicando a la escena', 'Refinando contornos', 0);
+    await nextFrame();
+    g = await refineGeometry(baseGeo, (p, s) => setStep(s, p * 0.6));
+    setViewGeometry(g, 'refined');
+  } else if (!state.refine) g = baseGeo;
+  showLoader('Aplicando a la escena', 'Horneando el relieve en la malla', 0.65);
+  await nextFrame();
+  try {
+    const ev = makeEvaluator();
+    const P = g.attributes.position.array, D = g.attributes.dispDir.array, A = g.attributes.aDisp.array, S = g.attributes.aSel.array;
+    const pos = new Float32Array(P.length);
+    for (let i = 0; i < P.length / 3; i++) {
+      const h = ev(P[i * 3], P[i * 3 + 1], P[i * 3 + 2], D[i * 3], D[i * 3 + 1], D[i * 3 + 2], A[i * 2], A[i * 2 + 1], S[i * 3], S[i * 3 + 1], S[i * 3 + 2]);
+      pos[i * 3] = P[i * 3] + D[i * 3] * h; pos[i * 3 + 1] = P[i * 3 + 1] + D[i * 3 + 1] * h; pos[i * 3 + 2] = P[i * 3 + 2] + D[i * 3 + 2] * h;
+    }
+    let vp = pos, tv = new Uint32Array(g.index.array);
+    const solids = logoGroup.children.filter((m) => m.geometry && m.geometry.attributes.position.count);
+    const wasm = solids.length ? await getManifold() : null;
+    if (wasm) {
+      setStep('Uniendo logos con booleanas exactas', 0.8);
+      await nextFrame();
+      try {
+        let body = new wasm.Manifold(new wasm.Mesh({ numProp: 3, vertProperties: pos, triVerts: tv }));
+        for (const m of solids) {
+          const gg = new THREE.BufferGeometry();
+          gg.setAttribute('position', m.geometry.attributes.position.clone());
+          const w = mergeVertices(gg, 1e-6);
+          const mm = new wasm.Mesh({ numProp: 3, vertProperties: w.attributes.position.array, triVerts: new Uint32Array(w.index.array) });
+          mm.merge();
+          const so = new wasm.Manifold(mm);
+          const nb = m.userData.engrave ? body.subtract(so) : body.add(so);
+          body.delete(); so.delete(); gg.dispose(); w.dispose(); body = nb;
+        }
+        const rm = body.getMesh(); body.delete();
+        vp = new Float32Array(rm.vertProperties); tv = new Uint32Array(rm.triVerts);
+      } catch (e) { console.warn('Booleana de logos fallida; se aplica solo el relieve', e); }
+    }
+    out.setAttribute('position', new THREE.BufferAttribute(vp, 3));
+    out.setIndex(new THREE.BufferAttribute(tv, 1));
+    out.translate(mesh.position.x, mesh.position.y, mesh.position.z);
+    return out;
+  } finally { hideLoader(); }
+}
+
 /* Manifold (booleanas exactas, la misma librería que usa Blender para sus booleanas). El WASM va incrustado. */
 let manifoldP = null;
 function getManifold() {
@@ -4705,8 +4770,13 @@ function renderCadCount(L) {
 }
 
 /* ---------- Aplicar (booleanas exactas) ---------- */
+// clave de lo que muestra la vista previa NURBS: si ya se cortó con esta misma configuración no se repite
+let cadAppliedKey = null;
+const cadKey = () => JSON.stringify(cadP) + '|' + [...cadSel].sort((a, b) => a - b).join(',');
+const pendingCut = () => state.shape === 'cad' && !!cad && cadSel.size > 0 && cadPreview.children.length > 0 && cadKey() !== cadAppliedKey;
 async function cadApply() {
   if (cadBusy || !cad) return;
+  const key0 = cadKey();
   const L = await cadLayout();
   const isLogo = cadP.shape === 'logo', isObj = cadP.shape === 'object';
   if (!(isLogo ? L.logo : L.holes.length)) { toast('bad', L.msg || 'No hay nada que aplicar.'); return; }
@@ -4755,7 +4825,7 @@ async function cadApply() {
     const info = occInfo(oc, shape);
     if (!info.faces) throw new Error('el resultado quedó vacío');
     cad.history.push({ shape: cad.shape, faceRegion: cad.faceRegion, walls: cad.walls.slice(), info: cad.info });
-    cad.shape = shape; cad.faceRegion = fr; cad.info = info;
+    cad.shape = shape; cad.faceRegion = fr; cad.info = info; cadAppliedKey = key0;
     const label = isLogo ? (mode === 'emboss' ? 'Logo en relieve' : 'Logo') : (mode === 'emboss' ? 'Relieve de ' : '') + CAD_NAMES[cadP.shape];
     cad.walls.push(`${label[0].toUpperCase() + label.slice(1)} ${cad.walls.length + 1}`);
     const secs = (performance.now() - t0) / 1000;
@@ -5095,6 +5165,8 @@ return {
   sizeMm: () => state.sizeMm,
   fromFile: () => state.shape === 'file' || state.shape === 'cad',
   picking: () => !!pickMode,
+  resultGeometry, patternStamp, pendingCut, applyCut: cadApply,
+  _test: { cadSel, cadP, scheduleCadPreview, pickPattern, layers, cadPreview },
   ground, grid,
 };
 }
