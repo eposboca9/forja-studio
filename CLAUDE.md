@@ -328,6 +328,8 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - Snap al dibujar (botones en la barra de dibujo): rejilla (Alt; en perspectiva la del suelo), punto (Ctrl), curva (Ctrl+Alt:
   curvas, aristas y líneas de parche = obj.isoLines, sin lo recortado; prefs.snapIso), superficie (botón o Shift mantenido).
 - Pruebas: scratchpad tcube.mjs (en swiftshader los cuadros son lentos: esperar ~1.5 s tras clic en el cubo).
+- Cubo con el estilo del logo Nodo: trazo de 1 px, aristas que se pasan de largo en las esquinas y, en la esquina delante-abajo-
+  derecha (PLUS_CORNER), las líneas paran antes de un + azul grueso (Sprite, visible cuando esa esquina mira a la cámara). Sin ejes.
 - Cubo solo de líneas (LineSegments2) y nombres sin fondo; un cubo invisible (colorWrite false) tapa lo de atrás y sirve para
   elegir. Color negro/blanco desde .cube-probe (un div sobre el cubo que adaptInk clasifica).
 - Velo "gaussiano" (clase .soft-veil y ::before de toolwin/quickpick): blur 18px + tinte --bg 50 % + máscara = producto de dos

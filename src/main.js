@@ -4306,7 +4306,7 @@ const FACE_LABELS = ['DERECHA', 'IZQUIERDA', 'ARRIBA', 'ABAJO', 'FRENTE', 'ATRÁ
 function faceTex(label) {
   const c = document.createElement('canvas'); c.width = c.height = 128;
   const g = c.getContext('2d');
-  g.fillStyle = '#fff'; g.font = `600 ${label.length > 7 ? 21 : 26}px Outfit, Jost, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = '#fff'; g.font = `500 ${label.length > 7 ? 21 : 26}px Outfit, Jost, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText(label, 64, 66);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   return t;
@@ -4314,8 +4314,33 @@ function faceTex(label) {
 // el cubo invisible solo escribe profundidad (tapa las aristas y nombres de atrás) y sirve para saber qué se toca
 const viewCube = new THREE.Mesh(new THREE.BoxGeometry(0.995, 0.995, 0.995), new THREE.MeshBasicMaterial({ colorWrite: false }));
 const cubeInk = new THREE.Color('#0b0d10');
-const cubeEdges = new LineSegments2(new LineSegmentsGeometry().fromEdgesGeometry(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1))),
-  new LineMaterial({ color: cubeInk, linewidth: 1.4, resolution: new THREE.Vector2(92, 92), toneMapped: false }));
+// Como el logotipo "Nodo": trazo de 1 px, las aristas se pasan de largo en las esquinas (como un dibujo técnico) y en la
+// esquina de delante abajo a la derecha se detienen antes de un + azul grueso.
+const PLUS_CORNER = new THREE.Vector3(0.5, -0.5, 0.5);
+const cubeEdges = (() => {
+  const pos = [], o = 0.2, gap = 0.2;
+  let i = 0;
+  for (const ax of [0, 1, 2]) for (const a of [-0.5, 0.5]) for (const b of [-0.5, 0.5]) {
+    const p0 = new THREE.Vector3(), p1 = new THREE.Vector3(), [u, v] = [0, 1, 2].filter((k) => k !== ax);
+    p0.setComponent(u, a).setComponent(v, b).setComponent(ax, -0.5);
+    p1.copy(p0).setComponent(ax, 0.5);
+    const d = new THREE.Vector3().setComponent(ax, 1), ext = o * (i++ % 3 === 1 ? 0.6 : 1);
+    const end = (p, sgn) => (p.equals(PLUS_CORNER) ? p.clone().addScaledVector(d, -sgn * gap) : p.clone().addScaledVector(d, sgn * ext));
+    const q0 = end(p0, -1), q1 = end(p1, 1);
+    pos.push(q0.x, q0.y, q0.z, q1.x, q1.y, q1.z);
+  }
+  const g = new LineSegmentsGeometry(); g.setPositions(pos);
+  return new LineSegments2(g, new LineMaterial({ color: cubeInk, linewidth: 1, resolution: new THREE.Vector2(92, 92), toneMapped: false }));
+})();
+const cubePlus = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'); g.fillStyle = '#2f7bff';
+  g.fillRect(0, 25, 64, 14); g.fillRect(25, 0, 14, 64);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, toneMapped: false }));
+  sp.position.copy(PLUS_CORNER); sp.scale.setScalar(0.27); sp.renderOrder = 3;
+  return sp;
+})();
 const cubeLabels = FACE_LABELS.map((l, i) => {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(0.92, 0.92), new THREE.MeshBasicMaterial({ map: faceTex(l), color: cubeInk, transparent: true, toneMapped: false }));
   const n = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]][i];
@@ -4329,17 +4354,14 @@ viewCube.renderOrder = 0; cubeEdges.renderOrder = 1; cubeLabels.forEach((m) => (
 const cubeHot = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: '#2f7bff', transparent: true, opacity: 0.32, toneMapped: false, depthTest: false }));
 cubeHot.renderOrder = 2; cubeHot.visible = false;
 // ejes junto a la esquina de atrás abajo a la izquierda: X rojo, Y verde, Z azul
-const cubeAxes = new THREE.AxesHelper(1.25);
-cubeAxes.position.set(-0.5, -0.5, -0.5);
-cubeAxes.material.toneMapped = false;
-cubeScene.add(viewCube, cubeEdges, ...cubeLabels, cubeHot, cubeAxes);
+cubeScene.add(viewCube, cubeEdges, ...cubeLabels, cubeHot, cubePlus);
 // muestra invisible sobre el cubo: adaptInk le pone .ink-dark / .ink-light y de ahí sale el color de las líneas
 const cubeProbe = document.createElement('div');
 cubeProbe.className = 'cube-probe';
 document.body.append(cubeProbe);
 let cubeHover = null, cubeDrag = null, camAnim = null;
 function cubeRect(p) { const r = renderer.domElement.getBoundingClientRect(); return { x: r.left + p.x + p.w - CUBE_PX - CUBE_RIGHT, y: r.top + CUBE_TOP, s: CUBE_PX }; }
-function placeCubeCam() { cubeCam.quaternion.copy(camera.quaternion); cubeCam.position.copy(viewDir()).multiplyScalar(-3.5); cubeCam.updateMatrixWorld(); }
+function placeCubeCam() { cubeCam.quaternion.copy(camera.quaternion); cubeCam.position.copy(viewDir()).multiplyScalar(-4.2); cubeCam.updateMatrixWorld(); }
 // región del cubo bajo el cursor (cara, arista o esquina) como dirección con componentes −1, 0 o 1
 function cubeRegionAt(x, y) {
   if (prefs.viewCube === false || carousel || layout === 'render') return null;
@@ -4387,6 +4409,7 @@ function renderViewCube(p) {
   }
   cubeInk.set(cubeProbe.classList.contains('ink-light') ? '#f4f5f7' : '#0b0d10');
   cubeEdges.material.color.copy(cubeInk);
+  cubePlus.visible = PLUS_CORNER.dot(viewDir()) < 0.15;   // el + solo cuando su esquina mira hacia la cámara
   cubeLabels.forEach((m) => m.material.color.copy(cubeInk));
   renderer.setViewport(x, y, S, S); renderer.setScissor(x, y, S, S);
   renderer.autoClear = false; renderer.clearDepth();
