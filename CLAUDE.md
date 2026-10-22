@@ -338,6 +338,11 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Texto encima con negro/blanco: INK_SEL incluye secciones del panel, filas de la ventana de herramienta y etiquetas del Puck;
   adaptInk mezcla el tinte del velo (data-ink-tint="0.5") con lo que hay detrás. Botones activos (azules) siguen en blanco.
 
+- (v0.17.1) Pedido del usuario: SIN fondo en la ventana de herramienta, la elección rápida, el panel derecho y la ventana de
+  Capas (CSS al final de index.html oculta los velos; panelVeil queda oculto). Solo texto con negro/blanco por fila (INK_SEL:
+  hijos de .panel .sec, filas de .tw-body, cabecera y filas de Capas). El Puck conserva su velo gaussiano.
+  Cubo: se oculta mientras el panel derecho está abierto (panelOpen) y, con el panel fijado, se corre a su izquierda (cubeRight).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

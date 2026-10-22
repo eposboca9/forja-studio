@@ -4360,11 +4360,19 @@ const cubeProbe = document.createElement('div');
 cubeProbe.className = 'cube-probe';
 document.body.append(cubeProbe);
 let cubeHover = null, cubeDrag = null, camAnim = null;
-function cubeRect(p) { const r = renderer.domElement.getBoundingClientRect(); return { x: r.left + p.x + p.w - CUBE_PX - CUBE_RIGHT, y: r.top + CUBE_TOP, s: CUBE_PX }; }
+// con el panel derecho abierto (ya no tiene fondo) el cubo se oculta: quedaría detrás de su texto (el panel se esconde solo)
+// con el panel fijado (chincheta) el cubo se corre a su izquierda
+function panelOpen() { if (pinned) return false; const pr = $('panel').getBoundingClientRect(); return pr.width > 0 && pr.left < innerWidth - 60; }
+function cubeRight(r) {
+  if (!pinned) return CUBE_RIGHT;
+  const pr = $('panel').getBoundingClientRect();
+  return pr.width ? Math.max(CUBE_RIGHT, r.right - pr.left + 14) : CUBE_RIGHT;
+}
+function cubeRect(p) { const r = renderer.domElement.getBoundingClientRect(); return { x: r.left + p.x + p.w - CUBE_PX - cubeRight(r), y: r.top + CUBE_TOP, s: CUBE_PX }; }
 function placeCubeCam() { cubeCam.quaternion.copy(camera.quaternion); cubeCam.position.copy(viewDir()).multiplyScalar(-4.2); cubeCam.updateMatrixWorld(); }
 // región del cubo bajo el cursor (cara, arista o esquina) como dirección con componentes −1, 0 o 1
 function cubeRegionAt(x, y) {
-  if (prefs.viewCube === false || carousel || layout === 'render') return null;
+  if (prefs.viewCube === false || carousel || layout === 'render' || panelOpen()) return null;
   for (const p of panes()) {
     if (p.kind === 'render') continue;
     const c = cubeRect(p);
@@ -4397,8 +4405,8 @@ function stepCamAnim(now) {
   if (t >= 1) { camAnim = null; if (a.ortho) setProjection(true, true); }
 }
 function renderViewCube(p) {
-  if (prefs.viewCube === false || p.kind === 'render') return;
-  const S = CUBE_PX, x = p.x + p.w - S - CUBE_RIGHT, y = p.h - S - CUBE_TOP;
+  if (prefs.viewCube === false || p.kind === 'render' || panelOpen()) return;
+  const S = CUBE_PX, x = p.x + p.w - S - cubeRight(renderer.domElement.getBoundingClientRect()), y = p.h - S - CUBE_TOP;
   placeCubeCam();
   const hv = cubeHover?.pane.x === p.x ? cubeHover.dir : null;
   cubeHot.visible = !!hv;
@@ -4467,7 +4475,7 @@ function updateViewName() {
   if (projBtn.textContent !== t) projBtn.textContent = t;
   projBtn.setAttribute('aria-pressed', String(proj.keep));
   const p = panes().find((x) => x.kind !== 'render');
-  projBtn.hidden = !p || prefs.viewCube === false || !!carousel || layout === 'render';
+  projBtn.hidden = !p || prefs.viewCube === false || !!carousel || layout === 'render' || panelOpen();
   if (p && !projBtn.hidden) {
     const c = cubeRect(p);
     projBtn.style.left = c.x + c.s / 2 + 'px'; projBtn.style.top = c.y + c.s + 4 + 'px';
@@ -4512,7 +4520,7 @@ function updateXfPrompt() {
 // Color del texto de los menús según lo que tiene detrás: se leen los píxeles de la vista bajo cada rótulo
 // (donde no hay objeto se ve el muro) y el texto pasa entero a negro o a blanco.
 let inkT = 0;
-const INK_SEL = '.cube-probe:not([hidden]), .proj-btn, .app .panel .sec, .app .panel .panel-head, #toolwin:not([hidden]) .tw-head, #toolwin:not([hidden]) .tw-row, #toolwin:not([hidden]) .tw-hint, #toolwin:not([hidden]) .tw-group, .puck:not([hidden]) .puck-item span, .puck:not([hidden]) .puck-center, #rel-labels:not([hidden]) .rel-label, .top .brand, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
+const INK_SEL = '.cube-probe:not([hidden]), .proj-btn, .app .panel .sec > *, .app .panel .panel-head, #toolwin:not([hidden]) .tw-head, #toolwin:not([hidden]) .tw-body > *, #quickpick:not([hidden]) > b, #layers-win:not([hidden]) .fw-head, #layers-win:not([hidden]) .ly-head, #layers-win:not([hidden]) .ly-item, #layers-win:not([hidden]) .ol-item, #layers-win:not([hidden]) .fw-body > p, .puck:not([hidden]) .puck-item span, .puck:not([hidden]) .puck-center, #rel-labels:not([hidden]) .rel-label, .top .brand, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
 function adaptInk(now) {
   if (now - inkT < 250) return;
   inkT = now;
@@ -4541,7 +4549,7 @@ function adaptInk(now) {
 }
 // velo desenfocado detrás del panel derecho (sigue al panel mientras entra y sale)
 const panelVeil = document.createElement('div');
-panelVeil.className = 'soft-veil';
+panelVeil.className = 'soft-veil';   // (oculto por CSS: el usuario quiere el panel sin fondo)
 $('panel').before(panelVeil);   // misma capa que el panel, justo detrás
 function placePanelVeil() {
   const r = $('panel').getBoundingClientRect(), on = r.width > 0 && r.left < innerWidth - 4;

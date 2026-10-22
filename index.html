@@ -753,6 +753,12 @@
   .ai-photo button { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; border: 0; background: #2f7bff; color: #fff; font-size: 12px; line-height: 1; cursor: pointer; padding: 0; }
   .ai-log { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); max-height: 220px; overflow-y: auto; }
   .ai-log b { color: var(--fg); font-weight: 500; }
+  /* Sin fondo (pedido del usuario): la ventana de herramienta, el panel derecho y Capas son solo texto sobre la escena;
+     cada fila pasa a negro o blanco según lo que tenga detrás (adaptInk), como el menú de arriba */
+  .toolwin::before, .quickpick::before { display: none; }
+  .soft-veil { display: none !important; }
+  .float-win { background: transparent !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 0 !important; }
+  .panel .sec h2, .panel .muted, .fw-count, .ly-n { color: inherit; }
 </style>
 </head>
 <body>
@@ -859,7 +865,7 @@
     </div>
   </section>
 
-  <aside class="panel" id="panel" aria-label="Propiedades" data-ink-tint="0.5">
+  <aside class="panel" id="panel" aria-label="Propiedades">
     <div class="panel-head">
       <span id="panel-title">Modelado</span>
       <button class="iconbtn" id="pin" aria-pressed="false" title="Panel automático: clic para fijarlo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 5 3 3H7l3-3zM12 15v6"/></svg></button>
@@ -1003,7 +1009,7 @@
     </div>
   </header>
 
-  <div class="toolwin" id="toolwin" data-ink-tint="0.5" hidden role="dialog" aria-label="Opciones de la herramienta">
+  <div class="toolwin" id="toolwin" hidden role="dialog" aria-label="Opciones de la herramienta">
     <div class="tw-head" id="tw-head"><b id="tw-title"></b><button class="tw-x" id="tw-close" title="Cerrar" aria-label="Cerrar">×</button></div>
     <div class="tw-body" id="tw-body"></div>
   </div>
