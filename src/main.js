@@ -566,6 +566,8 @@ function setTheme(t) {
   document.querySelectorAll('[data-theme-btn]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeBtn === t)));
   repaintWall();
   applyTheme3D();
+  const ff = document.getElementById('forge-frame');   // (setTheme corre antes de que exista forgeFrame)
+  if (ff?.src) ff.contentWindow?.postMessage({ type: 'forja:theme', theme: t }, '*');
 }
 document.querySelectorAll('[data-theme-btn]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeBtn)));
 
@@ -1582,6 +1584,8 @@ addEventListener('pointermove', (e) => {
   const busy = e.buttons !== 0;
   // El muro derecho (últimos 56 px) abre la losa; se cierra al alejarse de ella
   const edge = innerWidth - 56;
+  // en Forge el borde derecho abre el panel de Forge (que tiene la información de Forge), no el de Forja
+  if (layout === 'forge' && !forgeFrame.hidden) { if (e.clientX > edge && e.clientY > 58 && e.clientY < innerHeight - 34) forgeFrame.contentWindow?.postMessage({ type: 'forja:panel', show: true }, '*'); return; }
   if (e.clientX > edge && e.clientY > 58 && e.clientY < innerHeight - 34) panel.classList.add('show');
   else if (!busy && panel.classList.contains('show') && e.clientX < edge - panel.offsetWidth - 40) panel.classList.remove('show');
   if (e.clientX < r.left + 64 && e.clientY > r.top && e.clientY < r.bottom) tools.classList.add('show');
@@ -4570,12 +4574,14 @@ let forgeReady = null;
 function updateForgeFrame() {
   const on = layout === 'forge' && !carousel;
   if (on && !forgeFrame.src) {
-    forgeReady = new Promise((res) => forgeFrame.addEventListener('load', res, { once: true }));
+    forgeReady = new Promise((res) => forgeFrame.addEventListener('load', () => { postForgeTheme(); res(); }, { once: true }));
     forgeFrame.src = 'forge/index.html?forja=1';
   }
   if (forgeFrame.hidden === on) { forgeFrame.hidden = !on; document.body.classList.toggle('forge-on', on); }
 }
 $('forge-send').addEventListener('click', () => sendToForge());
+// Forge toma el tema de Forja (claro u oscuro): su lienzo es transparente y deja ver el muro
+function postForgeTheme() { forgeFrame.contentWindow?.postMessage({ type: 'forja:theme', theme }, '*'); }
 async function sendToForge() {
   const list = (selObjs.length ? selObjs : objects).filter((o) => o.visible);
   if (!list.length) return toast('Forge: no hay nada visible que enviar.');
@@ -4595,6 +4601,7 @@ async function sendToForge() {
 addEventListener('message', async (e) => {
   if (e.source !== forgeFrame.contentWindow || !e.data) return;
   const m = e.data;
+  if (m.type === 'forge:request') sendToForge();
   if (m.type === 'forge:key' && m.code === 'KeyV') { if (m.down) holdCarousel(); else releaseCarousel(); }
   if (m.type === 'forge:result') {
     try {
@@ -4621,7 +4628,9 @@ function renderFrame(now) {
   if (relArrows.children.length) scaleRelArrows();
   placeRelLabels();
   renderer.shadowMap.needsUpdate = true;
-  if (carousel) renderCarousel(now); else { panes().forEach(renderPane); panes().forEach(renderViewCube); }
+  if (carousel) renderCarousel(now);
+  else if (!forgeFrame.hidden) { const p = panes()[0]; renderer.setViewport(p.x, 0, p.w, p.h); renderer.setScissor(p.x, 0, p.w, p.h); renderer.clear(); }  // en Forge solo el muro
+  else { panes().forEach(renderPane); panes().forEach(renderViewCube); }
   scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
   // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
   useAspect(dragPane || paneAt(lastPtr.x));

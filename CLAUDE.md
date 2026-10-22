@@ -362,6 +362,16 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   npm (npm pack funciona) desde scratchpad/npmcdn/<pkg>@<ver>/package/... Resultado: el vaso llega a Forge como 4 caras
   NURBS, sólido cerrado, 386.9 mm; un STL devuelto por Forge entra en la escena.
 
+- (v0.18.1) Forge con la interfaz de Forja (pedido del usuario): con FORJA_BRIDGE la página pone html.forja y una hoja
+  <style id="forja-skin">: lienzo 3D transparente (WebGLRenderer alpha, scene.background null) → se ve el muro de Forja (Forja
+  solo hace clear mientras Forge está a la vista); sin fondos ni marcos, letra Jost, acento azul, botones planos como Forja;
+  panel a la derecha que sale al acercar el ratón al borde (también desde la franja de 56 px de Forja: 'forja:panel') y
+  botón Fijar; sección "Forja" con "Traer selección de Forja" ('forge:request'); datos (hud) abajo a la izquierda.
+  Tema: Forja manda 'forja:theme' al cargar y en setTheme (color-scheme del iframe = el de Forja, si no el iframe se pinta opaco).
+  Texto negro/blanco: window.forjaInk lee el lienzo de Forge justo después de composer.render (transparente = muro);
+  se vuelve a medir solo al cambiar tema o al terminar de abrir/cerrar el panel (__forgeDirty). NO forzar cuadros
+  periódicos: en swiftshader cada cuadro de Forge (GTAO) tarda segundos y la página se congela.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

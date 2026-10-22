@@ -880,6 +880,54 @@ input[type=color] { width: 44px; height: 28px; border: 1px solid var(--line); bo
 </div>
 <div id="toast" hidden></div>
 
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&family=Outfit:wght@500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style id="forja-skin">
+/* ===== Piel de Forja: dentro de Forja (módulo Forge) esta app toma la interfaz de Forja =====
+   Sin fondos ni marcos: se ve el muro de Forja detrás (el lienzo 3D es transparente). Letra Jost, acento azul #2f7bff.
+   El texto pasa a negro o blanco según lo que tenga detrás (forjaInk, como adaptInk de Forja). El panel sale por la
+   derecha al acercar el ratón al borde, como el de Forja, y se puede fijar. */
+html.forja { --bg: transparent; --panel: transparent; --panel-solid: transparent; --raise: rgba(127,127,127,.16); --line: rgba(127,127,127,.28);
+  --accent: #2f7bff; --accent-ink: #fff; --accent-wash: rgba(47,123,255,.18);
+  --font-ui: "Jost", "Futura", system-ui, sans-serif; --font-mono: "IBM Plex Mono", ui-monospace, monospace; --r: 0px; }
+html.forja[data-theme="light"] { --fg: #0b0d10; --muted: rgba(11,13,16,.72); --dim: rgba(11,13,16,.55); --toast: rgba(214,212,207,.92); color-scheme: light; }
+html.forja[data-theme="dark"] { --fg: #f4f5f7; --muted: rgba(244,245,247,.74); --dim: rgba(244,245,247,.55); --toast: rgba(30,30,31,.9); color-scheme: dark; }
+html.forja, html.forja body { background: transparent !important; }
+html.forja body { font-family: var(--font-ui); color: var(--fg); }
+html.forja #panel { top: 2px; bottom: 4px; left: auto; right: 0; width: 300px; background: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+  border: 0; border-radius: 0; box-shadow: none; transform: translateX(calc(100% + 30px)); transition: transform .22s cubic-bezier(.2,.7,.2,1); }
+html.forja #panel.show, html.forja.pinned #panel { transform: none; }
+html.forja .brand { border: 0; padding: 10px 12px 10px 16px; }
+html.forja .brand-mark, html.forja .brand p, html.forja .close-sheet, html.forja #sheetToggle { display: none !important; }
+html.forja .brand h1 { font: 400 11px var(--font-ui); letter-spacing: .3em; text-transform: uppercase; }
+html.forja .forja-pin { margin-left: auto; border: 0; background: none; color: var(--fg); font: 500 10px var(--font-ui); letter-spacing: .14em;
+  text-transform: uppercase; cursor: pointer; opacity: .75; padding: 4px 2px; }
+html.forja .forja-pin[aria-pressed="true"] { color: #2f7bff !important; opacity: 1; }
+html.forja details.grp { border: 0; }
+html.forja details.grp > summary { font: 500 10px var(--font-ui); letter-spacing: .22em; color: var(--fg); padding: 12px 16px 8px; }
+html.forja details.grp > summary svg, html.forja .sub-h svg, html.forja .preset svg { color: currentColor !important; }
+html.forja .grp-body { padding: 0 16px 14px; }
+html.forja .sub-h { border-top: 0; color: var(--fg); font: 500 10px var(--font-ui); letter-spacing: .16em; }
+html.forja .seg { background: none; padding: 0; gap: 2px; border-radius: 0; }
+html.forja .seg button { background: var(--raise); color: var(--fg); border-radius: 0; font-family: var(--font-ui); font-weight: 500; }
+html.forja .seg button[aria-pressed="true"] { background: #2f7bff; color: #fff; }
+html.forja :is(.btn, .preset, .mat, .ltabs button, .regions button, textarea, input[type=color], .tex) { border: 0 !important; border-radius: 0 !important; box-shadow: none; }
+html.forja :is(.btn, .preset, .mat, .ltabs button, .regions button, textarea) { background: var(--raise); color: var(--fg); font-family: var(--font-ui); }
+html.forja :is(.btn.primary, .btn.active) { background: #2f7bff !important; color: #fff !important; font-weight: 500; letter-spacing: .06em; }
+html.forja :is(.preset, .mat)[aria-pressed="true"], html.forja .ltabs button[aria-selected="true"], html.forja .regions button[aria-pressed="true"] { background: rgba(47,123,255,.24); }
+html.forja .tex[aria-pressed="true"] { box-shadow: 0 0 0 2px #2f7bff !important; }
+html.forja .ctl-top { font-weight: 400; }
+html.forja input[type=range]::-webkit-slider-thumb { background: #2f7bff; border: 0; box-shadow: none; width: 12px; height: 12px; margin-top: -4px; border-radius: 0; }
+html.forja .switch .knob, html.forja .switch .knob::after { border-radius: 0; }
+html.forja #hud .chip, html.forja #tools .btn { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; border: 0; box-shadow: none; color: var(--fg); }
+html.forja #hud { right: auto; left: 18px; bottom: 10px; align-items: flex-start; }
+html.forja #tools { right: 14px; top: 10px; }
+html.forja #toast { background: var(--toast); border: 0; border-radius: 0; box-shadow: none; color: var(--fg); font-family: var(--font-ui); }
+html.forja #loader { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+html.forja .ld-card { background: var(--toast); border: 0; border-radius: 0; box-shadow: none; }
+html.forja .ink-dark, html.forja .ink-dark * { color: #0b0d10 !important; }
+html.forja .ink-light, html.forja .ink-light * { color: #f4f5f7 !important; }
+html.forja :is(.ink-dark, .ink-light) :is([aria-pressed="true"], .primary, .active) { color: #fff !important; }
+</style>
 <script>
 /* Puente con Forja: esta app vive como módulo "Forge" dentro de Forja (forge/index.html?forja=1).
    - forja:open  → abre la pieza que manda Forja (STEP = modo NURBS exacto, STL = modo malla), como "Subir modelo".
@@ -894,6 +942,59 @@ if (window.FORJA_BRIDGE) {
     input.files = dt.files;
     input.dispatchEvent(new Event('change', { bubbles: true }));
   });
+
+  /* --- piel de Forja: tema, panel que sale por la derecha y texto negro/blanco --- */
+  const root = document.documentElement, panel = document.getElementById('panel');
+  root.classList.add('forja'); root.dataset.theme = 'dark';
+  panel.querySelector('.brand h1').textContent = 'Forge';
+  panel.querySelector('.brand').insertAdjacentHTML('beforeend', '<button class="forja-pin" id="forjaPin" aria-pressed="false" title="Fijar el panel (si no, sale al acercar el ratón al borde derecho)">Fijar</button>');
+  panel.querySelector('.scroll').insertAdjacentHTML('afterbegin', '<details class="grp" open><summary>Forja</summary><div class="grp-body">' +
+    '<button class="btn" id="forjaPull">Traer selección de Forja</button>' +
+    '<p class="hint">Lo que exportes aquí (STL, STEP) vuelve a la escena de Forja.</p></div></details>');
+  document.getElementById('forjaPull').addEventListener('click', () => window.parent.postMessage({ type: 'forge:request' }, '*'));
+  const pin = document.getElementById('forjaPin');
+  pin.addEventListener('click', () => { const on = !root.classList.contains('pinned'); root.classList.toggle('pinned', on); pin.setAttribute('aria-pressed', String(on)); });
+  addEventListener('pointermove', (e) => {
+    if (e.buttons) return;
+    if (e.clientX > innerWidth - 36 && e.clientY > 4) panel.classList.add('show');
+    else if (panel.classList.contains('show') && e.clientX < panel.getBoundingClientRect().left - 60) panel.classList.remove('show');
+  });
+  addEventListener('message', (e) => {
+    if (e.source !== window.parent || !e.data) return;
+    if (e.data.type === 'forja:theme') { root.dataset.theme = e.data.theme; remeasure(); }
+    if (e.data.type === 'forja:panel') panel.classList.toggle('show', !!e.data.show);
+  });
+  // Texto negro o blanco según lo que hay detrás (se lee del lienzo justo después de dibujar; transparente = muro de Forja)
+  const INK = '.brand, details.grp > summary, .grp-body > *, #hud .chip, #tools .btn';
+  let inkT = 0, inkNow = false;
+  window.forjaInk = () => {
+    const now = performance.now();
+    if (!inkNow && now - inkT < 250) return;
+    inkT = now; inkNow = false;
+    const r = window.__forgeRenderer;
+    if (!r) return;
+    const gl = r.getContext(), cv = r.domElement, rc = cv.getBoundingClientRect(), k = cv.width / Math.max(1, rc.width);
+    const bgL = root.dataset.theme === 'light' ? 0.86 : 0.1;
+    for (const el of document.querySelectorAll(INK)) {
+      const b = el.getBoundingClientRect();
+      if (!b.width || !b.height) continue;
+      const x0 = Math.max(0, Math.floor((b.left - rc.left) * k)), x1 = Math.min(cv.width, Math.ceil((b.right - rc.left) * k));
+      let sum = 0, n = 0;
+      for (const f of [0.35, 0.65]) {
+        const y = Math.floor(cv.height - (b.top + b.height * f - rc.top) * k);
+        if (x1 <= x0 || y < 0 || y >= cv.height) continue;
+        const buf = new Uint8Array((x1 - x0) * 4);
+        gl.readPixels(x0, y, x1 - x0, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+        for (let i = 0; i < buf.length; i += 4) { sum += (0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2]) / 255 + (1 - buf[i + 3] / 255) * bgL; n++; }
+      }
+      const L = n ? sum / n : bgL;
+      el.classList.toggle('ink-dark', L > 0.5);
+      el.classList.toggle('ink-light', L <= 0.5);
+    }
+  };
+  // al abrir el panel o pasar el ratón la escena no se redibuja: se vuelve a pedir un cuadro para medir
+  const remeasure = () => { inkNow = true; if (window.__forgeDirty) window.__forgeDirty(); };
+  panel.addEventListener('transitionend', (e) => { if (e.propertyName === 'transform') remeasure(); });
   const typing = (t) => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
   addEventListener('keydown', (e) => { if (e.code === 'KeyV' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !typing(e.target)) window.parent.postMessage({ type: 'forge:key', code: 'KeyV', down: true }, '*'); });
   addEventListener('keyup', (e) => { if (e.code === 'KeyV' && !typing(e.target)) window.parent.postMessage({ type: 'forge:key', code: 'KeyV', down: false }, '*'); });
@@ -960,7 +1061,8 @@ let active = 0;
    ===================================================================== */
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', alpha: !!window.FORJA_BRIDGE });
+  if (window.FORJA_BRIDGE) { renderer.setClearColor(0x000000, 0); window.__forgeRenderer = renderer; }   // dentro de Forja se ve el muro detrás
 } catch (e) {
   $('chipMeshTxt').textContent = 'WebGL no disponible en este navegador';
   throw e;
@@ -2014,7 +2116,7 @@ function buildGroups(g) {
 
 function applyMaterial() {
   const inspect = state.material === 'inspect';
-  scene.background = inspect ? BG_DARK : BG_STUDIO;
+  scene.background = window.FORJA_BRIDGE ? null : inspect ? BG_DARK : BG_STUDIO;
   grid.visible = inspect;
   gtao.enabled = state.ao && !inspect;
   if (mesh) {
@@ -4274,6 +4376,7 @@ $('ptTool').addEventListener('click', togglePT);
 $('ptStop').addEventListener('click', stopPT);
 
 let dirty = true;
+window.__forgeDirty = () => { dirty = true; };   // Forja pide un cuadro para medir el color del texto
 // cualquier edición invalida el render; si el trazado de rayos estaba activo, se vuelve a la vista en tiempo real
 function invalidate() { dirty = true; if (ptActive && !ptBusy) stopPT(); }
 
@@ -6056,7 +6159,7 @@ renderer.setAnimationLoop(() => {
     if ((ptFrame++ & 7) === 0) $('chipPTTxt').textContent = `Trazado de rayos · ${Math.floor(pt.samples)} muestras`;
     return;
   }
-  if (moved || dirty || controls.autoRotate) { composer.render(); dirty = false; }
+  if (moved || dirty || controls.autoRotate) { composer.render(); dirty = false; if (window.forjaInk) window.forjaInk(); }
 });
 await applyPreset(PRESETS[0]);
 document.fonts.ready.then(drawThumbs);
