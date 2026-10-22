@@ -856,6 +856,28 @@
   .bf-ui :is(#bf-shapeSeg, #bf-latticeGrp, #bf-fileRow) { display: none !important; }
   .app[data-forge-piece="0"] .bf-ui details.grp:not(.bf-piece), .app[data-forge-piece="0"] .bf-hud, .app[data-forge-piece="0"] #bf-pushForja,
   .app[data-forge-piece="0"] #bf-resetCam, .app[data-forge-piece="0"] #bf-ptTool, .app[data-forge-piece="0"] #bf-autoRot { display: none !important; }
+  .prefs .row { grid-template-columns: 160px 1fr 44px; }
+  .prefs .row .btn { grid-column: auto; }
+  /* Barra izquierda (solo Crear y Sólidos): iconos y etiquetas centrados en una columna, con aire entre grupos */
+  .tools, .app.auto .tools { align-items: center; gap: 2px; }
+  .tools .tl { width: 100%; text-align: center; white-space: nowrap; margin-top: 16px; padding: 0 0 2px; }
+  .tools .tl:first-child { margin-top: 0; }
+  .tools button { width: 38px; }
+  /* Interruptor claro / oscuro (arriba a la derecha): sin fondo, como el resto de la interfaz */
+  .light-switch { background: none; border: 0; padding: 4px 6px; cursor: pointer; color: inherit; line-height: 0; margin-left: 4px; }
+  .light-switch svg { width: 17px; height: 24px; display: block; }
+  .light-switch .sw-on, .light-switch .sw-off { opacity: .18; transition: opacity .18s; }
+  .light-switch[aria-pressed="true"] .sw-on { opacity: 1; }
+  .light-switch[aria-pressed="false"] .sw-off { opacity: 1; }
+  .light-switch:hover { opacity: .75; }
+  /* Herramientas de selección y transformación: a los lados del cubo de vistas (se colocan cada cuadro junto a él) */
+  .cube-tools { position: fixed; left: 0; top: 0; z-index: 25; pointer-events: none; }
+  .cube-tools[hidden] { display: none; }
+  .ct-col { position: fixed; display: flex; flex-direction: column; gap: 1px; pointer-events: auto; }
+  .ct-col button { width: 34px; height: 34px; display: grid; place-items: center; background: none; border: 0; border-radius: 0; padding: 0; cursor: pointer; color: inherit; opacity: .72; transition: opacity .15s; }
+  .ct-col button svg { width: 19px; height: 19px; stroke-width: 1.5; }
+  .ct-col button:hover { opacity: 1; }
+  .ct-col button[aria-pressed="true"] { opacity: 1; box-shadow: inset 0 -2px 0 #2f7bff; }
 </style>
 </head>
 <body>
@@ -869,7 +891,6 @@
       <button id="t-pivot" aria-pressed="false" title="Editar pivote del objeto (D)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>
       <button id="t-frame" title="Encuadrar selección (F)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><circle cx="12" cy="12" r="2.5"/></svg></button>
       <button id="t-top" title="Vista superior (T)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></svg></button>
-      <hr>
       <span class="tl">CREAR</span>
       <button id="t-curve" aria-pressed="false" title="Dibujar curva NURBS (C)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18C7 4 17 20 21 6"/></svg></button>
       <button id="t-plane" aria-pressed="false" title="Superficie plana: clic para colocarla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16l6-9h12l-6 9z"/></svg></button>
@@ -878,8 +899,8 @@
       <button id="t-revolve" title="Revolución de una curva alrededor del eje Y"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><ellipse cx="12" cy="12" rx="8" ry="3"/><path d="M15 6c2 2 2 9 0 12"/></svg></button>
       <hr>
       <span class="tl">SÓLIDOS</span>
-      <button disabled title="Redondeo / fillet (próxima versión, con OpenCASCADE)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V12a8 8 0 0 1 8-8h8"/></svg></button>
-      <button disabled title="Chaflán (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10l6-6h10"/></svg></button>
+      <button id="t-fillet" title="Redondear aristas (B): clic en una arista y arrastra el punto amarillo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V12a8 8 0 0 1 8-8h8"/></svg></button>
+      <button id="t-chamfer" title="Chaflán de aristas: como Redondear, hacia fuera del punto amarillo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10l6-6h10"/></svg></button>
       <button disabled title="Booleanas (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg></button>
       <div class="eval-a-wrap"><hr><span class="tl">EVALUAR</span><div class="eval-a" id="eval-a"></div></div>
       <div class="eval-c-wrap"><hr><span class="tl">EVALUAR</span><button class="eval-c-btn" id="eval-c-btn" aria-haspopup="true"></button></div>
@@ -1739,9 +1760,17 @@
       <button id="lay-ai" data-layout="ai" aria-pressed="false" title="IA: crea objetos escribiendo lo que quieres (V)">IA</button>
       <button id="lay-forge" data-layout="forge" aria-pressed="false" title="Forge: relieves, patrones y cortes para impresión 3D (V)">Forge</button>
     </div>
-    <span class="tag">v0.11</span>
+    <button class="light-switch" id="theme-switch" aria-pressed="false" aria-label="Fondo claro u oscuro" title="Claro / oscuro">
+      <svg viewBox="0 0 20 28" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="2.5" y="2.5" width="15" height="23" rx="3.5"/><rect class="sw-on" x="5.5" y="5.5" width="9" height="8" rx="1.6" fill="currentColor" stroke="none"/><rect class="sw-off" x="5.5" y="14.5" width="9" height="8" rx="1.6" fill="currentColor" stroke="none"/></svg>
+    </button>
+    <span class="tag">v0.20</span>
     </div>
   </header>
+
+  <div class="cube-tools" id="cube-tools" aria-label="Herramientas de selección y transformación">
+    <div class="ct-col" id="ct-left"></div>
+    <div class="ct-col" id="ct-right"></div>
+  </div>
 
   <div class="toolwin" id="toolwin" hidden role="dialog" aria-label="Opciones de la herramienta">
     <div class="tw-head" id="tw-head"><b id="tw-title"></b><button class="tw-x" id="tw-close" title="Cerrar" aria-label="Cerrar">×</button></div>
@@ -1772,6 +1801,19 @@
       <label class="radio"><input type="radio" name="pref-eval" value="a"> <b>A · Esferas en la barra izquierda</b><span>seis esferas pequeñas bajo las herramientas; el nombre sale al pasar el ratón</span></label>
       <label class="radio"><input type="radio" name="pref-eval" value="b"> <b>B · Miniaturas en el panel derecho</b><span>sección "Evaluación" con una esfera de muestra de cada modo, como la biblioteca de materiales</span></label>
       <label class="radio"><input type="radio" name="pref-eval" value="c"> <b>C · Una sola esfera que se despliega</b><span>la barra izquierda muestra solo el modo actual; al pasar el ratón salen los demás</span></label>
+      <h3>Oclusión ambiental (modos Forja y Arcilla)</h3>
+      <label class="check"><input type="checkbox" id="pref-ao"> Activada (oscurece contactos, uniones y cavidades; se calcula cuando la vista está quieta)</label>
+      <div class="row"><label for="pref-ao-int">Intensidad</label><input type="range" id="pref-ao-int" min="0" max="4" step="0.05"><output id="pref-ao-int-o"></output></div>
+      <div class="row"><label for="pref-ao-rad">Radio</label><input type="range" id="pref-ao-rad" min="0.1" max="2" step="0.05"><output id="pref-ao-rad-o"></output></div>
+      <p class="muted">Intensidad: cuánto se oscurece. Radio: a qué distancia (en dm) una superficie cercana cuenta como oclusión.</p>
+      <h3>Ajuste del modo Forja (se ve en vivo en Modelado)</h3>
+      <div class="row"><label for="fj-base">Claridad de la base</label><input type="range" id="fj-base" min="0" max="3" step="0.05"><output id="fj-base-o"></output></div>
+      <div class="row"><label for="fj-rim">Brillo en los bordes</label><input type="range" id="fj-rim" min="0" max="3" step="0.05"><output id="fj-rim-o"></output></div>
+      <div class="row"><label for="fj-sharp">Nitidez del brillo</label><input type="range" id="fj-sharp" min="0.6" max="8" step="0.1"><output id="fj-sharp-o"></output></div>
+      <div class="row"><label for="fj-blue">Azul de marca</label><input type="range" id="fj-blue" min="0" max="1.5" step="0.05"><output id="fj-blue-o"></output></div>
+      <div class="row"><label for="fj-spec">Brillo puntual</label><input type="range" id="fj-spec" min="0" max="3" step="0.05"><output id="fj-spec-o"></output></div>
+      <div class="row"><button class="btn" id="fj-reset">Restablecer</button><button class="btn" id="fj-copy">Copiar valores</button><span></span></div>
+      <p class="muted">Mueve los controles hasta que se vea como quieres, pulsa "Copiar valores" y pégame el texto: lo dejo como el modo de arranque.</p>
       <h3>Historial de construcción</h3>
       <label class="check"><input type="checkbox" id="pref-histlive"> Actualizar lo que depende mientras arrastras (apagado: al soltar el ratón, más ligero en modelos grandes)</label>
       <p class="muted">Colores: verde = tiene historial · rosa = depende de lo elegido · azul = sin historial.</p>

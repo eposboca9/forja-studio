@@ -73,7 +73,8 @@ const app = $('app');
 
 // ---------- Renderer y escena ----------
 // Lienzo transparente: el muro de hormigón de la página se ve detrás del modelo (una sola imagen)
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
+// sin preserveDrawingBuffer: conservar cada cuadro obliga a copiarlo y frena en muchos portátiles (adaptInk lee los píxeles justo tras dibujar)
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 renderer.setClearColor(0x000000, 0);
 renderer.setPixelRatio(window.__forjaPR || Math.min(Math.max(devicePixelRatio, 1.5), 2));   // window.__forjaPR: solo para pruebas automáticas   // en pantallas de baja densidad se dibuja a 1,5x y se reduce: bordes y líneas más limpios
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -156,6 +157,7 @@ function setProjection(ortho, temp = false) {
 // oclusión ambiental (Arcilla y Forja); se activa en Visualización › Oclusión ambiental
 const ao = createAO(renderer, scene, camera);
 const AO_MODES = new Set(['clay', 'forja']);
+let aoLastKey = '', aoMovedAt = 0;
 const key = new THREE.DirectionalLight(0xffffff, 1.6);
 key.position.set(4, 9, 3);
 key.castShadow = true;
@@ -171,7 +173,7 @@ scene.add(ground);
 const grid = new THREE.GridHelper(30, 30, 0x8a8781, 0xa3a09a);
 grid.position.y = 0.001;
 grid.layers.set(DIAG);
-grid.material.transparent = true; grid.material.opacity = 0.09;
+grid.material.transparent = true; grid.material.opacity = 0.1035;   // +15 % (antes 0,09), en tema claro y oscuro
 scene.add(grid);
 const gridXY = new THREE.GridHelper(30, 30, 0x4a3a22, 0x2a251d);
 gridXY.rotation.x = Math.PI / 2;
@@ -440,7 +442,7 @@ zebraMat.extensions = { derivatives: true };
 // uLink = luz ligada a la cámara: el entorno gira con la vista, como "Link Light to Camera" en Alias.
 const envDiagMat = new THREE.ShaderMaterial({
   side: THREE.DoubleSide,
-  uniforms: { uMode: { value: 1 }, uLink: { value: 1 } },
+  uniforms: { uMode: { value: 1 }, uLink: { value: 1 }, uBase: { value: 1 }, uRim: { value: 1 }, uSharp: { value: 2.6 }, uBlue: { value: 1 }, uSpec: { value: 1 } },
   vertexShader: `
     varying vec3 vWN; varying vec3 vWP;
     void main() {
@@ -450,7 +452,7 @@ const envDiagMat = new THREE.ShaderMaterial({
       gl_Position = projectionMatrix * viewMatrix * wp;
     }`,
   fragmentShader: `
-    uniform int uMode; uniform int uLink;
+    uniform int uMode; uniform int uLink; uniform float uBase, uRim, uSharp, uBlue, uSpec;   // ajuste del modo Forja (Preferencias)
     varying vec3 vWN; varying vec3 vWP;
     vec3 toEnv(vec3 d) { return uLink == 1 ? normalize((viewMatrix * vec4(d, 0.0)).xyz) : d; }
     float box(vec2 p, vec2 c, vec2 h, float soft) {
@@ -495,16 +497,18 @@ const envDiagMat = new THREE.ShaderMaterial({
       } else if (uMode == 5) {
         // FORJA, el modo de la marca: grafito azulado mate que absorbe la luz de frente; solo brilla en ángulos rasantes,
         // frío a un lado y azul Forja (#2f7bff) al otro, con el estudio reflejado nítido sobre bordes y biseles.
-        float graze = pow(1.0 - max(dot(ve, ne), 0.0), 2.6);
+        // uBase = claridad de la base · uRim = fuerza del brillo rasante · uSharp = nitidez (más alto = más estrecho) ·
+        // uBlue = cuánto azul de marca · uSpec = brillo puntual
+        float graze = pow(1.0 - max(dot(ve, ne), 0.0), uSharp);
         float wrap = clamp(dot(ne, L) * 0.5 + 0.5, 0.0, 1.0);
-        vec3 base = vec3(0.105, 0.11, 0.125) * (0.6 + 1.5 * wrap * wrap + 0.5 * dif2) + vec3(0.03, 0.034, 0.045) * hemi;
+        vec3 base = vec3(0.105, 0.11, 0.125) * (0.6 + 1.5 * wrap * wrap + 0.5 * dif2) * uBase + vec3(0.03, 0.034, 0.045) * hemi;
         float below = smoothstep(0.1, -0.7, ne.y);
         base *= 1.0 - 0.55 * below;
         float side = smoothstep(-0.35, 0.55, ne.x);                                   // lado de la pantalla hacia el que mira
-        vec3 rim = mix(vec3(0.92, 0.94, 0.98), vec3(0.18, 0.48, 1.0), smoothstep(0.25, 0.75, side));
+        vec3 rim = mix(vec3(0.92, 0.94, 0.98), vec3(0.18, 0.48, 1.0), smoothstep(0.25, 0.75, side) * uBlue);
         vec3 env = showroom(r);
         float k = graze * (0.35 + 0.65 * fres);
-        col = base + (env * 0.55 + vec3(0.45)) * rim * k * 0.9 * (1.0 - 0.6 * below) + vec3(0.25, 0.36, 0.6) * spec * 0.6;
+        col = base + (env * 0.55 + vec3(0.45)) * rim * k * 0.9 * uRim * (1.0 - 0.6 * below) + vec3(0.25, 0.36, 0.6) * spec * 0.6 * uSpec;
       } else if (uMode == 4) {
         // Arcilla oscura (estilo Plasticity): base mate que absorbe la luz de frente y solo brilla en ángulos rasantes,
         // donde el estudio se refleja nítido y traza el recorrido de la luz sobre bordes y biseles (continuidad G1/G2).
@@ -600,6 +604,7 @@ function applyTheme3D() {
 }
 function setTheme(t) {
   theme = t;
+  $('theme-switch')?.setAttribute('aria-pressed', String(t === 'light'));
   document.documentElement.dataset.theme = t;
   try { localStorage.setItem('forja-theme', t); } catch (e) { /* sin almacenamiento */ }
   document.querySelectorAll('[data-theme-btn]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeBtn === t)));
@@ -607,6 +612,7 @@ function setTheme(t) {
   applyTheme3D();
 }
 document.querySelectorAll('[data-theme-btn]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeBtn)));
+$('theme-switch').addEventListener('click', () => setTheme(theme === 'dark' ? 'light' : 'dark'));
 
 let diagMode = 'forja', layout = 'diag', matKey = 'paint', res = 90, combScale = 0.8;
 
@@ -684,6 +690,7 @@ function addMesh(geometry, base = 'Malla') {
 const pickTarget = (o) => (o.kind === 'curve' ? o.parts.pick : o.parts.mesh);
 
 function removeObject(obj) {
+  sceneChangedAt = performance.now();
   checkpoint();
   if (!restoring) dropRelations(obj.id);
   for (const o of Object.values(obj.parts)) { o.geometry?.dispose(); scene.remove(o); }
@@ -708,7 +715,8 @@ const line2Geo = (pts) => { const g = new LineGeometry(); g.setPositions(pts); r
 // Teselado adaptable: mientras se edita se usa el básico (rápido); cuando se deja de tocar, tras un momento, las superficies y las
 // curvas se vuelven a teselar más finas (silueta, líneas y reflejos nítidos) como hace Plasticity.
 let tessMul = 1, refineT = 0;
-const TESS_HI = 2.2;
+let shadowEvery = false, sceneChangedAt = 0;   // shadowEvery: true = recalcular la sombra en todos los cuadros (solo para medir)
+const TESS_HI = 1.8;
 function scheduleRefine() {
   clearTimeout(refineT);
   refineT = setTimeout(refineTess, 450);
@@ -727,11 +735,13 @@ function refineTess() {
       if (o.kind === 'surface') updateSurface(o); else updateCurve(o);
       applyVisibility(o);
     }
+    sceneChangedAt = performance.now();
     if (list.length && tessMul === TESS_HI) setTimeout(step, 0);
   };
   step();
 }
 function updateObject(obj) {
+  sceneChangedAt = performance.now();
   if (tessMul !== 1) tessMul = 1;
   scheduleRefine();
   if (obj.kind === 'mesh') { applyVisibility(obj); return; }
@@ -919,6 +929,7 @@ function rebuildHandles(obj) {
 }
 
 function applyVisibility(obj) {
+  sceneChangedAt = performance.now();
   const p = obj.parts, vis = obj.visible, sel = selObjs.includes(obj), cvMode = pickMode === 'cv';
   p.handles.visible = p.hull.visible = vis && cvMode && !modelClean && cvTargets.has(obj.id);
   if (obj.kind === 'mesh') {
@@ -1649,7 +1660,8 @@ document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('clic
 const NEAR = 90;
 function revealEdges(x, y) {
   app.classList.toggle('near-top', y < NEAR);
-  app.classList.toggle('near-left', x < NEAR);
+  // barra izquierda: se abre con el ratón a menos de 81 px del borde (10 % menos sensible que los 90 px del resto) y, ya abierta, no se cierra hasta pasar de 90 px
+  app.classList.toggle('near-left', x < (app.classList.contains('near-left') ? NEAR : NEAR * 0.9));
   app.classList.toggle('near-right', x > innerWidth - NEAR || $('panel').classList.contains('show') || pinned);
   app.classList.toggle('near-bottom', y > innerHeight - NEAR * 0.7);
 }
@@ -2203,6 +2215,8 @@ $('comb').addEventListener('input', (e) => {
 $('op-dist').addEventListener('input', (e) => { $('op-dist-o').textContent = (+e.target.value).toFixed(1); });
 
 $('t-select').addEventListener('click', () => setTool('select'));
+$('t-fillet').addEventListener('click', () => startFillet());
+$('t-chamfer').addEventListener('click', async () => { await startFillet(); if (fil) { fil.dist = -Math.abs(fil.dist); filRefresh(); showFilletWin(); } });
 $('t-move').addEventListener('click', () => { setTool('select'); setXform('translate'); });
 $('t-rotate').addEventListener('click', () => { setTool('select'); setXform('rotate'); });
 $('t-scale').addEventListener('click', () => { setTool('select'); setXform('scale'); });
@@ -3365,7 +3379,7 @@ const MENUBAR = [
     { sep: true }, { label: 'Ventana de capas', run: () => (prefs.layersWin?.open === false ? layersWin.show() : layersWin.set({ open: false })), ...chk(() => prefs.layersWin?.open !== false) }]],
   ['Visualización', [
     ...EVAL_MODES.map((m) => ({ label: m.label, key: m.key, run: () => setDiag(m.k), ...chk(() => layout !== 'render' && diagMode === m.k) })),
-    { label: 'Oclusión ambiental', run: () => { prefs.ao = prefs.ao === false; savePrefs(); }, ...chk(() => prefs.ao !== false) },
+    { label: 'Oclusión ambiental', run: () => { prefs.ao = prefs.ao === false; savePrefs(); $('pref-ao').checked = prefs.ao !== false; }, ...chk(() => prefs.ao !== false) },
     { sep: true }, { title: 'Entorno (Visu)' },
     ...[['studio', 'Estudio'], ['sun', 'Exterior'], ['sunset', 'Atardecer'], ['overcast', 'Nublado']].map(([k, l]) => ({ label: l, run: env(k), ...chk(() => envKey === k) }))]],
   ['Animación', [{ label: 'Plato giratorio', soon: true }, { label: 'Línea de tiempo', soon: true }]],
@@ -3453,6 +3467,28 @@ function initPrefs() {
   d.querySelectorAll('[data-ptab]').forEach((b) => b.addEventListener('click', () => openPrefs(b.dataset.ptab)));
   d.querySelectorAll('[name="pref-eval"]').forEach((r) => r.addEventListener('change', () => { prefs.evalUI = r.value; savePrefs(); updateEvalUI(); }));
   $('pref-xform').addEventListener('change', (e) => { prefs.xform = e.target.value; savePrefs(); attachGizmo(); });
+  // oclusión ambiental ajustable (se guarda en las preferencias)
+  // ajuste del modo Forja: sliders en vivo + botón para copiar los valores
+  const FJ = { base: 1, rim: 1, sharp: 2.6, blue: 1, spec: 1, ...(prefs.forjaShader || {}) };
+  const applyFJ = () => { const u = envDiagMat.uniforms; u.uBase.value = FJ.base; u.uRim.value = FJ.rim; u.uSharp.value = FJ.sharp; u.uBlue.value = FJ.blue; u.uSpec.value = FJ.spec; };
+  applyFJ();
+  for (const k of Object.keys(FJ)) {
+    const el = $('fj-' + k); if (!el) continue;
+    el.value = FJ[k]; $('fj-' + k + '-o').textContent = (+FJ[k]).toFixed(2);
+    el.addEventListener('input', () => { FJ[k] = +el.value; $('fj-' + k + '-o').textContent = FJ[k].toFixed(2); prefs.forjaShader = { ...FJ }; savePrefs(); applyFJ(); });
+  }
+  $('fj-reset').addEventListener('click', () => { Object.assign(FJ, { base: 1, rim: 1, sharp: 2.6, blue: 1, spec: 1 }); for (const k of Object.keys(FJ)) { $('fj-' + k).value = FJ[k]; $('fj-' + k + '-o').textContent = FJ[k].toFixed(2); } prefs.forjaShader = { ...FJ }; savePrefs(); applyFJ(); });
+  $('fj-copy').addEventListener('click', async () => {
+    const txt = JSON.stringify({ modo: 'forja', ...FJ, ao: { activa: prefs.ao !== false, intensidad: prefs.aoInt ?? 2.1, radio: prefs.aoRad ?? 0.7 } });
+    try { await navigator.clipboard.writeText(txt); toast('Valores copiados: pégalos en el chat'); } catch (e) { prompt('Copia estos valores:', txt); }
+  });
+  const aoInt = prefs.aoInt ?? 2.1, aoRad = prefs.aoRad ?? 0.7;
+  ao.intensity = aoInt; ao.radius = aoRad;
+  $('pref-ao').checked = prefs.ao !== false; $('pref-ao-int').value = aoInt; $('pref-ao-rad').value = aoRad;
+  $('pref-ao-int-o').textContent = (+aoInt).toFixed(2); $('pref-ao-rad-o').textContent = (+aoRad).toFixed(2);
+  $('pref-ao').addEventListener('change', (e) => { prefs.ao = e.target.checked; savePrefs(); });
+  $('pref-ao-int').addEventListener('input', (e) => { prefs.aoInt = +e.target.value; ao.intensity = +e.target.value; $('pref-ao-int-o').textContent = (+e.target.value).toFixed(2); aoLastKey = ''; savePrefs(); });
+  $('pref-ao-rad').addEventListener('input', (e) => { prefs.aoRad = +e.target.value; ao.radius = +e.target.value; $('pref-ao-rad-o').textContent = (+e.target.value).toFixed(2); aoLastKey = ''; savePrefs(); });
   $('pref-histlive').checked = prefs.histLive !== false;
   $('pref-histlive').addEventListener('change', (e) => { prefs.histLive = e.target.checked; savePrefs(); });
   $('pk-mod').addEventListener('change', renderPuckEditor);
@@ -4399,7 +4435,7 @@ addEventListener('keydown', (e) => {
 // Arriba a la derecha de cada vista. Clic en una cara: vista ortogonal de ese lado (girar la devuelve a perspectiva);
 // clic en una arista o esquina: vista en perspectiva desde ahí. Arrastrar el cubo gira la vista.
 // Debajo, PERSP / ORTO: trabajar siempre en ortogonal o en perspectiva.
-const CUBE_PX = 92, CUBE_TOP = 58, CUBE_RIGHT = 66;   // fuera de la franja derecha que abre el panel
+const CUBE_PX = 92, CUBE_TOP = 58, CUBE_RIGHT = 112;   // la columna de herramientas de la derecha cabe y queda fuera de la franja que abre el panel (56 px)
 const cubeScene = new THREE.Scene();
 const cubeCam = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
 const FACE_LABELS = ['DERECHA', 'IZQUIERDA', 'ARRIBA', 'ABAJO', 'FRENTE', 'ATRÁS'];   // +X −X +Y −Y +Z −Z
@@ -4559,6 +4595,10 @@ addEventListener('pointerup', (e) => {
   goToView(c.h.dir, faces === 1);
 }, true);
 // botón PERSP / ORTO debajo del cubo y nombre de la vista en la barra de estado
+// las herramientas de selección y transformación viven a los lados del cubo de vistas
+const cubeTools = $('cube-tools');
+['t-select', 't-move', 't-rotate', 't-scale'].forEach((id) => $('ct-left').append($(id)));
+['t-pivot', 't-frame', 't-top'].forEach((id) => $('ct-right').append($(id)));
 const projBtn = document.createElement('button');
 projBtn.className = 'proj-btn';
 projBtn.title = 'Perspectiva u ortogonal. Con PERSP, elegir una cara del cubo da una vista ortogonal que vuelve a perspectiva al girarla.';
@@ -4588,6 +4628,13 @@ function updateViewName() {
     Object.assign(cubeProbe.style, { left: c.x + 'px', top: c.y + 'px', width: c.s + 'px', height: c.s + 'px' });
   }
   cubeProbe.hidden = projBtn.hidden;
+  // herramientas a los lados del cubo
+  cubeTools.hidden = projBtn.hidden;
+  if (p && !projBtn.hidden) {
+    const c = cubeRect(p), L = $('ct-left'), R = $('ct-right');
+    L.style.left = c.x - 40 + 'px'; L.style.top = c.y + 'px';
+    R.style.left = c.x + c.s + 6 + 'px'; R.style.top = c.y + 'px';
+  }
 }
 if (prefs.ortho) { proj.keep = true; setProjection(true); }
 
@@ -4613,7 +4660,13 @@ function renderPane(p) {
   camera.layers.set(0);
   if (diag) camera.layers.enable(DIAG);
   renderer.render(scene, camera);
-  if (diag && !carousel && prefs.ao !== false && !window.__forjaNoAO && AO_MODES.has(diagMode)) ao.apply(p.w, p.h);
+  if (diag && !carousel && prefs.ao !== false && !window.__forjaNoAO && AO_MODES.has(diagMode)) {
+    // la oclusión se calcula cuando la vista está quieta (y se reutiliza mientras no cambie la cámara ni la escena)
+    const e = camera.matrixWorld.elements, pe = camera.projectionMatrix.elements;
+    const key = `${p.w}x${p.h}|${e[12].toFixed(4)},${e[13].toFixed(4)},${e[14].toFixed(4)},${e[0].toFixed(4)},${e[1].toFixed(4)},${e[2].toFixed(4)},${e[4].toFixed(4)},${e[5].toFixed(4)},${e[6].toFixed(4)}|${pe[0].toFixed(4)},${pe[5].toFixed(4)}|${sceneChangedAt}|${proj.ortho}`;
+    if (key !== aoLastKey) { aoLastKey = key; aoMovedAt = performance.now(); }
+    ao.apply(p.w, p.h, key, performance.now() - aoMovedAt < 140 || !!gizmoDrag || !!navDrag);
+  }
 }
 // aristas vivas de una malla (ángulo > 30°) para el modo Malla; se recalculan si la malla se movió
 function meshFeatures(o, show) {
@@ -4645,9 +4698,9 @@ function updateXfPrompt() {
 // Color del texto de los menús según lo que tiene detrás: se leen los píxeles de la vista bajo cada rótulo
 // (donde no hay objeto se ve el muro) y el texto pasa entero a negro o a blanco.
 let inkT = 0;
-const INK_SEL = '.cube-probe:not([hidden]), .proj-btn, .app .panel .sec > *, .app .panel .panel-head, .app[data-layout-now="forge"] .panel .bf-ui details.grp > summary, .app[data-layout-now="forge"] .panel .bf-ui .grp-body > *, .app[data-layout-now="forge"] .bf-hud .chip:not([hidden]), .app[data-layout-now="forge"] .bf-loader:not([hidden]), #toolwin:not([hidden]) .tw-head, #toolwin:not([hidden]) .tw-body > *, #quickpick:not([hidden]) > b, #layers-win:not([hidden]) .fw-head, #layers-win:not([hidden]) .ly-head, #layers-win:not([hidden]) .ly-item, #layers-win:not([hidden]) .ol-item, #layers-win:not([hidden]) .fw-body > p, .puck:not([hidden]) .puck-item span, .puck:not([hidden]) .puck-center, #rel-labels:not([hidden]) .rel-label, .top .brand, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
+const INK_SEL = '.cube-probe:not([hidden]), .proj-btn, .app .panel .sec > *, .app .panel .panel-head, .app[data-layout-now="forge"] .panel .bf-ui details.grp > summary, .app[data-layout-now="forge"] .panel .bf-ui .grp-body > *, .app[data-layout-now="forge"] .bf-hud .chip:not([hidden]), .app[data-layout-now="forge"] .bf-loader:not([hidden]), #toolwin:not([hidden]) .tw-head, #toolwin:not([hidden]) .tw-body > *, #quickpick:not([hidden]) > b, #layers-win:not([hidden]) .fw-head, #layers-win:not([hidden]) .ly-head, #layers-win:not([hidden]) .ly-item, #layers-win:not([hidden]) .ol-item, #layers-win:not([hidden]) .fw-body > p, .puck:not([hidden]) .puck-item span, .puck:not([hidden]) .puck-center, #rel-labels:not([hidden]) .rel-label, .top .brand, .top .light-switch, .cube-tools .ct-col button, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
 function adaptInk(now) {
-  if (now - inkT < 250) return;
+  if (now - inkT < 400) return;
   inkT = now;
   const cv = renderer.domElement, gl = renderer.getContext(), r = cv.getBoundingClientRect(), k = cv.width / Math.max(1, r.width);
   const bgL = theme === 'light' ? 0.86 : 0.1;
@@ -5114,14 +5167,21 @@ function renderFrame(now) {
   scaleHandles();
   if (relArrows.children.length) scaleRelArrows();
   placeRelLabels();
-  renderer.shadowMap.needsUpdate = true;
+  // la sombra solo cambia si cambia la escena (no al mover la cámara): se recalcula si algo cambió hace poco, si se arrastra el gizmo,
+  // y siempre en Forge y durante el carrusel (sus objetos cambian por dentro)
+  if (gizmoDrag) sceneChangedAt = performance.now();
+  if (shadowEvery || layout === 'forge' || carousel || performance.now() - sceneChangedAt < 700) renderer.shadowMap.needsUpdate = true;
   if (carousel) renderCarousel(now);
   else { panes().forEach(renderPane); panes().forEach(renderViewCube); }
   scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
   // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
   useAspect(dragPane || paneAt(lastPtr.x));
-  adaptInk(now);
+  // el color del texto (negro/blanco) se mide con la vista quieta: cada lectura de píxeles obliga a la tarjeta gráfica a esperar
+  { const e = camera.matrixWorld.elements, k = `${e[12].toFixed(3)},${e[13].toFixed(3)},${e[14].toFixed(3)},${e[0].toFixed(3)},${e[2].toFixed(3)},${e[6].toFixed(3)}`;
+    if (k !== camInkKey) { camInkKey = k; camMovedAt = now; } }
+  if (!navDrag && !gizmoDrag && !carousel && now - camMovedAt > 160) adaptInk(now);
 }
+let camInkKey = '', camMovedAt = 0;
 
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
@@ -5179,7 +5239,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

@@ -453,6 +453,20 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   alphaToCoverage en LineMaterial y pixelRatio mínimo 1,5 (supersampling en pantallas de baja densidad).
 - Pruebas: forja/tline.mjs (captura a doble densidad), tao.mjs / tao2.mjs (AO con y sin), tclay.mjs, ttess.mjs. En swiftshader con
   pixelRatio 1,5–2 + AO la página tarda en arrancar: subir los timeouts de las pruebas (240 s).
+- (v0.20.1) Rendimiento (el usuario: "muy lento, solo con mover la vista"): el AO costaba ~6x el resto del cuadro. Ahora: se calcula a
+  media resolución con 8 muestras, SOLO con la vista quieta (>140 ms sin cambios; la clave = cámara + sceneChangedAt) y se reutiliza
+  mientras no cambie (solo la mezcla, barata); la sombra solo se recalcula si cambió la escena (sceneChangedAt, gizmoDrag, Forge,
+  carrusel); adaptInk (lectura de píxeles) solo con la vista quieta y cada 400 ms; renderer sin preserveDrawingBuffer; TESS_HI 1,8.
+  sceneChangedAt se actualiza en updateObject / applyVisibility / removeObject: cualquier cambio nuevo de escena debe pasar por ellos.
+  Banderas solo para pruebas: window.__forjaPR (pixelRatio) y window.__forjaNoAO. Medición: forja/tperf.mjs.
+- (v0.20.1) Interfaz: interruptor claro/oscuro arriba a la derecha (#theme-switch, estilo interruptor de luz, sin fondo);
+  herramientas de selección y transformación (select, mover, rotar, escalar | pivote, encuadrar, vista superior) a los lados del cubo
+  (#cube-tools, columnas #ct-left / #ct-right colocadas cada cuadro junto al cubo; CUBE_RIGHT = 112); la barra izquierda solo tiene
+  Crear y Sólidos (redondeo y chaflán ya activos, t-fillet / t-chamfer); rejilla +15 % (opacidad 0,1035); la barra izquierda se abre
+  a 81 px del borde (NEAR·0,9; ya abierta aguanta hasta 90).
+- (v0.20.1) Preferencias › Interfaz: Oclusión ambiental (activar, intensidad prefs.aoInt, radio prefs.aoRad) y "Ajuste del modo
+  Forja" (uBase, uRim, uSharp, uBlue, uSpec de envDiagMat, prefs.forjaShader) con "Copiar valores": el usuario los ajusta en vivo y
+  pega el JSON para dejarlos como valores de arranque.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso
