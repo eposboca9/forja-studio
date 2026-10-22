@@ -32,6 +32,8 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - `src/logo.js`: logotipo Nodo.
 - `src/freeform.js`: Freeform Blend / Skin por estaciones, curvas sobre superficie (proyectar), recortes (trimGeometry) y Extender. Pura matemática.
 - `src/history.js`: historial de construcción (Align G0–G3, Blend G1/G2, Offset, Simetría, diagnóstico de unión). Pura matemática.
+- `forge/index.html` + `forge/occ/replicad_single.wasm`: app BumpForge ("Forge") del usuario, copiada de su artifact
+  https://claude.ai/artifact/S7MagYHBjK4qJ9bKmJjo3y. Es el cuarto módulo del carrusel (iframe). Solo se le añadió el puente con Forja.
 - `src/ai.js`: módulo IA: generadores paramétricos (tornillo ISO con rosca, tuerca, arandela, mesa, silla) y parsePrompt (español).
 - `docs/capturas/`: capturas de pantalla de cada versión.
 - `docs/alias-referencia.md`: atajos y comportamiento de Alias (de la hoja oficial que pasó el usuario). Consúltalo.
@@ -342,6 +344,23 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Capas (CSS al final de index.html oculta los velos; panelVeil queda oculto). Solo texto con negro/blanco por fila (INK_SEL:
   hijos de .panel .sec, filas de .tw-body, cabecera y filas de Capas). El Puck conserva su velo gaussiano.
   Cubo: se oculta mientras el panel derecho está abierto (panelOpen) y, con el panel fijado, se corre a su izquierda (cubeRight).
+
+## Hecho (v0.18) — módulo FORGE (cuarto módulo del carrusel)
+
+- RING = diag, render, ai, forge (RING_NAMES / MODULE_TITLES / PUCK_MODULES / CMD_MODS / PUCK_DEFAULT con 'forge'); botón
+  FORGE en la cabecera, menús Vistas y de visualización. layout 'forge' dibuja la escena como diag durante el giro; al
+  terminar, #forge-frame (iframe forge/index.html?forja=1, se carga la primera vez) cubre la vista: width calc(100vw − 56px)
+  y height calc(100vh − 86px) (un iframe NO se estira con top/left/right/bottom). body.forge-on oculta Capas, ventana de
+  herramienta, etiquetas y cubo.
+- Puente (postMessage): Forja → Forge {type 'forja:open', name, bytes}: sendToForge() manda la selección (o todo lo visible)
+  como STEP mm Z arriba si son superficies NURBS (Forge las abre en su modo NURBS exacto con OpenCascade y las cose en sólido)
+  o STL si hay mallas; en Forge se mete en #modelFile con DataTransfer y se dispara 'change'. Forge → Forja: con
+  window.FORJA_BRIDGE, deliver() manda {type 'forge:result', name, bytes} y Forja hace importFile (STL entra como malla; STEP
+  pasa por occt-import-js). V dentro de Forge reenvía {type 'forge:key'} para el carrusel. Panel derecho: sección Forge con
+  "Enviar selección a Forge"; Puck de Forge: A Forge, Encuadrar, Deshacer, Capas.
+- Prueba: scratchpad forja/tforge.mjs. Aquí jsdelivr y cdnjs están bloqueados (CONNECT 403): la prueba sirve los paquetes de
+  npm (npm pack funciona) desde scratchpad/npmcdn/<pkg>@<ver>/package/... Resultado: el vaso llega a Forge como 4 caras
+  NURBS, sólido cerrado, 386.9 mm; un STL devuelto por Forge entra en la escena.
 
 ## Siguiente paso
 

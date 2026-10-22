@@ -1829,8 +1829,8 @@ const LAYOUTS = ['split', 'diag', 'render'];
 // vista un poco elevada (se ven todos los módulos), el anillo gira hasta dejar delante el módulo nuevo y la cámara vuelve a bajar a la vista de trabajo.
 let carousel = null;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
-const RING = ['diag', 'render', 'ai'];
-const RING_NAMES = { diag: 'MODELADO', render: 'VISU', ai: 'IA' };
+const RING = ['diag', 'render', 'ai', 'forge'];
+const RING_NAMES = { diag: 'MODELADO', render: 'VISU', ai: 'IA', forge: 'FORGE' };
 // Etiquetas de cada módulo, flotando sobre su modelo durante el giro (la del módulo activo, más grande y en azul)
 const ringLabels = document.createElement('div');
 ringLabels.className = 'ring-labels';
@@ -1987,7 +1987,7 @@ function renderCarousel(now) {
 }
 let bgFadeT0 = -1e9;
 // El panel derecho cambia de módulo girando como una placa
-const MODULE_TITLES = { diag: 'Modelado', render: 'Visu', ai: 'IA', split: 'Modelado + Visu' };
+const MODULE_TITLES = { diag: 'Modelado', render: 'Visu', ai: 'IA', forge: 'Forge', split: 'Modelado + Visu' };
 function showModule(l) {
   document.querySelectorAll('#panel-body [data-module]').forEach((sec) => {
     const m = sec.dataset.module;
@@ -1998,7 +1998,7 @@ function showModule(l) {
 async function flipPanel(l) {
   const body = $('panel-body');
   if (reduceMotion.matches || !body.animate) { showModule(l); return; }
-  const ORDER = ['diag', 'render', 'ai'], dir = ORDER.indexOf(l) > ORDER.indexOf(layout) ? 1 : -1;
+  const ORDER = ['diag', 'render', 'ai', 'forge'], dir = ORDER.indexOf(l) > ORDER.indexOf(layout) ? 1 : -1;
   await body.animate([{ transform: 'perspective(900px) rotateY(0deg)', opacity: 1 }, { transform: `perspective(900px) rotateY(${-90 * dir}deg)`, opacity: 0 }],
     { duration: 380, easing: 'cubic-bezier(.55,0,.8,.4)' }).finished;
   showModule(l);
@@ -2012,12 +2012,12 @@ function setLayout(l) {
   $('pane-diag').hidden = l === 'render';
   $('pane-render').hidden = l !== 'render' && l !== 'split';
   $('pane-diag').className = 'pane left' + (l !== 'split' ? ' full' : '');
-  $('pane-diag').querySelector('.pane-title b').textContent = l === 'ai' ? 'IA' : 'MODELADO';
+  $('pane-diag').querySelector('.pane-title b').textContent = l === 'ai' ? 'IA' : l === 'forge' ? 'FORGE' : 'MODELADO';
   $('pane-render').className = 'pane right' + (l === 'render' ? ' full' : '');
   if (!carousel) showModule(l);
   resize();
 }
-const cycleLayout = () => switchLayout({ diag: 'render', render: 'ai', ai: 'diag', split: 'diag' }[layout]);
+const cycleLayout = () => switchLayout({ diag: 'render', render: 'ai', ai: 'forge', forge: 'diag', split: 'diag' }[layout]);
 // V: mantener para ver todos los módulos y elegir uno con el ratón; soltar sin elegir = cancelar
 addEventListener('keydown', (e) => {
   if (e.code !== 'KeyV' || e.repeat || e.altKey || e.ctrlKey || e.metaKey || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
@@ -2824,11 +2824,12 @@ const PUCK_CMDS = {
     { k: 'cube', label: 'Silla', run: () => runAI('una silla') }, { k: 'cube', label: 'Taza', run: () => runAI('una taza') }, { k: 'cube', label: 'Botella', run: () => runAI('una botella') }] },
   // comunes
   undo: { k: 'undo', label: 'Deshacer', key: 'Ctrl+Z', run: undo, sub: [{ k: 'redo', label: 'Rehacer', run: redo }] },
+  forgeSend: { k: 'object', label: 'A Forge', run: () => sendToForge() },
   frame: { k: 'frame', label: 'Encuadrar', key: 'F', run: frameSelection, sub: [{ k: 'frame', label: 'Todo', run: () => frameObjects([]) }, { k: 'top', label: 'Vista sup.', run: topView }] },
   layers: { k: 'layers', label: 'Capas', run: () => layersWin.show(), sub: [
     { k: 'layers', label: 'Nueva capa', run: newLayer }, { k: 'layers', label: 'Pasar selección', run: () => assignToLayer() }] },
   modules: { k: 'modules', label: 'Módulos', run: holdHint, sub: [
-    { k: 'shade', label: 'Modelado', run: () => switchLayout('diag') }, { k: 'visu', label: 'Visu', run: () => switchLayout('render') }, { k: 'ai', label: 'IA', run: () => switchLayout('ai') }] },
+    { k: 'shade', label: 'Modelado', run: () => switchLayout('diag') }, { k: 'visu', label: 'Visu', run: () => switchLayout('render') }, { k: 'ai', label: 'IA', run: () => switchLayout('ai') }, { k: 'object', label: 'Forge', run: () => switchLayout('forge') }] },
   prefs: { k: 'gear', label: 'Personalizar', run: () => openPrefs('puck') },
 };
 function holdHint() { toast('Mantén V para ver los módulos y elige uno con el ratón'); }
@@ -2836,13 +2837,15 @@ const PUCK_DEFAULT = {
   diag: ['curve', 'surface', 'edit', 'pick', 'xform', 'dup', 'show', 'del'],
   render: ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'render', 'frame'],
   ai: ['aiNew', 'aiPhoto', 'aiEx', 'frame', 'undo', 'layers'],
+  forge: ['forgeSend', 'frame', 'undo', 'layers'],
 };
-const PUCK_MODULES = { diag: 'Modelado', render: 'Visu', ai: 'IA' };
+const PUCK_MODULES = { diag: 'Modelado', render: 'Visu', ai: 'IA', forge: 'Forge' };
 // qué comandos caben en el Puck de cada módulo (VISU solo visualización; nada que cambie de módulo sin querer)
 const CMD_MODS = {
   diag: ['curve', 'surface', 'edit', 'pick', 'xform', 'dup', 'show', 'del', 'eval', 'undo', 'frame', 'layers', 'modules', 'prefs'],
   render: ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'render', 'frame', 'prefs'],
   ai: ['aiNew', 'aiPhoto', 'aiEx', 'undo', 'frame', 'layers', 'prefs'],
+  forge: ['forgeSend', 'undo', 'frame', 'layers', 'prefs'],
 };
 const puckIds = (mod) => (prefs.puck?.[mod] || PUCK_DEFAULT[mod]).filter((id) => PUCK_CMDS[id] && CMD_MODS[mod].includes(id));
 // Marking menus (Ctrl+Shift + botón del ratón), con la misma forma pero otra información
@@ -2872,6 +2875,7 @@ const DISPLAY_MM = [
     { k: 'studio', label: 'Estudio', run: env('studio') }, { k: 'sun', label: 'Exterior', run: env('sun') },
     { k: 'sunset', label: 'Atardecer', run: env('sunset') }, { k: 'cloud', label: 'Nublado', run: env('overcast') }] },
   { k: 'ai', label: 'IA', run: () => switchLayout('ai') },
+  { k: 'object', label: 'Forge', run: () => switchLayout('forge') },
   { k: 'model', label: 'Toggle Model', run: toggleModel },
   { k: 'grid', label: 'Toggle Grid', run: toggleGrid },
   { k: 'ctrlOn', label: 'Controls', run: () => setPickMode(pickMode === 'cv' ? 'object' : 'cv'), sub: [
@@ -3253,6 +3257,7 @@ const MENUBAR = [
     { label: 'Encuadrar selección', key: 'F', run: frameSelection }, { label: 'Encuadrar todo', run: () => frameObjects([]) }, { label: 'Vista superior', key: 'T', run: topView },
     { sep: true }, { label: 'Modelado', run: () => switchLayout('diag'), ...chk(() => layout === 'diag') },
     { label: 'Visu', run: () => switchLayout('render'), ...chk(() => layout === 'render') }, { label: 'IA', run: () => switchLayout('ai'), ...chk(() => layout === 'ai') },
+    { label: 'Forge', run: () => switchLayout('forge'), ...chk(() => layout === 'forge') },
     { label: 'Dividida', run: () => switchLayout('split'), ...chk(() => layout === 'split') }, { label: 'Elegir módulo', key: 'mantener V', run: () => toast('Mantén V y haz clic en un módulo') }]],
   ['Mostrar', [
     { label: 'Toggle Model', run: toggleModel, ...chk(() => modelClean) }, { label: 'Rejilla', run: toggleGrid, ...chk(() => grid.visible) },
@@ -4556,7 +4561,51 @@ function placePanelVeil() {
   panelVeil.hidden = !on;
   if (on) Object.assign(panelVeil.style, { left: r.left - 30 + 'px', top: r.top - 30 + 'px', width: r.width + 60 + 'px', height: r.height + 60 + 'px' });
 }
+// ---------- Módulo FORGE (BumpForge: relieves, patrones y cortes exactos para impresión 3D) ----------
+// Es su propia app (forge/index.html) dentro de la vista. Se carga la primera vez que se entra al módulo.
+// Puente con Forja (postMessage): "Enviar a Forge" manda la selección (STEP si son NURBS, STL si son mallas) y lo que
+// Forge exporta vuelve a la escena de Forja como objeto nuevo. La tecla V dentro de Forge también abre el carrusel.
+const forgeFrame = $('forge-frame');
+let forgeReady = null;
+function updateForgeFrame() {
+  const on = layout === 'forge' && !carousel;
+  if (on && !forgeFrame.src) {
+    forgeReady = new Promise((res) => forgeFrame.addEventListener('load', res, { once: true }));
+    forgeFrame.src = 'forge/index.html?forja=1';
+  }
+  if (forgeFrame.hidden === on) { forgeFrame.hidden = !on; document.body.classList.toggle('forge-on', on); }
+}
+$('forge-send').addEventListener('click', () => sendToForge());
+async function sendToForge() {
+  const list = (selObjs.length ? selObjs : objects).filter((o) => o.visible);
+  if (!list.length) return toast('Forge: no hay nada visible que enviar.');
+  const nurbs = list.filter((o) => o.kind === 'surface'), o = { unit: 'mm', zUp: true };
+  let name, data;
+  if (nurbs.length && nurbs.length === list.filter((x) => x.kind !== 'curve').length) {
+    name = `${baseName()}.step`; data = new TextEncoder().encode(X.writeSTEP(nurbs, o, name));
+  } else {
+    name = `${baseName()}.stl`; data = new Uint8Array(new STLExporter().parse(meshExportScene(list, o), { binary: true }).buffer);
+  }
+  if (layout !== 'forge') switchLayout('forge');
+  updateForgeFrame();
+  await forgeReady;
+  forgeFrame.contentWindow.postMessage({ type: 'forja:open', name, bytes: data }, '*');
+  toast(`Enviado a Forge: ${name} (${list.length} ${list.length === 1 ? 'objeto' : 'objetos'})`);
+}
+addEventListener('message', async (e) => {
+  if (e.source !== forgeFrame.contentWindow || !e.data) return;
+  const m = e.data;
+  if (m.type === 'forge:key' && m.code === 'KeyV') { if (m.down) holdCarousel(); else releaseCarousel(); }
+  if (m.type === 'forge:result') {
+    try {
+      await importFile(new File([m.bytes], m.name));
+      toast(`Llegó de Forge: ${m.name} · está en la escena (Modelado / Visu)`);
+    } catch (err) { toast(`No se pudo traer ${m.name} de Forge: ${err.message}`); }
+  }
+});
+
 function renderFrame(now) {
+  updateForgeFrame();
   stepCamAnim(now);
   placePanelVeil();
   updateViewName();
@@ -4634,7 +4683,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, sendToForge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

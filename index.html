@@ -759,6 +759,10 @@
   .soft-veil { display: none !important; }
   .float-win { background: transparent !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 0 !important; }
   .panel .sec h2, .panel .muted, .fw-count, .ly-n { color: inherit; }
+  /* Módulo Forge: su app dentro de la vista, debajo de la cabecera y dejando libre la franja derecha del panel */
+  .forge-frame { position: fixed; top: 56px; left: 0; width: calc(100vw - 56px); height: calc(100vh - 86px); border: 0; z-index: 3; background: #121315; }
+  body.forge-on :is(#layers-win, #toolwin, #quickpick, #rel-labels, .proj-btn, .cube-probe) { display: none !important; }
+  .forge-frame[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -872,6 +876,13 @@
     </div>
 
     <div class="panel-body" id="panel-body">
+    <section class="sec" data-module="forge">
+      <h2>Forge</h2>
+      <p class="muted">Relieves, texturas, patrones y cortes exactos para impresión 3D. Manda aquí lo que tengas en Forja;
+        lo que exportes en Forge (STL, STEP) vuelve a la escena de Forja.</p>
+      <button class="btn primary" id="forge-send">Enviar selección a Forge</button>
+      <p class="muted">Si no hay nada elegido se envía todo lo visible. Superficies NURBS van como STEP (modo NURBS exacto de Forge); mallas, como STL.</p>
+    </section>
     <section class="sec" data-module="ai">
       <h2>Pide un objeto</h2>
       <div class="ai-chat" id="ai-chat" aria-live="polite"></div>
@@ -1004,6 +1015,7 @@
       <button id="lay-diag" data-layout="diag" aria-pressed="true" title="Modelado: shaders de evaluación (V)">Modelado</button>
       <button id="lay-render" data-layout="render" aria-pressed="false" title="Visu: render realista con materiales (V)">Visu</button>
       <button id="lay-ai" data-layout="ai" aria-pressed="false" title="IA: crea objetos escribiendo lo que quieres (V)">IA</button>
+      <button id="lay-forge" data-layout="forge" aria-pressed="false" title="Forge: relieves, patrones y cortes para impresión 3D (V)">Forge</button>
     </div>
     <span class="tag">v0.11</span>
     </div>
@@ -1015,6 +1027,7 @@
   </div>
   <div class="quickpick" id="quickpick" hidden></div>
 
+  <iframe class="forge-frame" id="forge-frame" hidden title="Forge" allow="camera; clipboard-write"></iframe>
   <div class="float-win" id="layers-win" role="dialog" aria-label="Capas">
     <div class="fw-head" id="layers-head" title="Arrastra para mover">
       <b>Capas</b><span class="fw-count" id="scene-count"></span>
