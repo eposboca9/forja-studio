@@ -420,6 +420,24 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Referencia: github.com/nkallen/plasticity-document pages/solid/fillet-shell.en.mdx.
 - Pruebas: forja/tfillet.mjs (caja de 6 planos), tmisc.mjs (Malla + ortogonal), tapply.mjs dark cad1 (piel abierta).
 
+## Hecho (v0.19.1) — acabado visual tipo Plasticity
+
+- Modo de evaluación "Arcilla" (tecla 7, Visualización › Arcilla; envDiagMat uMode 4): base mate oscura que absorbe la luz de
+  frente, brillos del estudio solo en ángulos rasantes (graze) y líneas de parche sutiles (isoMat fino y apagado en este modo,
+  setDiag). Pedido del usuario: estética clínica/minimalista de Plasticity, AO pronunciado, brillos nítidos en bordes y biseles.
+  PENDIENTE: oclusión ambiental real (hace falta un pase de post-proceso en el lienzo dividido) y probar en Visu / Forge.
+- Los bordes de recorte (curvas con cos.edge) se dibujan finos (edgeCurveMat 1,1 px, claros en tema oscuro y negros en claro).
+- Redondear: OpenCascade devuelve el sólido con volumen negativo (se corrige con Reverse en filletShape) y sus caras de redondeo
+  pueden quedar orientadas al revés de las vecinas; toSurfaces(…, evalPt) y previewMesh deciden el giro con la prueba del rayo
+  (paridad de cruces de la malla, no depende de ninguna orientación de OCC).
+- CONVENCIÓN DE FORJA: la superficie se ve bien cuando Su × Sv apunta HACIA DENTRO del sólido (el giro de los triángulos de
+  ParametricGeometry es el contrario de su normal y mira hacia fuera; con material DoubleSide manda el giro). Las superficies de
+  revolución ya son así. No asumir "Su × Sv hacia fuera".
+- El redondeo se ve gris/cromado en Visu con pintura roja: no es un fallo, es el barniz reflejando el estudio en ángulos rasantes.
+- Pedidos pendientes del usuario: los "map type" de Forge (Superficie UV / Cilindro 360° / Plano) deben verse tan elegantes y
+  definidos como la textura de Plasticity 2025.2, y las herramientas (redondeo...) deben funcionar con sólidos de Parasolid
+  (STEP importado como B-rep, hoy entra como malla) y con superficies. Falta decidir con el usuario qué quiere exactamente.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

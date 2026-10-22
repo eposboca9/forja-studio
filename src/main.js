@@ -33,7 +33,7 @@ try { Object.assign(prefs, JSON.parse(localStorage.getItem('forja-prefs') || '{}
 function savePrefs() { try { localStorage.setItem('forja-prefs', JSON.stringify(prefs)); } catch { /* sin almacenamiento */ } }
 // modos de evaluación (los usan el Puck, los menús y la interfaz lateral)
 const EVAL_MODES = [
-  { k: 'showroom', label: 'Showroom', key: '4' }, { k: 'diffuse', label: 'Difuso', key: '5' }, { k: 'sky', label: 'Shade-Sky', key: '6' },
+  { k: 'showroom', label: 'Showroom', key: '4' }, { k: 'clay', label: 'Arcilla', key: '7' }, { k: 'diffuse', label: 'Difuso', key: '5' }, { k: 'sky', label: 'Shade-Sky', key: '6' },
   { k: 'zebra', label: 'Cebra', key: '1' }, { k: 'curv', label: 'Curvatura', key: '2' }, { k: 'wire', label: 'Malla', key: '3' },
 ];
 // historial de construcción: relaciones entre objetos que se recalculan solas (ver "Historial de construcción")
@@ -488,6 +488,16 @@ const envDiagMat = new THREE.ShaderMaterial({
         vec3 base = vec3(0.70) * (0.12 + 0.48 * dif + 0.12 * dif2 + 0.28 * hemi);
         vec3 env = showroom(r);
         col = mix(base, env, 0.5 + 0.45 * fres) + vec3(0.9) * spec;
+      } else if (uMode == 4) {
+        // Arcilla oscura (estilo Plasticity): base mate que absorbe la luz de frente y solo brilla en ángulos rasantes,
+        // donde el estudio se refleja nítido y traza el recorrido de la luz sobre bordes y biseles (continuidad G1/G2).
+        float graze = pow(1.0 - max(dot(ve, ne), 0.0), 2.4);                          // 0 de frente, 1 rasante
+        float wrap = clamp(dot(ne, L) * 0.5 + 0.5, 0.0, 1.0);
+        vec3 base = vec3(0.13, 0.135, 0.145) * (0.55 + 1.5 * wrap * wrap + 0.5 * dif2) + vec3(0.06) * hemi;
+        float below = smoothstep(0.1, -0.7, ne.y);                                    // lo que mira al suelo queda asentado
+        base *= 1.0 - 0.55 * below;
+        vec3 env = showroom(r);
+        col = base + env * (0.025 + 0.95 * graze * (0.35 + 0.65 * fres)) * (1.0 - 0.6 * below) + vec3(0.35) * spec;
       } else if (uMode == 2) {
         col = vec3(0.78, 0.77, 0.75) * (0.08 + 0.62 * dif + 0.12 * dif2 + 0.3 * hemi) + vec3(0.12) * spec;
       } else {
@@ -502,8 +512,8 @@ const envDiagMat = new THREE.ShaderMaterial({
       gl_FragColor = vec4(col, 1.0);
     }`,
 });
-const ENV_MODES = { showroom: 1, diffuse: 2, sky: 3 };
-const DIAG_NAMES = { showroom: 'SHOWROOM', diffuse: 'DIFUSO', sky: 'SHADE-SKY', zebra: 'CEBRA', curv: 'CURVATURA', wire: 'MALLA' };
+const ENV_MODES = { showroom: 1, diffuse: 2, sky: 3, clay: 4 };
+const DIAG_NAMES = { showroom: 'SHOWROOM', clay: 'ARCILLA', diffuse: 'DIFUSO', sky: 'SHADE-SKY', zebra: 'CEBRA', curv: 'CURVATURA', wire: 'MALLA' };
 const curvMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
 // Modo Malla como el wireframe de Alias: las superficies no se pintan (siguen sirviendo para elegir) y solo se ven sus
 // líneas: bordes, líneas de parche y curvas sobre superficie. Las mallas muestran solo sus aristas vivas, no los triángulos.
@@ -524,6 +534,8 @@ const wireLineMat = LM({ color: 0xe8e8e8, linewidth: 1.1 });   // líneas del mo
 const isoHistMat = LM({ color: 0x2fb36b, linewidth: 1.8 });
 const isoDepMat = LM({ color: 0xff5fb0, linewidth: 1.8 });
 const curveHistMat = LM({ color: 0x2fb36b, linewidth: 2.5 });
+// bordes de recorte (límite entre caras): líneas finas y nítidas, como los filos de Plasticity
+const edgeCurveMat = LM({ color: 0x1b1d21, linewidth: 1.1, transparent: true, opacity: 0.9 });
 const curveDepMat = LM({ color: 0xff5fb0, linewidth: 2.5 });
 // Polígono de control: punteado en naranja claro; las aristas (borde de la red de una superficie), continuas en naranja oscuro
 const hullMat = new THREE.LineDashedMaterial({ color: '#ffb46b', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.85 });
@@ -562,6 +574,7 @@ const THEME_3D = {
 function applyTheme3D() {
   const t = THEME_3D[theme];
   curveMat.color.setHex(t.curve);
+  edgeCurveMat.color.setHex(theme === 'dark' ? 0xd6dae2 : 0x1b1d21);
   grid.material.color.setHex(t.grid);
   ground.material.opacity = t.shadow;
 }
@@ -871,7 +884,7 @@ function applyVisibility(obj) {
     p.edge.visible = vis && sel;
   } else {
     p.line.visible = vis;
-    p.line.material = sel ? curveSelMat : histState(obj) === 'dep' ? curveDepMat : histState(obj) === 'hist' ? curveHistMat : curveMat;
+    p.line.material = sel ? curveSelMat : histState(obj) === 'dep' ? curveDepMat : histState(obj) === 'hist' ? curveHistMat : obj.data.cos?.edge ? edgeCurveMat : curveMat;
     p.comb.visible = p.env.visible = vis && $('show-comb').checked && !modelClean && !obj.data.cos?.edge;   // los bordes de recorte no llevan peine
   }
 }
@@ -1833,6 +1846,9 @@ function updateStatus() {
 // ---------- Panel: modos, materiales, análisis ----------
 function setDiag(m) {
   diagMode = m;
+  // en Arcilla las líneas de parche son sutiles (finas y apagadas) para no ensuciar la superficie
+  const clay = m === 'clay';
+  isoMat.color.setHex(clay ? 0x9aa3b3 : 0x4a8fe0); isoMat.linewidth = clay ? 0.9 : 1.6; isoMat.transparent = clay; isoMat.opacity = clay ? 0.5 : 1; isoMat.needsUpdate = true;
   $('vi-shader').textContent = DIAG_NAMES[m];
   document.querySelectorAll('[data-diag]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.diag === m)));
   if (layout === 'render') switchLayout('diag');
@@ -2692,6 +2708,7 @@ addEventListener('keydown', (e) => {
   else if (k === '1') setDiag('zebra');
   else if (k === '2') setDiag('curv');
   else if (k === '3') setDiag('wire');
+  else if (k === '7') setDiag('clay');
   else if (k === 'enter' && tool === 'curve') finishDraft();
   else if (k === 'enter' && tool === 'edge' && edgeOp && EDGE_OPS[edgeOp.type].enter) EDGE_OPS[edgeOp.type].enter();
   else if (k === 'escape') {
@@ -2822,7 +2839,7 @@ const PUCK_CMDS = {
     { k: 'hide', label: 'Ocultar', run: hideSelection }, { k: 'show', label: 'Mostrar todo', run: unhideAll },
     { k: 'frame', label: 'Encuadrar', run: frameSelection }, { k: 'top', label: 'Vista sup.', run: topView }] },
   del: { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
-  eval: { k: 'zebra', label: 'Evaluar', run: () => setDiag('showroom'), sub: EVAL_MODES.map((m) => ({ k: { showroom: 'studio', diffuse: 'shade', sky: 'sun', zebra: 'zebra', curv: 'curvz', wire: 'wire' }[m.k], label: m.label, run: () => setDiag(m.k) })) },
+  eval: { k: 'zebra', label: 'Evaluar', run: () => setDiag('showroom'), sub: EVAL_MODES.map((m) => ({ k: { showroom: 'studio', clay: 'studio', diffuse: 'shade', sky: 'sun', zebra: 'zebra', curv: 'curvz', wire: 'wire' }[m.k], label: m.label, run: () => setDiag(m.k) })) },
   // Visu
   mats: { k: 'mat', label: 'Materiales', run: () => setMaterial(matKey), sub: matSub(['paint', 'black', 'pearl', 'alu', 'chrome']) },
   mats2: { k: 'mat', label: 'Más materiales', run: () => setMaterial('ceram'), sub: matSub(['ceram', 'glass', 'plastic', 'clay']) },
@@ -3220,7 +3237,7 @@ function buildEvalUI() {
     const ball = new THREE.Mesh(geo); ts.add(ball);
     const wire = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), wireMat);
     for (const m of EVAL_MODES) {
-      const mats = { showroom: envDiagMat, diffuse: envDiagMat, sky: envDiagMat, zebra: zebraMat, curv: curvMat };
+      const mats = { showroom: envDiagMat, clay: envDiagMat, diffuse: envDiagMat, sky: envDiagMat, zebra: zebraMat, curv: curvMat };
       ts.remove(ball, wire);
       if (m.k === 'wire') ts.add(wire); else { ball.material = mats[m.k]; ts.add(ball); }
       const keep = envDiagMat.uniforms.uMode.value;
@@ -4780,7 +4797,10 @@ function endFillet(accept) {
     if (!fil.result) { toast(`El redondeo no se pudo hacer: ${fil.error || 'sin resultado'}`); return; }
     const fitData = (grid) => N.fitSurface(grid.map((row) => row.map(([x, y, z]) => new THREE.Vector3(x, y, z))), 3, 3);
     let surfs;
-    try { surfs = FL.toSurfaces(fil.oc, fil.result.shape, fitData, fil.result.origin); } catch (e) { toast(`No se pudo convertir el resultado: ${e.message || e}`); return; }
+    try { surfs = FL.toSurfaces(fil.oc, fil.result.shape, fitData, fil.result.origin, (d, u, v) => {
+      const t = new THREE.Vector3(); N.surfaceOf({ ...d, cvs: d.cvs.map((row) => row.map((c) => new THREE.Vector4(c.x, c.y, c.z, c.w ?? 1))) }).getPoint(Math.min(1, u), Math.min(1, v), t);
+      return [t.x, t.y, t.z];
+    }); } catch (e) { toast(`No se pudo convertir el resultado: ${e.message || e}`); return; }
     checkpoint();
     const srcs = fil.items, made = [];
     // las superficies de origen se quitan antes, así las nuevas conservan su nombre, material, capa y grupo

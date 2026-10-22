@@ -98,6 +98,11 @@ export function edgeList(oc, shape) {
   return out;
 }
 
+export function volume(oc, shape) {
+  const g = new oc.GProp_GProps_1(); oc.BRepGProp.VolumeProperties_1(shape, g, false, false, false);
+  const v = g.Mass(); g.delete(); return v;
+}
+
 // Redondeo / chaflán. edges: aristas de edgeList; o = { r (dm), kind: 'fillet' | 'chamfer', vary: [[t 0..1, r dm], ...] | null }.
 // src: caras de origen (makeShape) → origin: [{ id, faces }] con las caras del resultado que vienen de cada una.
 export function filletShape(oc, shape, edges, o, src = []) {
@@ -120,6 +125,8 @@ export function filletShape(oc, shape, edges, o, src = []) {
   mk.Build(pr(oc));
   if (!mk.IsDone()) { mk.delete(); throw new Error(o.kind === 'chamfer' ? 'el chaflán no cabe con esa distancia' : 'el redondeo no cabe con ese radio'); }
   const res = mk.Shape();
+  // OpenCascade puede devolver el sólido "del revés" (volumen negativo, caras hacia dentro): se da la vuelta
+  if (volume(oc, res) < 0) res.Reverse();
   const origin = src.map(({ id, face }) => {
     const faces = [];
     if (!mk.IsDeleted(face)) {
@@ -134,8 +141,11 @@ export function filletShape(oc, shape, edges, o, src = []) {
 }
 
 // Resultado → superficies de Forja. Devuelve [{ data, loops: [{ uv: [[u, v]...], trim: 'outside' | 'inside' }] }]
-export function toSurfaces(oc, shape, fit, origin = []) {
+// evalPt(data, u, v) → [x, y, z] (la superficie de Forja); sirve para saber hacia dónde mira su normal Su × Sv.
+export function toSurfaces(oc, shape, fit, origin = [], evalPt = null) {
   const out = [], REV = oc.TopAbs_Orientation.TopAbs_REVERSED;
+  let solidTris = null;
+  if (evalPt) { const m = new oc.BRepMesh_IncrementalMesh_2(shape, 0.5, false, 0.5, false); m.delete(); solidTris = meshTriangles(oc, shape); }
   explore(oc, shape, T(oc).TopAbs_FACE, (f0) => {
     const face = oc.TopoDS.Face_1(f0), ad = new oc.BRepAdaptor_Surface_2(face, true);
     const u0 = ad.FirstUParameter(), u1 = ad.LastUParameter(), v0 = ad.FirstVParameter(), v1 = ad.LastVParameter();
@@ -173,7 +183,25 @@ export function toSurfaces(oc, shape, fit, origin = []) {
       if (outer && onBox) return;   // borde rectangular: superficie sin recorte
       if (uv.length > 2) loops.push({ uv, trim: outer ? 'outside' : 'inside' });
     });
-    if (face.Orientation_1() === REV) flipU(data, loops);
+    // dirección de Su × Sv respecto al sólido. Prueba que no depende de ninguna orientación:
+    // un punto un poco delante de la cara (según Su × Sv) está dentro del sólido si un rayo suyo cruza la malla un nº impar de veces.
+    let flip = false;
+    const pt = evalPt && centerPoint(oc, face);
+    if (pt && solidTris) {
+      let best = null;
+      for (let i = 1; i < 12; i++) for (let j = 1; j < 12; j++) {
+        const q = evalPt(data, i / 12, j / 12), d = (q[0] - pt[0]) ** 2 + (q[1] - pt[1]) ** 2 + (q[2] - pt[2]) ** 2;
+        if (!best || d < best.d) best = { d, u: i / 12, v: j / 12, q };
+      }
+      const h = 1e-3, a = best.q, b = evalPt(data, Math.min(1, best.u + h), best.v), c = evalPt(data, best.u, Math.min(1, best.v + h));
+      const su = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], sv = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      const n = [su[1] * sv[2] - su[2] * sv[1], su[2] * sv[0] - su[0] * sv[2], su[0] * sv[1] - su[1] * sv[0]], l = Math.hypot(...n) || 1;
+      const eps = solidTris.eps / MM;
+      // convención de Forja: Su × Sv apunta HACIA DENTRO (el giro de los triángulos de ParametricGeometry es el contrario y mira hacia fuera,
+      // que es lo que cuenta para la luz); así son también las superficies de revolución. Si apunta hacia fuera, se invierte.
+      flip = !insideMesh(solidTris, [(a[0] + (n[0] / l) * eps) * MM, (a[1] + (n[1] / l) * eps) * MM, (a[2] + (n[2] / l) * eps) * MM]);
+    } else flip = face.Orientation_1() === REV;
+    if (flip) flipU(data, loops);
     const from = origin.find((o) => o.faces.some((f) => f.IsSame(face)));
     out.push({ data, loops, src: from ? from.id : null });
     ad.delete();
@@ -194,6 +222,51 @@ function chain(segs) {
     for (const p of rev ? s.slice().reverse() : s) if (d(uv[uv.length - 1], p) > 1e-6) uv.push(p);
   }
   return uv;
+}
+// punto (dm) de un triángulo central del teselado de la cara
+function centerPoint(oc, face) {
+  const loc = new oc.TopLoc_Location_1(), h = oc.BRep_Tool.Triangulation(face, loc, 0);
+  if (h.IsNull()) { loc.delete(); return null; }
+  const tr = h.get(), tf = loc.Transformation(), nt = tr.NbTriangles();
+  if (!nt) { loc.delete(); return null; }
+  const t = tr.Triangle(Math.max(1, Math.round(nt / 2))), c = [0, 0, 0];
+  for (let k = 1; k <= 3; k++) { const q = tr.Node(t.Value(k)), p = q.Transformed(tf); c[0] += p.X() / 3; c[1] += p.Y() / 3; c[2] += p.Z() / 3; p.delete(); q.delete(); }
+  t.delete(); loc.delete();
+  return c.map((x) => x / MM);
+}
+// todos los triángulos del sólido (mm) para contar cruces de un rayo
+function meshTriangles(oc, shape) {
+  const T3 = [];
+  explore(oc, shape, T(oc).TopAbs_FACE, (f0) => {
+    const f = oc.TopoDS.Face_1(f0), loc = new oc.TopLoc_Location_1(), h = oc.BRep_Tool.Triangulation(f, loc, 0);
+    if (h.IsNull()) { loc.delete(); return; }
+    const tr = h.get(), tf = loc.Transformation(), pts = [];
+    for (let i = 1; i <= tr.NbNodes(); i++) { const q = tr.Node(i), p = q.Transformed(tf); pts.push([p.X(), p.Y(), p.Z()]); p.delete(); q.delete(); }
+    for (let i = 1; i <= tr.NbTriangles(); i++) { const t = tr.Triangle(i); T3.push(pts[t.Value(1) - 1], pts[t.Value(2) - 1], pts[t.Value(3) - 1]); t.delete(); }
+    loc.delete();
+  });
+  let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+  for (const p of T3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], p[k]); mx[k] = Math.max(mx[k], p[k]); }
+  return { T3, eps: Math.max(0.02, Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) * 2e-3) };
+}
+function insideMesh(m, q) {
+  const d = [0.5773502, 0.5774101, 0.5772903];   // dirección "irracional": no pasa justo por aristas
+  let hits = 0;
+  const T3 = m.T3;
+  for (let i = 0; i < T3.length; i += 3) {
+    const a = T3[i], b = T3[i + 1], c = T3[i + 2];
+    const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const pv = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
+    const det = e1[0] * pv[0] + e1[1] * pv[1] + e1[2] * pv[2];
+    if (Math.abs(det) < 1e-12) continue;
+    const tv = [q[0] - a[0], q[1] - a[1], q[2] - a[2]], u = (tv[0] * pv[0] + tv[1] * pv[1] + tv[2] * pv[2]) / det;
+    if (u < 0 || u > 1) continue;
+    const qv = [tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2], tv[0] * e1[1] - tv[1] * e1[0]];
+    const v = (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]) / det;
+    if (v < 0 || u + v > 1) continue;
+    if ((e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) / det > 0) hits++;
+  }
+  return hits % 2 === 1;
 }
 function readBSpline(bs) {
   const nu = bs.NbUPoles(), nv = bs.NbVPoles(), cvs = [];
@@ -216,21 +289,46 @@ function flipU(d, loops) {
   for (const l of loops) { l.uv = l.uv.map(([u, v]) => [1 - u, v]); l.uv.reverse(); }
 }
 
-// Malla rápida del resultado (vista previa mientras se arrastra el punto amarillo). Posiciones en dm.
+// Malla rápida del resultado (vista previa mientras se arrastra el punto amarillo). Posiciones en dm. El giro de cada cara se
+// comprueba con la prueba del rayo (OpenCascade a veces deja caras de redondeo orientadas al revés de sus vecinas).
 export function previewMesh(oc, shape, defl = 0.05) {
   const m = new oc.BRepMesh_IncrementalMesh_2(shape, defl, false, 0.3, false); m.delete();
-  const P = [], I = [], REV = oc.TopAbs_Orientation.TopAbs_REVERSED;
+  const faces = [], REV = oc.TopAbs_Orientation.TopAbs_REVERSED;
   explore(oc, shape, T(oc).TopAbs_FACE, (f0) => {
     const f = oc.TopoDS.Face_1(f0), loc = new oc.TopLoc_Location_1(), h = oc.BRep_Tool.Triangulation(f, loc, 0);
     if (h.IsNull()) { loc.delete(); return; }
-    const tr = h.get(), tf = loc.Transformation(), base = P.length / 3, rev = f.Orientation_1() === REV;
-    for (let i = 1; i <= tr.NbNodes(); i++) { const q = tr.Node(i), p = q.Transformed(tf); P.push(p.X() / MM, p.Y() / MM, p.Z() / MM); p.delete(); q.delete(); }
+    const tr = h.get(), tf = loc.Transformation(), P = [], I = [], rev = f.Orientation_1() === REV;
+    for (let i = 1; i <= tr.NbNodes(); i++) { const q = tr.Node(i), p = q.Transformed(tf); P.push(p.X(), p.Y(), p.Z()); p.delete(); q.delete(); }
     for (let i = 1; i <= tr.NbTriangles(); i++) {
-      const t = tr.Triangle(i), a = t.Value(1) - 1 + base, b = t.Value(2) - 1 + base, c = t.Value(3) - 1 + base;
+      const t = tr.Triangle(i), a = t.Value(1) - 1, b = t.Value(2) - 1, c = t.Value(3) - 1;
       if (rev) I.push(a, c, b); else I.push(a, b, c);
       t.delete();
     }
     loc.delete();
+    faces.push({ P, I });
   });
+  let nTri = 0;
+  for (const f of faces) nTri += f.I.length / 3;
+  let solid = null;
+  if (faces.length * nTri < 4e7) {
+    const T3 = [];
+    for (const f of faces) for (let i = 0; i < f.I.length; i += 3) for (let k = 0; k < 3; k++) { const o = f.I[i + k] * 3; T3.push([f.P[o], f.P[o + 1], f.P[o + 2]]); }
+    let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    for (const p of T3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], p[k]); mx[k] = Math.max(mx[k], p[k]); }
+    solid = { T3, eps: Math.max(0.02, Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) * 2e-3) };
+  }
+  const P = [], I = [];
+  for (const f of faces) {
+    if (solid && f.I.length) {
+      const t = Math.floor(f.I.length / 6) * 3, a = f.I[t] * 3, b = f.I[t + 1] * 3, c = f.I[t + 2] * 3;
+      const u = [f.P[b] - f.P[a], f.P[b + 1] - f.P[a + 1], f.P[b + 2] - f.P[a + 2]], v = [f.P[c] - f.P[a], f.P[c + 1] - f.P[a + 1], f.P[c + 2] - f.P[a + 2]];
+      const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], l = Math.hypot(...n) || 1;
+      const g = [(f.P[a] + f.P[b] + f.P[c]) / 3, (f.P[a + 1] + f.P[b + 1] + f.P[c + 1]) / 3, (f.P[a + 2] + f.P[b + 2] + f.P[c + 2]) / 3];
+      if (insideMesh(solid, [g[0] + (n[0] / l) * solid.eps, g[1] + (n[1] / l) * solid.eps, g[2] + (n[2] / l) * solid.eps])) for (let i = 0; i < f.I.length; i += 3) { const x = f.I[i + 1]; f.I[i + 1] = f.I[i + 2]; f.I[i + 2] = x; }
+    }
+    const base = P.length / 3;
+    for (let i = 0; i < f.P.length; i += 3) P.push(f.P[i] / MM, f.P[i + 1] / MM, f.P[i + 2] / MM);
+    for (const k of f.I) I.push(k + base);
+  }
   return { pos: new Float32Array(P), idx: new Uint32Array(I) };
 }
