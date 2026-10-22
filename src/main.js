@@ -18,6 +18,7 @@ import * as HX from './history.js';
 import * as FF from './freeform.js';
 import * as FL from './fillet.js';
 import { getOCC } from './occ.js';
+import { createAO } from './ao.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { PLYExporter } from 'three/addons/exporters/PLYExporter.js';
@@ -33,7 +34,7 @@ try { Object.assign(prefs, JSON.parse(localStorage.getItem('forja-prefs') || '{}
 function savePrefs() { try { localStorage.setItem('forja-prefs', JSON.stringify(prefs)); } catch { /* sin almacenamiento */ } }
 // modos de evaluación (los usan el Puck, los menús y la interfaz lateral)
 const EVAL_MODES = [
-  { k: 'showroom', label: 'Showroom', key: '4' }, { k: 'clay', label: 'Arcilla', key: '7' }, { k: 'diffuse', label: 'Difuso', key: '5' }, { k: 'sky', label: 'Shade-Sky', key: '6' },
+  { k: 'forja', label: 'Forja', key: '8' }, { k: 'showroom', label: 'Showroom', key: '4' }, { k: 'clay', label: 'Arcilla', key: '7' }, { k: 'diffuse', label: 'Difuso', key: '5' }, { k: 'sky', label: 'Shade-Sky', key: '6' },
   { k: 'zebra', label: 'Cebra', key: '1' }, { k: 'curv', label: 'Curvatura', key: '2' }, { k: 'wire', label: 'Malla', key: '3' },
 ];
 // historial de construcción: relaciones entre objetos que se recalculan solas (ver "Historial de construcción")
@@ -74,7 +75,7 @@ const app = $('app');
 // Lienzo transparente: el muro de hormigón de la página se ve detrás del modelo (una sola imagen)
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
 renderer.setClearColor(0x000000, 0);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setPixelRatio(window.__forjaPR || Math.min(Math.max(devicePixelRatio, 1.5), 2));   // window.__forjaPR: solo para pruebas automáticas   // en pantallas de baja densidad se dibuja a 1,5x y se reduce: bordes y líneas más limpios
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -152,6 +153,9 @@ function setProjection(ortho, temp = false) {
   if (typeof updateViewName === 'function') updateViewName();
 }
 
+// oclusión ambiental (Arcilla y Forja); se activa en Visualización › Oclusión ambiental
+const ao = createAO(renderer, scene, camera);
+const AO_MODES = new Set(['clay', 'forja']);
 const key = new THREE.DirectionalLight(0xffffff, 1.6);
 key.position.set(4, 9, 3);
 key.castShadow = true;
@@ -488,6 +492,19 @@ const envDiagMat = new THREE.ShaderMaterial({
         vec3 base = vec3(0.70) * (0.12 + 0.48 * dif + 0.12 * dif2 + 0.28 * hemi);
         vec3 env = showroom(r);
         col = mix(base, env, 0.5 + 0.45 * fres) + vec3(0.9) * spec;
+      } else if (uMode == 5) {
+        // FORJA, el modo de la marca: grafito azulado mate que absorbe la luz de frente; solo brilla en ángulos rasantes,
+        // frío a un lado y azul Forja (#2f7bff) al otro, con el estudio reflejado nítido sobre bordes y biseles.
+        float graze = pow(1.0 - max(dot(ve, ne), 0.0), 2.6);
+        float wrap = clamp(dot(ne, L) * 0.5 + 0.5, 0.0, 1.0);
+        vec3 base = vec3(0.105, 0.11, 0.125) * (0.6 + 1.5 * wrap * wrap + 0.5 * dif2) + vec3(0.03, 0.034, 0.045) * hemi;
+        float below = smoothstep(0.1, -0.7, ne.y);
+        base *= 1.0 - 0.55 * below;
+        float side = smoothstep(-0.35, 0.55, ne.x);                                   // lado de la pantalla hacia el que mira
+        vec3 rim = mix(vec3(0.92, 0.94, 0.98), vec3(0.18, 0.48, 1.0), smoothstep(0.25, 0.75, side));
+        vec3 env = showroom(r);
+        float k = graze * (0.35 + 0.65 * fres);
+        col = base + (env * 0.55 + vec3(0.45)) * rim * k * 0.9 * (1.0 - 0.6 * below) + vec3(0.25, 0.36, 0.6) * spec * 0.6;
       } else if (uMode == 4) {
         // Arcilla oscura (estilo Plasticity): base mate que absorbe la luz de frente y solo brilla en ángulos rasantes,
         // donde el estudio se refleja nítido y traza el recorrido de la luz sobre bordes y biseles (continuidad G1/G2).
@@ -512,16 +529,19 @@ const envDiagMat = new THREE.ShaderMaterial({
       gl_FragColor = vec4(col, 1.0);
     }`,
 });
-const ENV_MODES = { showroom: 1, diffuse: 2, sky: 3, clay: 4 };
-const DIAG_NAMES = { showroom: 'SHOWROOM', clay: 'ARCILLA', diffuse: 'DIFUSO', sky: 'SHADE-SKY', zebra: 'CEBRA', curv: 'CURVATURA', wire: 'MALLA' };
+const ENV_MODES = { showroom: 1, diffuse: 2, sky: 3, clay: 4, forja: 5 };
+const DIAG_NAMES = { forja: 'FORJA', showroom: 'SHOWROOM', clay: 'ARCILLA', diffuse: 'DIFUSO', sky: 'SHADE-SKY', zebra: 'CEBRA', curv: 'CURVATURA', wire: 'MALLA' };
 const curvMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
+// Las líneas (curvas exactas) caen justo sobre una malla de triángulos: sin ayuda, la malla las tapa a tramos y se ven cortadas a rayas.
+// Se empuja un poco hacia atrás todo lo que es superficie (como hace Plasticity) para que las líneas siempre ganen la prueba de profundidad.
+for (const m of [envDiagMat, zebraMat, curvMat, ...Object.values(materials)]) { m.polygonOffset = true; m.polygonOffsetFactor = 1.5; m.polygonOffsetUnits = 2; }
 // Modo Malla como el wireframe de Alias: las superficies no se pintan (siguen sirviendo para elegir) y solo se ven sus
 // líneas: bordes, líneas de parche y curvas sobre superficie. Las mallas muestran solo sus aristas vivas, no los triángulos.
 const wireMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide });
 const wireFeatMat = new THREE.LineBasicMaterial({ color: 0xe8e8e8, transparent: true, opacity: 0.8 });
 
 const lineMats = [];
-const LM = (o) => { const m = new LineMaterial(o); lineMats.push(m); return m; };
+const LM = (o) => { const m = new LineMaterial({ alphaToCoverage: true, ...o }); lineMats.push(m); return m; };   // alphaToCoverage: bordes de línea suaves con MSAA
 const curveMat = LM({ color: 0x2b2a27, linewidth: 2.5 });
 const curveSelMat = LM({ color: 0xe07a1f, linewidth: 3 });
 const draftMat = LM({ color: 0xe07a1f, linewidth: 2 });
@@ -588,7 +608,7 @@ function setTheme(t) {
 }
 document.querySelectorAll('[data-theme-btn]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeBtn)));
 
-let diagMode = 'showroom', layout = 'diag', matKey = 'paint', res = 90, combScale = 0.8;
+let diagMode = 'forja', layout = 'diag', matKey = 'paint', res = 90, combScale = 0.8;
 
 // ---------- Objetos de la escena ----------
 const objects = [];
@@ -685,7 +705,35 @@ const setGeo = (o, g) => { o.geometry.dispose(); o.geometry = g; };
 const posGeo = (pts) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3)); return g; };
 const line2Geo = (pts) => { const g = new LineGeometry(); g.setPositions(pts); return g; };
 
+// Teselado adaptable: mientras se edita se usa el básico (rápido); cuando se deja de tocar, tras un momento, las superficies y las
+// curvas se vuelven a teselar más finas (silueta, líneas y reflejos nítidos) como hace Plasticity.
+let tessMul = 1, refineT = 0;
+const TESS_HI = 2.2;
+function scheduleRefine() {
+  clearTimeout(refineT);
+  refineT = setTimeout(refineTess, 450);
+}
+function refineTess() {
+  if (gizmoDrag || navDrag || restoring || extrudeDrag || fil) { scheduleRefine(); return; }
+  if (tessMul === TESS_HI) return;
+  tessMul = TESS_HI;
+  // en trozos de ~25 ms para que una escena grande no congele la vista; si se vuelve a editar, se abandona
+  const list = objects.filter((o) => o.kind === 'surface' || o.kind === 'curve');
+  const step = () => {
+    const t0 = performance.now();
+    while (list.length && performance.now() - t0 < 25) {
+      const o = list.shift();
+      if (!objects.includes(o)) continue;
+      if (o.kind === 'surface') updateSurface(o); else updateCurve(o);
+      applyVisibility(o);
+    }
+    if (list.length && tessMul === TESS_HI) setTimeout(step, 0);
+  };
+  step();
+}
 function updateObject(obj) {
+  if (tessMul !== 1) tessMul = 1;
+  scheduleRefine();
   if (obj.kind === 'mesh') { applyVisibility(obj); return; }
   if (obj.kind === 'surface') updateSurface(obj); else updateCurve(obj);
   rebuildHandles(obj);
@@ -695,18 +743,18 @@ function updateObject(obj) {
 
 function updateSurface(obj) {
   const p = obj.parts, d = obj.data;
-  const s = N.surfaceOf(d);
-  let geo = new ParametricGeometry((u, v, t) => s.getPoint(u, v, t), res, res);
-  if (diagMode === 'curv') curvatureColors(geo, res);
+  const s = N.surfaceOf(d), R = Math.round(res * tessMul);   // R: teselado (más fino cuando no se está editando)
+  let geo = new ParametricGeometry((u, v, t) => s.getPoint(u, v, t), R, R);
+  if (diagMode === 'curv') curvatureColors(geo, R);
   // recortes: curvas sobre esta superficie con "Recortar" dentro o fuera
   const trims = objects.filter((c) => c.kind === 'curve' && c.data.cos?.surf === obj.id && c.data.cos.trim && c.data.cos.trim !== 'none')
     .map((c) => ({ loop: FF.trimLoop(c.data.cos), trim: c.data.cos.trim })).filter((x) => x.loop);
   const rm = trims.length ? FF.removedFn(trims) : null;
   obj.removed = rm;
-  if (rm) geo = FF.trimGeometry(geo, res, rm, (u, v) => { const q = new THREE.Vector3(); s.getPoint(u, v, q); return q; });
+  if (rm) geo = FF.trimGeometry(geo, R, rm, (u, v) => { const q = new THREE.Vector3(); s.getPoint(u, v, q); return q; });
   setGeo(p.mesh, geo);
   // Isoparamétricas en los límites de cada span, como en Alias (sin lo recortado)
-  const iso = [], S = 60, t = new THREE.Vector3();
+  const iso = [], S = Math.round(60 * tessMul), t = new THREE.Vector3();
   obj.isoLines = [];   // polilíneas de cada isoparamétrica interior (para el snap de curva)
   const seg = (uv, inner) => {
     let line = null;
@@ -725,7 +773,7 @@ function updateSurface(obj) {
   { const g = new LineSegmentsGeometry(); g.setPositions(iso); setGeo(p.iso, g); }
   // bordes de la superficie (modo Malla); los bordes de un recorte los dibuja su curva sobre superficie
   {
-    const b = [], a = new THREE.Vector3(), c = new THREE.Vector3(), B = 80;
+    const b = [], a = new THREE.Vector3(), c = new THREE.Vector3(), B = Math.round(80 * tessMul);
     const edge = (uv) => { for (let k = 0; k < B; k++) { const [u0, v0] = uv(k / B), [u1, v1] = uv((k + 1) / B); if (rm && rm((u0 + u1) / 2, (v0 + v1) / 2)) continue; s.getPoint(u0, v0, a); s.getPoint(u1, v1, c); b.push(a.x, a.y, a.z, c.x, c.y, c.z); } };
     edge((x) => [x, 0]); edge((x) => [x, 1]); edge((x) => [0, x]); edge((x) => [1, x]);
     const g = new LineSegmentsGeometry(); g.setPositions(b.length ? b : [0, 0, 0, 0, 0, 0]); setGeo(p.bound, g);
@@ -739,7 +787,7 @@ function updateSurface(obj) {
   setGeo(p.hull, posGeo(hull));
   setGeo(p.hullEdge, posGeo(rim));
   p.hull.computeLineDistances();
-  const loop = [], E = 40;
+  const loop = [], E = Math.round(40 * tessMul);
   const at = (u, v) => { s.getPoint(u, v, t); loop.push(t.x, t.y, t.z); };
   for (let k = 0; k <= E; k++) at(k / E, 0);
   for (let k = 1; k <= E; k++) at(1, k / E);
@@ -753,7 +801,7 @@ function updateSurface(obj) {
 
 function updateCurve(obj) {
   const p = obj.parts, d = obj.data;
-  const crv = N.curveOf(d), pts = [], S = 200;
+  const crv = N.curveOf(d), pts = [], S = Math.round(200 * Math.max(1, tessMul));
   const host = d.cos && byId(d.cos.surf);
   // curva sobre superficie: se dibuja exacta sobre ella (un poco levantada por la normal para que se vea)
   if (host) FF.cosPoints(host.data, d.cos.uv, 0.004).forEach((q) => pts.push(q.x, q.y, q.z));
@@ -1847,8 +1895,8 @@ function updateStatus() {
 function setDiag(m) {
   diagMode = m;
   // en Arcilla las líneas de parche son sutiles (finas y apagadas) para no ensuciar la superficie
-  const clay = m === 'clay';
-  isoMat.color.setHex(clay ? 0x9aa3b3 : 0x4a8fe0); isoMat.linewidth = clay ? 0.9 : 1.6; isoMat.transparent = clay; isoMat.opacity = clay ? 0.5 : 1; isoMat.needsUpdate = true;
+  const clay = m === 'clay' || m === 'forja';
+  isoMat.color.setHex(m === 'forja' ? 0x2f7bff : clay ? 0x9aa3b3 : 0x4a8fe0); isoMat.linewidth = clay ? 0.9 : 1.6; isoMat.transparent = clay; isoMat.opacity = m === 'forja' ? 0.7 : clay ? 0.5 : 1; isoMat.needsUpdate = true;
   $('vi-shader').textContent = DIAG_NAMES[m];
   document.querySelectorAll('[data-diag]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.diag === m)));
   if (layout === 'render') switchLayout('diag');
@@ -2709,6 +2757,7 @@ addEventListener('keydown', (e) => {
   else if (k === '2') setDiag('curv');
   else if (k === '3') setDiag('wire');
   else if (k === '7') setDiag('clay');
+  else if (k === '8') setDiag('forja');
   else if (k === 'enter' && tool === 'curve') finishDraft();
   else if (k === 'enter' && tool === 'edge' && edgeOp && EDGE_OPS[edgeOp.type].enter) EDGE_OPS[edgeOp.type].enter();
   else if (k === 'escape') {
@@ -2839,7 +2888,7 @@ const PUCK_CMDS = {
     { k: 'hide', label: 'Ocultar', run: hideSelection }, { k: 'show', label: 'Mostrar todo', run: unhideAll },
     { k: 'frame', label: 'Encuadrar', run: frameSelection }, { k: 'top', label: 'Vista sup.', run: topView }] },
   del: { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
-  eval: { k: 'zebra', label: 'Evaluar', run: () => setDiag('showroom'), sub: EVAL_MODES.map((m) => ({ k: { showroom: 'studio', clay: 'studio', diffuse: 'shade', sky: 'sun', zebra: 'zebra', curv: 'curvz', wire: 'wire' }[m.k], label: m.label, run: () => setDiag(m.k) })) },
+  eval: { k: 'zebra', label: 'Evaluar', run: () => setDiag('showroom'), sub: EVAL_MODES.map((m) => ({ k: { showroom: 'studio', clay: 'studio', forja: 'studio', diffuse: 'shade', sky: 'sun', zebra: 'zebra', curv: 'curvz', wire: 'wire' }[m.k], label: m.label, run: () => setDiag(m.k) })) },
   // Visu
   mats: { k: 'mat', label: 'Materiales', run: () => setMaterial(matKey), sub: matSub(['paint', 'black', 'pearl', 'alu', 'chrome']) },
   mats2: { k: 'mat', label: 'Más materiales', run: () => setMaterial('ceram'), sub: matSub(['ceram', 'glass', 'plastic', 'clay']) },
@@ -3237,7 +3286,7 @@ function buildEvalUI() {
     const ball = new THREE.Mesh(geo); ts.add(ball);
     const wire = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), wireMat);
     for (const m of EVAL_MODES) {
-      const mats = { showroom: envDiagMat, clay: envDiagMat, diffuse: envDiagMat, sky: envDiagMat, zebra: zebraMat, curv: curvMat };
+      const mats = { showroom: envDiagMat, clay: envDiagMat, forja: envDiagMat, diffuse: envDiagMat, sky: envDiagMat, zebra: zebraMat, curv: curvMat };
       ts.remove(ball, wire);
       if (m.k === 'wire') ts.add(wire); else { ball.material = mats[m.k]; ts.add(ball); }
       const keep = envDiagMat.uniforms.uMode.value;
@@ -3316,6 +3365,7 @@ const MENUBAR = [
     { sep: true }, { label: 'Ventana de capas', run: () => (prefs.layersWin?.open === false ? layersWin.show() : layersWin.set({ open: false })), ...chk(() => prefs.layersWin?.open !== false) }]],
   ['Visualización', [
     ...EVAL_MODES.map((m) => ({ label: m.label, key: m.key, run: () => setDiag(m.k), ...chk(() => layout !== 'render' && diagMode === m.k) })),
+    { label: 'Oclusión ambiental', run: () => { prefs.ao = prefs.ao === false; savePrefs(); }, ...chk(() => prefs.ao !== false) },
     { sep: true }, { title: 'Entorno (Visu)' },
     ...[['studio', 'Estudio'], ['sun', 'Exterior'], ['sunset', 'Atardecer'], ['overcast', 'Nublado']].map(([k, l]) => ({ label: l, run: env(k), ...chk(() => envKey === k) }))]],
   ['Animación', [{ label: 'Plato giratorio', soon: true }, { label: 'Línea de tiempo', soon: true }]],
@@ -4563,6 +4613,7 @@ function renderPane(p) {
   camera.layers.set(0);
   if (diag) camera.layers.enable(DIAG);
   renderer.render(scene, camera);
+  if (diag && !carousel && prefs.ao !== false && !window.__forjaNoAO && AO_MODES.has(diagMode)) ao.apply(p.w, p.h);
 }
 // aristas vivas de una malla (ángulo > 30°) para el modo Malla; se recalculan si la malla se movió
 function meshFeatures(o, show) {
@@ -5120,6 +5171,7 @@ pivot.set(0, 0.6, 0.6);
 
 setNavStyle(navStyle);
 setTheme(theme);
+setDiag(diagMode);   // modo de arranque (Forja): pone el nombre, las líneas de parche y la leyenda
 setLayout(layout);
 setPinned(false);
 frameObjects([]);
@@ -5127,7 +5179,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { THREE, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

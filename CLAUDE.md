@@ -41,6 +41,8 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - `src/fillet.js`: Redondear / chaflán como Plasticity (makeShape cose superficies de Forja, edgeList, filletShape, toSurfaces
   devuelve B-splines recortadas a la caja UV de cada cara + lazos de recorte, previewMesh). Pura geometría, prueba en Node:
   scratchpad fil/t1.mjs (occ-node.mjs pone require/__dirname para el .js de replicad).
+- `src/ao.js`: oclusión ambiental (GTAO de three sin EffectComposer) multiplicada sobre el lienzo tras dibujar cada vista; normales
+  sacadas de derivadas de pantalla (las de vértice no sirven con el giro variable de los triángulos). Solo en modos Arcilla y Forja.
 - `src/ai.js`: módulo IA: generadores paramétricos (tornillo ISO con rosca, tuerca, arandela, mesa, silla) y parsePrompt (español).
 - `docs/capturas/`: capturas de pantalla de cada versión.
 - `docs/alias-referencia.md`: atajos y comportamiento de Alias (de la hoja oficial que pasó el usuario). Consúltalo.
@@ -52,7 +54,8 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   de 1 px que se pasa de largo en las esquinas; en la esquina inferior derecha las líneas paran antes de un + azul #2f7bff grueso.
 - Interfaz (rama interfaz-concreto, pendiente de pasar a main): fondo de piedra rugosa a pantalla completa (src/concrete.js),
   tema claro/oscuro, sin marcos, menús que aparecen al acercar el ratón a cada borde, cabecera e info de vista siempre visibles y tenues.
-- Por decisión del usuario se abre solo la vista Diagnóstico (Showroom por defecto) con las líneas de parche encendidas.
+- Por decisión del usuario se abre solo la vista Diagnóstico con las líneas de parche encendidas. Modo de arranque: FORJA (el modo
+  propio de la marca, tecla 8; antes era Showroom). El usuario quiere que los modos de visualización ("map type") se vean mejor que Plasticity.
 - Interfaz en español.
 
 ## Hecho (v0.1)
@@ -437,6 +440,20 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - Pedidos pendientes del usuario: los "map type" de Forge (Superficie UV / Cilindro 360° / Plano) deben verse tan elegantes y
   definidos como la textura de Plasticity 2025.2, y las herramientas (redondeo...) deben funcionar con sólidos de Parasolid
   (STEP importado como B-rep, hoy entra como malla) y con superficies. Falta decidir con el usuario qué quiere exactamente.
+
+## Hecho (v0.20) — modos de visualización propios, oclusión y calidad de línea
+
+- Modo FORJA (tecla 8, envDiagMat uMode 5) = el modo de la marca y el de arranque: grafito azulado mate, brillos solo en ángulos
+  rasantes (blanco frío a un lado y azul #2f7bff al otro) y líneas de parche azul marca finas. Arcilla (7) queda como el neutro.
+- Oclusión ambiental real (src/ao.js, prefs.ao, Visualización › Oclusión ambiental): oscurece los contactos con el suelo, las uniones
+  y las cavidades. El suelo cuenta en el pase pero el lienzo es transparente: el contacto se ve sobre los propios objetos.
+- Calidad de línea ("se ve de baja resolución"): causa principal = las curvas exactas caían sobre una malla de triángulos y esta las
+  tapaba a tramos (líneas "a rayas", sobre todo en ángulos rasantes). Arreglos: polygonOffset en todos los materiales de superficie,
+  teselado adaptable (tessMul: normal al editar, ×2,2 tras 450 ms quieto, en trozos de 25 ms; updateObject lo reinicia),
+  alphaToCoverage en LineMaterial y pixelRatio mínimo 1,5 (supersampling en pantallas de baja densidad).
+- Pruebas: forja/tline.mjs (captura a doble densidad), tao.mjs / tao2.mjs (AO con y sin), tclay.mjs, ttess.mjs. En swiftshader con
+  pixelRatio 1,5–2 + AO la página tarda en arrancar: subir los timeouts de las pruebas (240 s).
+- PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso
 
