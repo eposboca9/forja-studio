@@ -912,6 +912,7 @@ function clearSelection() { selObjs.length = 0; selCVs.clear(); selectionChanged
 
 function selectionChanged() {
   recomputeDeps();
+  if (typeof forgeSelectionChanged === 'function') forgeSelectionChanged();
   if (pivotEdit && (pickMode !== 'object' || !selObjs.length)) { pivotEdit = false; gizmo.setMode(xform); updateXformButtons(); }
   objects.forEach((o) => {
     applyVisibility(o);
@@ -2826,8 +2827,8 @@ const PUCK_CMDS = {
     { k: 'cube', label: 'Silla', run: () => runAI('una silla') }, { k: 'cube', label: 'Taza', run: () => runAI('una taza') }, { k: 'cube', label: 'Botella', run: () => runAI('una botella') }] },
   // comunes
   undo: { k: 'undo', label: 'Deshacer', key: 'Ctrl+Z', run: undo, sub: [{ k: 'redo', label: 'Rehacer', run: redo }] },
-  forgeIn: { k: 'object', label: 'De Forja', run: () => forgeFromForja() },
-  forgeOut: { k: 'dup', label: 'A Forja', run: () => $('bf-pushForja').click() },
+  forgeIn: { k: 'object', label: 'Usar selección', run: () => forgeFromForja() },
+  forgeOut: { k: 'dup', label: 'Crear objeto', run: () => $('bf-pushForja').click() },
   forgeExport: { k: 'object', label: 'Exportar', run: () => $('bf-exportBtn').click() },
   forgeFrame: { k: 'frame', label: 'Encuadrar', run: () => forge?.resetCamera() },
   forgeRender: { k: 'sun', label: 'Render', run: () => $('bf-ptTool').click() },
@@ -4581,6 +4582,7 @@ const forgeCtx = {
   toast: (msg) => toast(msg),
   // Forge da la vista en sus unidades: se pasa a la escena de Forja con la colocación de la pieza
   setView: (pos, target) => {
+    if (!forgeSource) return;   // sin pieza elegida, Forge no mueve la cámara
     placeForge(); forgeRoot.updateMatrixWorld(true);
     pos.applyMatrix4(forgeRoot.matrixWorld); target.applyMatrix4(forgeRoot.matrixWorld);
     pivot.copy(target); camera.position.copy(pos); camera.lookAt(target);
@@ -4604,16 +4606,15 @@ function ensureForge() {
     .catch((e) => { console.error(e); toast(`Forge no pudo arrancar: ${e.message}`); forgeLoading = null; });
   return forgeLoading;
 }
-// La pieza de Forge vive en la escena de Forja, a su tamaño real (mm de Forge → dm de Forja). Si salió de objetos de
-// Forja ("Traer de Forja") ocupa su mismo lugar y esos objetos se ocultan mientras se trabaja; si es una forma de Forge
-// (cubo, esfera...) se pone sobre el suelo, al lado de la escena.
+// Forge solo trabaja sobre objetos de la escena: la pieza ocupa el lugar de lo elegido (que se oculta en esta vista) y
+// sin pieza elegida no se dibuja nada de Forge (ni su cubo de arranque).
 let forgeSource = null;   // { ids, box } de lo que se trajo de Forja
 const _fb = new THREE.Vector3(), _fc = new THREE.Vector3();
 function placeForge() {
   const b = forge?.pieceBox();
   if (!b || b.isEmpty()) return;
   const size = b.getSize(_fb), c = b.getCenter(_fc), big = Math.max(size.x, size.y, size.z) || 1;
-  if (forgeSource && forge.fromFile()) {
+  if (forgeSource) {
     const sb = forgeSource.box, ss = sb.getSize(new THREE.Vector3()), s = Math.max(ss.x, ss.y, ss.z) / big;
     forgeRoot.scale.setScalar(s);
     forgeRoot.position.copy(sb.getCenter(new THREE.Vector3())).addScaledVector(c, -s);
@@ -4624,7 +4625,8 @@ function placeForge() {
     forgeRoot.position.set(x - c.x * s, -b.min.y * s, z - c.z * s);
   }
 }
-const forgeHidesSource = () => forgeSource && forge?.fromFile();
+const forgePiece = () => !!(forge && forgeSource && forge.fromFile() && forgeSource.ready);
+const forgeHidesSource = forgePiece;
 // la vista de Forge: los objetos de Forja con sus materiales (como Visu) y la pieza de Forge con su exposición y tono
 function renderForgePane(p) {
   if (forge) { placeForge(); forge.ground.visible = false; forge.grid.visible = false; }
@@ -4633,7 +4635,9 @@ function renderForgePane(p) {
     if (o.kind !== 'curve') o.parts.mesh.material = materials[o.mat];
     if (forgeHidesSource() && forgeSource.ids.includes(o.id)) for (const part of Object.values(o.parts)) if (part.visible) { part.visible = false; hid.push(part); }
   });
-  forgeRoot.visible = true;
+  forgeRoot.visible = forgePiece();
+  // en Forge no se mueve nada de Forja: sin manipulador ni marcas de pivote
+  for (const x of [gizmo, objPivotMarkers, pivotMarker]) if (x.visible) { x.visible = false; hid.push(x); }
   scene.background = null;
   scene.environment = envTexture('studio');
   const expo = renderer.toneMappingExposure;
@@ -4646,16 +4650,33 @@ function renderForgePane(p) {
 }
 // la selección de Forja (o todo lo visible) pasa a Forge como su pieza: superficies NURBS en STEP (modo exacto), mallas en STL
 async function forgeFromForja() {
-  const list = (selObjs.length ? selObjs : objects).filter((o) => o.visible && o.kind !== 'curve');
-  if (!list.length) return toast('No hay superficies ni mallas visibles para pasar a Forge.');
+  const list = selObjs.filter((o) => o.visible && o.kind !== 'curve');
+  if (!list.length) return toast('Elige con clic un objeto o una superficie de la escena para trabajar sobre él.');
+  const key = list.map((x) => x.id).join(',');
+  if (forgeSource?.key === key) return;
   const api = await ensureForge();
   if (!api) return;
   const o = { unit: 'mm', zUp: true }, nurbs = list.filter((x) => x.kind === 'surface');
-  forgeSource = { ids: list.map((x) => x.id), box: boundsOf(list) };
+  forgeSource = { key, ids: list.map((x) => x.id), box: boundsOf(list), ready: false };
+  $('bf-pieceName').textContent = `Pieza: ${list.map((x) => x.name).join(', ')} · preparando…`;
   const file = nurbs.length === list.length
     ? new File([X.writeSTEP(nurbs, o, `${baseName()}.step`)], `${baseName()}.step`)
     : new File([new STLExporter().parse(meshExportScene(list, o), { binary: true })], `${baseName()}.stl`);
   await api.openFile(file);
+}
+// cuando Forge termina de preparar la malla de la pieza
+forgeCtx.onPiece = () => {
+  if (!forgeSource) return;
+  forgeSource.ready = true;
+  $('app').dataset.forgePiece = '1';
+  $('bf-pieceName').textContent = `Pieza: ${forgeSource.ids.map((id) => byId(id)?.name || '¿?').join(', ')} · clic en otro objeto para cambiarla`;
+};
+// en Forge, elegir un objeto o superficie de la escena lo convierte en la pieza de trabajo
+let forgePickT = 0;
+function forgeSelectionChanged() {
+  if (layout !== 'forge' || !selObjs.some((o) => o.kind !== 'curve')) return;
+  clearTimeout(forgePickT);
+  forgePickT = setTimeout(forgeFromForja, 350);
 }
 $('bf-pullForja').addEventListener('click', forgeFromForja);
 $('bf-pushForja').addEventListener('click', () => { forgeToScene = true; $('bf-exportBtn').click(); });

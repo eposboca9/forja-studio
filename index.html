@@ -851,10 +851,15 @@
   .app[data-layout-now="forge"] #pane-mode { display: none; }
   .bf-ui .hint { position: static !important; transform: none !important; left: auto !important; bottom: auto !important; background: none !important; white-space: normal !important; }
   .bf-hud .chip { background: none !important; border: 0 !important; padding: 0 !important; box-shadow: none !important; backdrop-filter: none !important; border-radius: 0 !important; }
+  /* Forge trabaja solo sobre objetos de la escena: sin formas propias (cubo, esfera...) ni subir modelos; hasta elegir una pieza
+     el panel solo muestra cómo empezar y no hay datos de pieza */
+  .bf-ui :is(#bf-shapeSeg, #bf-latticeGrp, #bf-fileRow) { display: none !important; }
+  .app[data-forge-piece="0"] .bf-ui details.grp:not(.bf-piece), .app[data-forge-piece="0"] .bf-hud, .app[data-forge-piece="0"] #bf-pushForja,
+  .app[data-forge-piece="0"] #bf-resetCam, .app[data-forge-piece="0"] #bf-ptTool, .app[data-forge-piece="0"] #bf-autoRot { display: none !important; }
 </style>
 </head>
 <body>
-<div class="app auto" id="app">
+<div class="app auto" id="app" data-forge-piece="0">
 
   <nav class="tools" id="tools" aria-label="Herramientas">
       <button id="t-select" aria-pressed="true" title="Seleccionar (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 8-6 1.5L10 19z"/></svg></button>
@@ -977,22 +982,23 @@
     <div class="panel-body" id="panel-body">
 <div class="bf-ui" data-module="forge">
       <!-- FORGE: relieve físico por capas, patrones y cortes exactos (código de modelado de BumpForge, src/forge/engine.js) -->
-      <details class="grp" open>
-        <summary>Forja</summary>
+      <details class="grp bf-piece" open>
+        <summary>Pieza de trabajo</summary>
         <div class="grp-body">
+          <p class="hint" id="bf-pieceName">Haz clic en un objeto o una superficie de la escena para trabajar sobre él.</p>
           <div class="row2">
-            <button class="btn" id="bf-pullForja" title="Pasa lo elegido en Forja (o todo lo visible) a Forge como su pieza: NURBS en modo exacto, mallas como malla">Traer de Forja</button>
-            <button class="btn" id="bf-pushForja" title="Hornea el relieve y deja el resultado como objeto en la escena de Forja">Enviar a Forja</button>
+            <button class="btn" id="bf-pullForja" title="Usa lo elegido en la escena como pieza (superficies NURBS en modo exacto, mallas como malla)">Usar selección</button>
+            <button class="btn" id="bf-pushForja" title="Hornea el relieve y deja el resultado como objeto nuevo en la escena">Crear objeto</button>
           </div>
           <div class="row3">
             <button class="btn sm" id="bf-autoRot" aria-pressed="false" title="Rotación automática">Girar</button>
-            <button class="btn sm" id="bf-resetCam" title="Recentrar la cámara en la pieza">Encuadrar</button>
+            <button class="btn sm" id="bf-resetCam" title="Encuadrar la pieza">Encuadrar</button>
             <button class="btn sm" id="bf-ptTool" aria-pressed="false" title="Render realista (trazado de rayos)">Render</button>
           </div>
         </div>
       </details>
       <details class="grp" open>
-        <summary>Forma base </summary>
+        <summary>Malla de la pieza </summary>
         <div class="grp-body">
           <div class="seg" id="bf-shapeSeg">
             <button data-shape="cube" aria-pressed="true">Cubo</button>

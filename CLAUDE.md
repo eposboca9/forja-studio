@@ -372,6 +372,13 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   objetos se ocultan en esta vista; si es una forma de Forge (cubo, esfera...) se apoya en el suelo a la derecha de la escena.
   setView de Forge pasa por la matriz de forgeRoot. La selección de Forja funciona en Forge salvo mientras Forge elige
   caras / pinta (api.picking()). El suelo y la rejilla propios de Forge se ocultan (se usa el suelo de Forja).
+- (v0.18.2) Pedido del usuario: en Forge NO hay objetos propios (ni el cubo / cilindro de arranque de BumpForge, ni Forma base,
+  ni Subir modelo / Ejemplo): se trabaja eligiendo un objeto o superficie de la escena. Elegir con clic en Forge
+  (selectionChanged → forgeSelectionChanged, 350 ms) o "Usar selección" → forgeFromForja (solo lo elegido) → pieza en su lugar.
+  forgeSource = {key, ids, box, ready}; el motor llama ctx.onPiece al terminar rebuild en modo archivo/NURBS → ready, y
+  #app[data-forge-piece] = 1. Sin pieza: forgeRoot no se dibuja, setView no mueve la cámara y el panel solo muestra
+  "Pieza de trabajo" (CSS con data-forge-piece="0"). "Crear objeto" = hornear y dejarlo en la escena. En la vista de Forge se
+  ocultan gizmo y marcas de pivote.
 - Prueba: scratchpad forja/tbump.mjs [dark|light] [pull] [push] (jsdelivr bloqueado aquí: sirve paquetes de npm desde
   scratchpad/npmcdn). Resultado: arranca (cubo de ladrillos, 580.800 triángulos, hermética); el vaso de Forja llega como 4 caras
   NURBS, sólido cerrado; "Enviar a Forja" deja el STL horneado (841.208 triángulos) en la escena.

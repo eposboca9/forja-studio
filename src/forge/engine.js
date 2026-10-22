@@ -1187,7 +1187,7 @@ async function rebuild() {
   setViewGeometry(g, 'base');
   loadLayerToUI();
   renderCustomList(); syncBandSliders(); updateBandPreview();
-  applyModeUI();
+  applyModeUI();  if (ctx.onPiece && (state.shape === 'file' || state.shape === 'cad')) ctx.onPiece();
 }
 let cylinderSrc = null;
 
