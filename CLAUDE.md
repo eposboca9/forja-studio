@@ -467,6 +467,9 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - (v0.20.1) Preferencias › Interfaz: Oclusión ambiental (activar, intensidad prefs.aoInt, radio prefs.aoRad) y "Ajuste del modo
   Forja" (uBase, uRim, uSharp, uBlue, uSpec de envDiagMat, prefs.forjaShader) con "Copiar valores": el usuario los ajusta en vivo y
   pega el JSON para dejarlos como valores de arranque.
+- (v0.20.2) La rejilla aparece sola en la vista ortogonal de cada cara (updateDrawGrids): frente/atrás = XY, derecha/izquierda = YZ,
+  arriba/abajo = suelo XZ; en vista libre solo el suelo. gridUser = Mostrar › Rejilla. Las tres rejillas comparten estilo y tema.
+  Prueba: forja/tgrid.mjs.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso

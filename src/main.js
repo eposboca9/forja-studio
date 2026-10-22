@@ -175,7 +175,8 @@ grid.position.y = 0.001;
 grid.layers.set(DIAG);
 grid.material.transparent = true; grid.material.opacity = 0.1035;   // +15 % (antes 0,09), en tema claro y oscuro
 scene.add(grid);
-const gridXY = new THREE.GridHelper(30, 30, 0x4a3a22, 0x2a251d);
+const gridXY = new THREE.GridHelper(30, 30, 0x8a8781, 0xa3a09a);
+gridXY.material.transparent = true; gridXY.material.opacity = 0.1035;
 gridXY.rotation.x = Math.PI / 2;
 gridXY.layers.set(DIAG);
 gridXY.visible = false;
@@ -599,7 +600,7 @@ function applyTheme3D() {
   const t = THEME_3D[theme];
   curveMat.color.setHex(t.curve);
   edgeCurveMat.color.setHex(theme === 'dark' ? 0xd6dae2 : 0x1b1d21);
-  grid.material.color.setHex(t.grid);
+  grid.material.color.setHex(t.grid); gridXY.material.color.setHex(t.grid); gridYZ.material.color.setHex(t.grid);
   ground.material.opacity = t.shadow;
 }
 function setTheme(t) {
@@ -1382,14 +1383,25 @@ function setDrawPlane(k) {
   if (draft) showDraft();
 }
 // rejilla del plano de construcción mientras se dibuja
-const gridYZ = new THREE.GridHelper(30, 30, 0x4a3a22, 0x2a251d);
+const gridYZ = new THREE.GridHelper(30, 30, 0x8a8781, 0xa3a09a);
+gridYZ.material.transparent = true; gridYZ.material.opacity = 0.1035;
 gridYZ.rotation.z = Math.PI / 2;
 gridYZ.layers.set(DIAG);
 gridYZ.visible = false;
 scene.add(gridYZ);
 function updateDrawGrids() {
   const drawing = tool === 'curve' || tool === 'plane' || tool === 'circle', k = drawing ? resolvePlaneKind(tool !== 'curve') : null;
-  gridXY.visible = k === 'xy'; gridYZ.visible = k === 'yz';
+  // vista ortogonal de una cara (cubo de vistas): aparece la rejilla del plano que se ve de frente
+  // (frente/atrás = XY, derecha/izquierda = YZ, arriba/abajo = el suelo XZ)
+  let face = null;
+  if (proj.ortho) {
+    const d = viewDir(), a = [Math.abs(d.x), Math.abs(d.y), Math.abs(d.z)];
+    if (Math.max(...a) > 0.9995) face = a[2] > 0.9995 ? 'xy' : a[0] > 0.9995 ? 'yz' : 'xz';
+  }
+  const show = gridUser;
+  grid.visible = show && face !== 'xy' && face !== 'yz';          // de canto, el suelo no aporta
+  gridXY.visible = k === 'xy' || (show && face === 'xy');
+  gridYZ.visible = k === 'yz' || (show && face === 'yz');
 }
 
 const HINTS = {
@@ -2827,7 +2839,8 @@ function toggleModel() {
   objects.forEach(applyVisibility);
   toast(modelClean ? 'Toggle Model: parches, hulls y CVs ocultos' : 'Toggle Model: parches, hulls y CVs visibles');
 }
-function toggleGrid() { grid.visible = !grid.visible; }
+let gridUser = true;   // la rejilla que elige el usuario (Mostrar › Rejilla); además aparece sola en las vistas ortogonales de cada cara
+function toggleGrid() { gridUser = !gridUser; }
 function fullscreen() {
   if (document.fullscreenElement) document.exitFullscreen?.();
   else document.documentElement.requestFullscreen?.().catch(() => toast('La pantalla completa no está disponible en esta vista.'));
@@ -3369,7 +3382,7 @@ const MENUBAR = [
     { label: 'Forge', run: () => switchLayout('forge'), ...chk(() => layout === 'forge') },
     { label: 'Dividida', run: () => switchLayout('split'), ...chk(() => layout === 'split') }, { label: 'Elegir módulo', key: 'mantener V', run: () => toast('Mantén V y haz clic en un módulo') }]],
   ['Mostrar', [
-    { label: 'Toggle Model', run: toggleModel, ...chk(() => modelClean) }, { label: 'Rejilla', run: toggleGrid, ...chk(() => grid.visible) },
+    { label: 'Toggle Model', run: toggleModel, ...chk(() => modelClean) }, { label: 'Rejilla', run: toggleGrid, ...chk(() => gridUser) },
     { label: 'Líneas de parche', run: () => $('show-iso').click(), ...chk(() => $('show-iso').checked) },
     { label: 'Peine de curvatura', run: () => $('show-comb').click(), ...chk(() => $('show-comb').checked) },
     { sep: true }, { label: 'Ocultar selección', run: hideSelection }, { label: 'Mostrar todo', run: unhideAll }]],
@@ -5239,7 +5252,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;
