@@ -266,6 +266,36 @@ function projectUV(surf, grid, G, pt) {
   }
   return { uv: [u, v], dist: Math.sqrt(cur) };
 }
+// superficies cerradas (u=0 y u=1 son la misma línea, p. ej. un huevo): el punto más cercano de la costura cae en 0 o en 1 al azar.
+// Se encadena cada contorno sin saltos y se elige el lado de la costura (0 o 1) que deja los agujeros dentro del contorno exterior.
+function fixSeams(loops, grid, G) {
+  const closed = [0, 1].map((ax) => {
+    let m = 0;
+    for (let k = 0; k <= G; k++) { const a = ax === 0 ? grid[0][k] : grid[k][0], b = ax === 0 ? grid[G][k] : grid[k][G]; m = Math.max(m, a.distanceTo(b)); }
+    return m < 1e-3;
+  });
+  const ext = (x) => x < 1e-4 || x > 1 - 1e-4;
+  const pip = (poly, x, y) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c; } return c; };
+  for (let ax = 0; ax < 2; ax++) {
+    if (!closed[ax]) continue;
+    const seam = [];
+    loops.forEach((l, li) => {
+      const uv = l.uv;
+      for (let pass = 0; pass < 2; pass++)
+        for (let i = 1; i < uv.length; i++) if (ext(uv[i][ax]) && Math.abs(uv[i][ax] - uv[i - 1][ax]) > 0.5) uv[i][ax] = 1 - Math.round(uv[i][ax]);
+      uv.forEach((p, i) => { if (ext(p[ax])) seam.push([li, i]); });
+    });
+    if (!seam.length) continue;
+    const set = (val) => seam.forEach(([li, i]) => { loops[li].uv[i][ax] = val; });
+    const outer = loops.find((l) => l.trim === 'outside'), holes = loops.filter((l) => l.trim === 'inside');
+    let best = 0;
+    if (outer && holes.length) {
+      const ok = [0, 1].map((val) => { set(val); return holes.every((h) => pip(outer.uv, h.uv[0][0], h.uv[0][1])); });
+      best = ok[0] ? 0 : ok[1] ? 1 : 0;
+    }
+    set(best);
+  }
+}
 export function readSTEP(text, o) {
   const E = parseStepEntities(text), out = { surfaces: [], curves: [], skipped: {}, trimmed: 0, other: 0, faces: 0 };
   const get = (id) => E.get(id);
@@ -339,6 +369,7 @@ export function readSTEP(text, o) {
             if (uv.length > 1 && Math.hypot(uv[0][0] - uv[uv.length - 1][0], uv[0][1] - uv[uv.length - 1][1]) > 1e-4) uv.push(uv[0].slice());
             loops.push({ uv, trim: bd.type === 'FACE_OUTER_BOUND' ? 'outside' : 'inside' });
           });
+          if (!fail) fixSeams(loops, grid, G);
           if (fail) out.trimFailed = (out.trimFailed || 0) + 1; else sd.loops = loops;
         }
       }

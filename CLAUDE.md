@@ -564,6 +564,12 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (Node), tstep4.mjs (en la app). Todavía sin: sólidos con cascarón cerrado (B-rep real), caras analíticas como NURBS, unidades leídas del archivo.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
+- (v0.25.1) STEP: superficies CERRADAS (huevo: u=0 y u=1 son la misma línea, polos colapsados) rompían el recorte: projectUV daba 0 o 1 al azar en la costura y el contorno
+  exterior salía en zigzag (el cuerpo desaparecía y quedaba una "esfera de bandas"). fixSeams() (exporters.js) encadena cada contorno sin saltos y elige el lado
+  de la costura que deja los agujeros dentro del exterior. El modelo del usuario (fromaforja.stp) = 2 mitades espejo (caras 0–22 y 23–45), cada una un cuerpo
+  de huevo con una cavidad y el redondeo del borde; juntas dan las dos cavidades de su 2.ª captura. Prueba: scratchpad forja/tface2.mjs, tstep7.mjs;
+  captura docs/capturas/v0.25.1-step-huevo.png. Pendiente: la cara 21 y la 44 son la misma superficie en las dos mitades (no duplicadas, espejo).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
