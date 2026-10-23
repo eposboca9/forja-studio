@@ -38,10 +38,10 @@ fn box(d: vec3f, c: vec3f, ex: vec3f, ey: vec3f, w: f32, h: f32, col: vec3f) -> 
 fn studio(d: vec3f) -> vec3f {
   var c = mix(vec3f(0.004, 0.005, 0.008), vec3f(0.035, 0.04, 0.055), smoothstep(-0.3, 1.0, d.y));
   if (d.y < 0.0) { c = vec3f(0.005, 0.005, 0.006) * (1.0 + 2.0 * d.y); }
-  c += box(d, normalize(vec3f(0.0, 1.0, 0.12)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 0.0, 1.0), 1.0, 0.7, vec3f(5.0, 5.0, 5.2));            // caja de arriba
-  c += box(d, normalize(vec3f(-1.0, 0.25, 0.35)), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), 0.55, 1.0, vec3f(4.2, 4.3, 4.5));       // lateral izquierdo
-  c += box(d, normalize(vec3f(1.0, 0.2, -0.25)), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), 0.5, 0.95, vec3f(2.6, 3.2, 4.6));       // lateral derecho (azulado)
-  c += box(d, normalize(vec3f(0.25, 0.45, -1.0)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), 1.0, 0.25, vec3f(7.0, 6.6, 6.2));       // contraluz
+  c += box(d, normalize(vec3f(0.0, 1.0, 0.12)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 0.0, 1.0), 1.0, 0.7, vec3f(3.6, 3.6, 3.7));            // caja de arriba
+  c += box(d, normalize(vec3f(-1.0, 0.25, 0.35)), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), 0.55, 1.0, vec3f(3.4, 3.4, 3.5));       // lateral izquierdo
+  c += box(d, normalize(vec3f(1.0, 0.2, -0.25)), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), 0.5, 0.95, vec3f(2.2, 2.6, 3.4));       // lateral derecho (frío)
+  c += box(d, normalize(vec3f(0.25, 0.45, -1.0)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), 1.0, 0.25, vec3f(6.0, 5.6, 5.2));       // contraluz
   c += box(d, normalize(vec3f(-0.1, 0.1, 1.0)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), 0.6, 0.14, vec3f(1.2, 1.2, 1.3));        // relleno de frente
   return c;
 }

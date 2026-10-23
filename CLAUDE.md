@@ -627,6 +627,10 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (para que el usuario sepa si lo está usando; vi-proj). Probado con el modelo del usuario en pintura roja (Visu) y Forja/Arcilla: forja/tegg.mjs, tegg2.mjs. El usuario pidió seguir
   hasta igualar las referencias (Plasticity/Alias): siguen pendientes cajas de luz editables, pintura con flakes, Forge/IA en WebGPU y probar en su laptop (aún no vio el híbrido bien).
 
+- (v0.31) Capturas del usuario con el híbrido activo (su laptop, Intel Iris): funciona (Forja, Arcilla, Visu candy; sliders de entorno a 2,10 / 195°). Problema visto: ARCILLA salía casi
+  blanca y plana (difuso = último mip, luz uniforme). Ahora el difuso toma el entorno poco desenfocado (mip·0,62 ×0,8) para que la luz tenga dirección (lado iluminado y lado en sombra, como
+  la figura de arcilla de la referencia 6) y las cajas del estudio son menos intensas y más neutras (arriba 3,6; laterales 3,4 / frío; contraluz 6). Siguiente: pintura con flakes, cajas editables.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

@@ -46,7 +46,7 @@ fn envBRDF(noV: f32, rough: f32) -> vec2f {
   let nr = vec3f(n.x * cs - n.z * sn, n.y, n.x * sn + n.z * cs);
   let mm = fr.misc.z;
   let spec = textureSampleLevel(envT, envS, r, rough * mm).rgb;
-  let irr = textureSampleLevel(envT, envS, nr, mm).rgb;
+  let irr = textureSampleLevel(envT, envS, nr, mm * 0.62).rgb * 0.8;   // difuso: entorno poco desenfocado, así la luz tiene dirección (lado iluminado / lado en sombra)
   let ab = envBRDF(noV, rough);
   var col = (base * (1.0 - metal) * irr + spec * (f0 * ab.x + ab.y)) * fr.misc.y;
   // barniz: capa transparente de F0 = 0.04 con su propia rugosidad; atenúa lo de debajo
