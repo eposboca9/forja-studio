@@ -574,6 +574,11 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 
 - (v0.25.3) Pivotes y manipulador más discretos y de tamaño fijo en píxeles: pxWorld(p, px) (main.js) = unidades de mundo por píxel; marcador de pivote de objeto 20 px, marcador de navegación 24 px, gizmo.setSize(0.5). Cada superficie tiene su pivote; un grupo elegido como un solo objeto tiene el suyo.
 
+- (v0.25.4) Normales del STEP importado: (1) trimGeometry (freeform.js) daba a las caras RECORTADAS el giro de triángulos contrario al de ParametricGeometry, así que
+  en Visu las caras recortadas se veían grises/cromadas y las demás azules ("normales distintas por superficie"); ahora cada triángulo se invierte para igualar el giro.
+  (2) readSTEP orienta cada cara con same_sense: la normal STEP (hacia fuera) = Su×Sv, y Forja la quiere hacia dentro -> se traspone la malla de CVs (U<->V) y los lazos de recorte.
+  Verificado contra las normales de OpenCascade (46/46 coinciden) y con Cebra continua entre caras; curvatura: exterior convexa (rojo), cavidad cóncava (azul). Pruebas: forja/tnorm.mjs, tnm2.mjs.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

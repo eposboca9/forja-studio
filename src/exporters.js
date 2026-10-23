@@ -335,6 +335,8 @@ export function readSTEP(text, o) {
   for (const [, e] of E) {
     if (e.type === 'ADVANCED_FACE') {
       out.faces++;
+      // orientación: Forja quiere Su × Sv HACIA DENTRO; en STEP la normal de la cara es Su × Sv si same_sense = .T. (hacia fuera) -> se cambian U y V
+      { const sd = out.surfaces.find((sf) => sf.step === e.args[2]); if (sd && !sd.flipDone) { sd.flipDone = true; if (e.args[3] !== '.F.') sd.flip = true; } }
       const s0 = get(e.args[2]);
       if (!s0 || (!part(s0, 'B_SPLINE_SURFACE_WITH_KNOTS'))) out.other++;
       // ¿hay recortes? más de un contorno, o el contorno exterior no son 4 bordes de curva B-spline
@@ -374,6 +376,13 @@ export function readSTEP(text, o) {
         }
       }
     }
+  }
+  // aplicar el cambio de orientación (traspuesta: U <-> V) a la superficie y a sus lazos de recorte
+  for (const sd of out.surfaces) {
+    if (!sd.flip) continue;
+    const t = sd.cvs[0].map((_, j) => sd.cvs.map((row) => row[j]));
+    [sd.degU, sd.degV] = [sd.degV, sd.degU]; [sd.knotsU, sd.knotsV] = [sd.knotsV, sd.knotsU]; sd.cvs = t;
+    if (sd.loops) sd.loops.forEach((l) => l.uv.forEach((q) => q.reverse()));
   }
   return out;
 }

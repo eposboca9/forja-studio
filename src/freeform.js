@@ -505,6 +505,8 @@ export function trimGeometry(geo, segs, removed, S) {
   g.setAttribute('normal', new THREE.Float32BufferAttribute(Nn, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2));
   if (C) g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+  // mismo giro que ParametricGeometry (a, b, d en sentido antihorario en (u, v)): sin esto las caras recortadas se ven del revés
+  for (let k = 0; k < index.length; k += 3) { const t = index[k + 1]; index[k + 1] = index[k + 2]; index[k + 2] = t; }
   g.setIndex(index);
   return g;
 }
