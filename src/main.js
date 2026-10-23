@@ -20,6 +20,7 @@ import * as FL from './fillet.js';
 import { getOCC } from './occ.js';
 import { createAO } from './ao.js';
 import { createBackend } from './render/backend.js';
+import { BUILTIN, builtinMap, rollMap, thumb } from './envlib.js';
 import { probeWebGPU, describeProbe } from './render/webgpu-probe.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
@@ -104,10 +105,20 @@ const DIAG = 1;
 // Entornos de VISU (como los HDRI de Blender), generados por código y guardados al primer uso
 const pmrem = new THREE.PMREMGenerator(renderer);
 const envCache = {};
-function envTexture(k) {
-  if (envCache[k]) return envCache[k];
+// Biblioteca de entornos del panel: los 4 de siempre + los .hdr que cargue el usuario (item = { id, name, builtin?, map: { w, h, data } })
+const envLib = { items: BUILTIN.map((b) => ({ id: b.id, name: b.name, builtin: true })), rot: 0, rotApplied: 0, int: 1, nextHdr: 1 };
+const envMap = (it) => (it.map ||= builtinMap(it.id));
+function envTexture(k, rot = 0) {
+  const ck = k + '|' + rot;
+  if (envCache[ck]) return envCache[ck];
   let tex;
-  if (k === 'studio') tex = pmrem.fromScene(new RoomEnvironment(renderer), 0.04).texture;
+  const custom = envLib.items.find((x) => x.id === k && !x.builtin);
+  if (custom) {
+    const mp = rollMap(custom.map, rot), dt = new THREE.DataTexture(mp.data, mp.w, mp.h, THREE.RGBAFormat, THREE.HalfFloatType);
+    dt.mapping = THREE.EquirectangularReflectionMapping; dt.colorSpace = THREE.LinearSRGBColorSpace; dt.flipY = true;
+    dt.minFilter = dt.magFilter = THREE.LinearFilter; dt.generateMipmaps = false; dt.needsUpdate = true;
+    tex = pmrem.fromEquirectangular(dt).texture; dt.dispose();
+  } else if (k === 'studio') { const re = new RoomEnvironment(renderer); re.rotation.y = THREE.MathUtils.degToRad(rot); tex = pmrem.fromScene(re, 0.04).texture; }
   else if (k === 'overcast') {
     const sc = new THREE.Scene();
     sc.add(new THREE.Mesh(new THREE.SphereGeometry(10, 48, 24), new THREE.ShaderMaterial({
@@ -120,17 +131,17 @@ function envTexture(k) {
     const sky = new Sky(), u = sky.material.uniforms, sunset = k === 'sunset';
     sky.scale.setScalar(50);
     u.turbidity.value = sunset ? 8 : 2.5; u.rayleigh.value = sunset ? 2.5 : 1; u.mieCoefficient.value = 0.005; u.mieDirectionalG.value = 0.8;
-    u.sunPosition.value.setFromSphericalCoords(1, THREE.MathUtils.degToRad(sunset ? 87 : 52), THREE.MathUtils.degToRad(140));
+    u.sunPosition.value.setFromSphericalCoords(1, THREE.MathUtils.degToRad(sunset ? 87 : 52), THREE.MathUtils.degToRad(140 + rot));
     const sc = new THREE.Scene(); sc.add(sky);
     // suelo neutro para que la parte baja del reflejo no sea negra
     const ground = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshBasicMaterial({ color: sunset ? 0x2a2018 : 0x3a3834 }));
     ground.rotation.x = -Math.PI / 2; ground.position.y = -1; sc.add(ground);
     tex = pmrem.fromScene(sc, 0.01).texture;
   }
-  return (envCache[k] = tex);
+  return (envCache[ck] = tex);
 }
 let envKey = 'studio', envBg = true;
-scene.environment = envTexture('studio');
+scene.environment = envTexture('studio', 0);
 scene.backgroundBlurriness = 0.55;
 
 const camera = new THREE.PerspectiveCamera(35, 1, 0.05, 400);
@@ -561,7 +572,9 @@ const depthOnlyMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THRE
 // material de la superficie de un objeto en el panel actual; en modo híbrido la deja marcada para que el lienzo de WebGPU la pinte (color plano)
 // Modos de modelado que ya viven en el motor nuevo (PBR con estudio HDR): FORJA = grafito azulado con barniz tenue; ARCILLA = gris mate
 const GPU_DIAG = { forja: { color: 0x1d2028, pbr: [0, 0.36, 0.5, 0.16] }, clay: { color: 0x6a6b70, pbr: [0, 0.82, 0, 0.3], env: 'horizon' } };
-const gpuDiag = () => (backend.hybrid ? GPU_DIAG[diagMode] : null);
+// El motor híbrido SOLO toma Visu: los modos de modelado (Forja, Arcilla, Difuso, Shade-Sky...) se quedan con los shaders clásicos, que son los buenos.
+const GPU_MODELING = false;
+const gpuDiag = () => (backend.hybrid && GPU_MODELING ? GPU_DIAG[diagMode] : null);
 function setSurfaceMaterial(o, diag, dm, wire, hy = backend.hybrid && (!diag || !!gpuDiag())) {
   const mesh = o.parts.mesh, mt = materials[o.mat], gd = diag ? gpuDiag() : null;
   mesh.material = hy ? depthOnlyMat : diag ? dm : mt;
@@ -746,7 +759,7 @@ function addSurface(data, base = 'Superficie') {
   p.mesh.castShadow = true;
   p.mesh.userData.obj = obj;
   p.iso = new LineSegments2(new LineSegmentsGeometry(), isoMat); p.iso.layers.set(DIAG);
-  p.bound = new LineSegments2(new LineSegmentsGeometry(), wireLineMat); p.bound.layers.set(DIAG);   // bordes (modo Malla)
+  p.bound = new LineSegments2(new LineSegmentsGeometry(), wireLineMat);   // bordes (modo Malla y aristas); su visibilidad se decide en cada panel
   p.hull = new THREE.LineSegments(new THREE.BufferGeometry(), hullMat); p.hull.layers.set(DIAG);
   p.hullEdge = new THREE.LineSegments(new THREE.BufferGeometry(), hullEdgeMat); p.hullEdge.layers.set(DIAG);
   p.hull.add(p.hullEdge);   // hijo: se muestra y se oculta junto con el polígono
@@ -1049,10 +1062,11 @@ function applyVisibility(obj) {
   const LY = layerById(obj.layer), lm = layerStyled(LY) ? layerMats(LY) : null;   // color / estado de la capa
   // los CVs se ven en el modo CV (los de los objetos encendidos) y, en cualquier modo, en los objetos elegidos: al crear, mover o alinear
   p.handles.visible = p.hull.visible = vis && !modelClean && ((cvMode && cvTargets.has(obj.id)) || (sel && obj.kind !== 'mesh'));
+  const showFaces = prefs.showFaces !== false, showCurves = prefs.showCurves !== false;
   if (obj.kind === 'mesh') {
-    p.mesh.visible = vis;
+    p.mesh.visible = vis && showFaces;
   } else if (obj.kind === 'surface') {
-    p.mesh.visible = vis;
+    p.mesh.visible = vis && showFaces;
     const wire = diagMode === 'wire';
     p.iso.visible = vis && (wire || ($('show-iso').checked && !modelClean));
     p.iso.material = sel ? isoSelMat : lm ? lm.iso : histState(obj) === 'dep' ? isoDepMat : histState(obj) === 'hist' ? isoHistMat : wire ? wireLineMat : isoMat;
@@ -1060,10 +1074,11 @@ function applyVisibility(obj) {
     p.hull.material = lm ? lm.hull : hullMat; p.hullEdge.material = lm ? lm.hullEdge : hullEdgeMat;
     p.edge.visible = vis && sel;
   } else {
-    p.line.visible = vis;
+    const curveOn = obj.data.cos?.edge || showCurves;   // los bordes de recorte son aristas, no curvas de construcción
+    p.line.visible = vis && curveOn;
     p.line.material = sel ? curveSelMat : lm ? (obj.data.cos?.edge ? lm.edgeCurve : lm.curve) : histState(obj) === 'dep' ? curveDepMat : histState(obj) === 'hist' ? curveHistMat : obj.data.cos?.edge ? edgeCurveMat : curveMat;
     p.hull.material = lm ? lm.hull : hullMat;
-    p.comb.visible = p.env.visible = vis && $('show-comb').checked && !modelClean && !obj.data.cos?.edge;   // los bordes de recorte no llevan peine
+    p.comb.visible = p.env.visible = vis && curveOn && $('show-comb').checked && !modelClean && !obj.data.cos?.edge;   // los bordes de recorte no llevan peine
   }
 }
 
@@ -2355,12 +2370,58 @@ $('me-color').addEventListener('input', (e) => { materials[matKey].color.set(e.t
 for (const [id, prop] of [['me-metal', 'metalness'], ['me-coat', 'clearcoat'], ['me-coatr', 'clearcoatRoughness'], ['me-trans', 'transmission']]) {
   $(id).addEventListener('input', (e) => { materials[matKey][prop] = +e.target.value; $(id + '-o').textContent = fmt2(e.target.value); });
 }
-document.querySelectorAll('[data-env]').forEach((b) => b.addEventListener('click', () => {
-  envKey = b.dataset.env;
-  document.querySelectorAll('[data-env]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-  $('expo').value = envKey === 'sun' || envKey === 'sunset' ? -1.4 : 0; $('expo').dispatchEvent(new Event('input'));
-}));
-$('env-int').addEventListener('input', (e) => { Object.values(materials).forEach((m) => (m.envMapIntensity = +e.target.value)); $('env-int-o').textContent = fmt2(e.target.value); });
+// ----- Panel de entornos: miniaturas, rotación, intensidad y carga de .hdr (clásico y motor híbrido a la vez) -----
+function setEnvOpts(o = {}) {
+  if (o.rot !== undefined) envLib.rot = ((Math.round(+o.rot || 0) % 360) + 360) % 360;
+  if (o.int !== undefined) envLib.int = Math.max(0, Math.min(5, +o.int || 0));
+  backend.envRotation = (envLib.rot * Math.PI) / 180; backend.envIntensity = envLib.int;
+  Object.values(materials).forEach((mt) => (mt.envMapIntensity = envLib.int));
+  $('env-rot').value = envLib.rot; $('env-int').value = +envLib.int.toFixed(2);
+  for (const [id, v, out, f] of [['pref-env-int', envLib.int, 'pref-env-int-o', (x) => x.toFixed(2)], ['pref-env-rot', envLib.rot, 'pref-env-rot-o', (x) => x + '°']]) { const el = $(id); if (el) { el.value = v; $(out).textContent = f(v); } }
+  prefs.envInt = envLib.int; prefs.envRot = envLib.rot; savePrefs();
+  sceneChangedAt = performance.now();
+  // el motor clásico no sabe girar el entorno: se rehace el PMREM con el giro (con retardo, para no hacerlo en cada paso del control)
+  clearTimeout(setEnvOpts.t); setEnvOpts.t = setTimeout(() => { envLib.rotApplied = envLib.rot; sceneChangedAt = performance.now(); }, 140);
+}
+function selectEnv(id) {
+  const it = envLib.items.find((x) => x.id === id) || envLib.items[0];
+  envKey = it.id;
+  backend.setEnv(it.id === 'studio' ? null : envMap(it));   // motor híbrido: estudio procedural de la tarjeta o mapa equirectangular
+  $('expo').value = it.id === 'sun' || it.id === 'sunset' ? -1.4 : 0; $('expo').dispatchEvent(new Event('input'));
+  document.querySelectorAll('#env-grid [data-env]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.env === it.id)));
+  sceneChangedAt = performance.now();
+}
+function buildEnvGrid() {
+  const g = $('env-grid'); g.innerHTML = '';
+  for (const it of envLib.items) {
+    const b = document.createElement('button');
+    b.className = 'envt'; b.dataset.env = it.id; b.title = it.name; b.setAttribute('aria-pressed', String(it.id === envKey));
+    b.append(thumb(envMap(it), 64));
+    b.addEventListener('click', () => selectEnv(it.id));
+    g.append(b);
+  }
+  const add = document.createElement('button');
+  add.className = 'envt add'; add.textContent = '+'; add.title = 'Cargar un HDRI (.hdr) propio';
+  add.addEventListener('click', () => $('env-file').click());
+  g.append(add);
+}
+async function loadHdrFile(f) {
+  try {
+    const { RGBELoader } = await import('three/addons/loaders/RGBELoader.js');
+    const ld = new RGBELoader(); ld.setDataType(THREE.HalfFloatType);
+    const tex = ld.parse(await f.arrayBuffer());
+    const it = { id: 'hdr' + envLib.nextHdr++, name: f.name.replace(/\.hdr$/i, ''), map: { w: tex.width, h: tex.height, data: tex.data } };
+    envLib.items.push(it); buildEnvGrid(); selectEnv(it.id);
+    toast(`Entorno "${it.name}" cargado${backend.hybrid ? '' : ' (el motor híbrido lo usa al activarlo)'}`);
+  } catch (err) { toast('No se pudo leer el .hdr: ' + err.message); }
+}
+$('env-file').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) loadHdrFile(f); });
+$('env-rot').addEventListener('input', (e) => { if (e.target.value !== '') setEnvOpts({ rot: e.target.value }); });
+$('env-int').addEventListener('input', (e) => { if (e.target.value !== '') setEnvOpts({ int: e.target.value }); });
+for (const [id, key] of [['show-edges', 'showEdges'], ['show-curves', 'showCurves'], ['show-faces', 'showFaces']]) {
+  $(id).checked = key === 'showEdges' ? prefs[key] === true : prefs[key] !== false;
+  $(id).addEventListener('change', (e) => { prefs[key] = e.target.checked; savePrefs(); objects.forEach(applyVisibility); sceneChangedAt = performance.now(); });
+}
 $('env-bg').addEventListener('change', (e) => { envBg = e.target.checked; });
 $('env-blur').addEventListener('input', (e) => { scene.backgroundBlurriness = +e.target.value; $('env-blur-o').textContent = fmt2(e.target.value); });
 $('tone').addEventListener('change', (e) => { toneKey = e.target.value; });
@@ -3830,27 +3891,12 @@ function initPrefs() {
     };
     sel.addEventListener('change', () => { prefs.engine = sel.value; savePrefs(); apply(sel.value); });
     if (prefs.engine === 'webgpu') apply('webgpu');
-    // entorno del motor nuevo: intensidad, giro y archivo .hdr propio (o el estudio procedural)
+    // entorno del motor nuevo: intensidad, giro y archivo .hdr propio (comparte funciones con el panel de Entornos de Visu)
     const ei = $('pref-env-int'), er = $('pref-env-rot');
-    ei.value = prefs.envInt ?? 1; er.value = prefs.envRot ?? 0;
-    const syncEnv = () => { backend.envIntensity = +ei.value; backend.envRotation = (+er.value * Math.PI) / 180; $('pref-env-int-o').textContent = (+ei.value).toFixed(2); $('pref-env-rot-o').textContent = er.value + '°'; sceneChangedAt = performance.now(); };
-    ei.addEventListener('input', () => { prefs.envInt = +ei.value; savePrefs(); syncEnv(); });
-    er.addEventListener('input', () => { prefs.envRot = +er.value; savePrefs(); syncEnv(); });
-    syncEnv();
-    $('pref-env-hdr').addEventListener('click', () => $('pref-env-file').click());
-    $('pref-env-studio').addEventListener('click', () => { backend.setEnv(null); $('pref-env-name').textContent = 'Estudio procedural'; });
-    $('pref-env-file').addEventListener('change', async (e) => {
-      const f = e.target.files[0]; if (!f) return;
-      try {
-        const { RGBELoader } = await import('three/addons/loaders/RGBELoader.js');
-        const ld = new RGBELoader(); ld.setDataType(THREE.HalfFloatType);
-        const tex = ld.parse(await f.arrayBuffer());
-        backend.setEnv({ w: tex.width, h: tex.height, data: tex.data });
-        $('pref-env-name').textContent = f.name;
-        if (!backend.hybrid) toast('Entorno cargado: se verá al activar el motor híbrido.');
-      } catch (err) { toast('No se pudo leer el .hdr: ' + err.message); }
-      e.target.value = '';
-    });
+    ei.addEventListener('input', () => setEnvOpts({ int: +ei.value }));
+    er.addEventListener('input', () => setEnvOpts({ rot: +er.value }));
+    $('pref-env-hdr').addEventListener('click', () => $('env-file').click());
+    $('pref-env-studio').addEventListener('click', () => { selectEnv('studio'); $('pref-env-name').textContent = 'Estudio procedural'; });
     $('pref-edges').checked = prefs.edges !== false;
     $('pref-edges').addEventListener('change', (e) => { prefs.edges = e.target.checked; savePrefs(); });
     $('pref-ao-visu').checked = prefs.aoVisu !== false;
@@ -5298,12 +5344,13 @@ function renderPane(p) {
   const diag = p.kind !== 'render';                 // MODELADO e IA usan los shaders de evaluación
   const dm = diagMaterial(), wire = diag && diagMode === 'wire';
   if (wire) { const c = theme === 'dark' ? 0xe8e8e8 : 0x1b1d21; wireLineMat.color.setHex(c); wireFeatMat.color.setHex(c); }
+  faceEdgeMat.color.setHex(diag && diagMode === 'clay' ? 0x08090b : theme === 'dark' ? 0xe6eaf2 : 0x14161a);   // aristas: oscuras sobre arcilla, claras u oscuras según el tema
   if (fil?.preview) fil.preview.material = diag && !wire ? dm : materials[fil.items[0].mat];
   objects.forEach((o) => {
     if (o.kind === 'curve') return;
     setSurfaceMaterial(o, diag, dm, wire);
     if (o.kind === 'surface' && o.parts.bound && !wire) {
-      const show = diag && diagMode === 'clay' && prefs.edges !== false && o.visible && !modelClean;
+      const show = ((diag && diagMode === 'clay' && prefs.edges !== false) || prefs.showEdges === true) && o.visible && !modelClean && prefs.showFaces !== false;
       o.parts.bound.visible = show;
       if (show) { const L = layerById(o.layer); o.parts.bound.material = selObjs.includes(o) ? isoSelMat : layerStyled(L) ? layerMats(L).bound : faceEdgeMat; }
     }
@@ -5313,7 +5360,7 @@ function renderPane(p) {
   syncGhosts();
   scene.background = !diag && envBg && !backend.hybrid ? scene.environment : null;   // en híbrido el fondo es el muro (el lienzo de abajo no se tapa)
   renderer.toneMapping = diag ? THREE.ACESFilmicToneMapping : TONES[toneKey];
-  scene.environment = diag ? envTexture('studio') : envTexture(envKey);
+  scene.environment = diag ? envTexture('studio', 0) : envTexture(envKey, envLib.rotApplied);
   camera.layers.set(0);
   if (diag) camera.layers.enable(DIAG);
   renderer.render(scene, camera);
@@ -5712,6 +5759,7 @@ function renderForgePane(p) {
   const hid = [];
   objects.forEach((o) => {
     if (o.kind !== 'curve') setSurfaceMaterial(o, false, null, false, false);
+    if (o.parts.bound) o.parts.bound.visible = false;
     if (forgeHidesSource() && (forgeSource.ids.includes(o.id) || o.id === forgeSource.resultId)) for (const part of Object.values(o.parts)) if (part.visible) { part.visible = false; hid.push(part); }
   });
   syncGhosts();
@@ -5851,6 +5899,7 @@ function resize() {
 }
 
 // ---------- Arranque ----------
+buildEnvGrid(); setEnvOpts({ rot: prefs.envRot ?? 0, int: prefs.envInt ?? 1 });
 new ResizeObserver(resize).observe(view);
 resize();
 buildMaterialLibrary();

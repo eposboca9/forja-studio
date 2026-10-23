@@ -681,6 +681,21 @@
   .sym-menu { position: fixed; z-index: 120; min-width: 210px; padding: 4px 0; background: color-mix(in srgb, var(--bg) 92%, #000); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.45); color: var(--fg); }
   .sym-menu button { display: block; width: 100%; text-align: left; background: none; border: 0; color: inherit; font: inherit; font-size: 12px; padding: 6px 12px; cursor: pointer; }
   .sym-menu button:hover { color: #2f7bff; } .sym-menu hr { border: 0; border-top: 1px solid rgba(127,127,127,.25); margin: 4px 8px; }
+  /* panel de entornos (HDRI): miniaturas de esfera, opciones numéricas e interruptores */
+  .envgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .envt { position: relative; padding: 0; border: 0; background: none; cursor: pointer; border-radius: 50%; aspect-ratio: 1; box-shadow: 0 0 0 2px transparent; transition: box-shadow .15s; }
+  .envt canvas { width: 100%; height: 100%; border-radius: 50%; display: block; }
+  .envt:hover { box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 35%, transparent); }
+  .envt[aria-pressed="true"] { box-shadow: 0 0 0 2px #2f7bff; }
+  .envt.add { display: grid; place-items: center; font-size: 22px; line-height: 1; border: 1px dashed color-mix(in srgb, currentColor 45%, transparent); color: inherit; }
+  .envh { margin-top: 6px; }
+  .numrow { display: grid; grid-template-columns: 1fr 96px 12px; align-items: center; gap: 6px; font-size: 12.5px; }
+  .numrow input { width: 100%; background: rgba(127,127,127,.16); border: 0; border-radius: 6px; padding: 6px 8px; color: inherit; font: inherit; font-family: var(--font-mono); text-align: center; }
+  .numrow i { font-style: normal; opacity: .6; }
+  .swrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; cursor: pointer; }
+  input.sw { appearance: none; -webkit-appearance: none; width: 38px; height: 22px; border-radius: 11px; background: rgba(127,127,127,.35); position: relative; cursor: pointer; flex: none; transition: background .15s; }
+  input.sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  input.sw:checked { background: #2f7bff; } input.sw:checked::after { transform: translateX(16px); }
   .ly-item { display: grid; grid-template-columns: 24px 1fr auto 22px; align-items: center; gap: 4px; border-radius: 5px; padding: 1px 2px; }
   .ly-item.active { background: color-mix(in srgb, #2f7bff 16%, transparent); }
   .ly-item.off .ly-name { opacity: .45; }
@@ -1704,17 +1719,18 @@
       <div class="row"><label for="me-trans">Transmisión</label><input id="me-trans" type="range" min="0" max="1" step="0.01"><output id="me-trans-o"></output></div>
     </section>
 
-    <section class="sec" data-module="render">
-      <h2>Entorno</h2>
-      <div class="envs" role="group" aria-label="Entorno de iluminación">
-        <button class="btn" data-env="studio" aria-pressed="true">Estudio</button>
-        <button class="btn" data-env="sun" aria-pressed="false">Exterior</button>
-        <button class="btn" data-env="sunset" aria-pressed="false">Atardecer</button>
-        <button class="btn" data-env="overcast" aria-pressed="false">Nublado</button>
-      </div>
-      <div class="row"><label for="env-int">Intensidad</label><input id="env-int" type="range" min="0" max="3" step="0.05" value="1"><output id="env-int-o">1.00</output></div>
-      <label class="check"><input type="checkbox" id="env-bg" checked> Ver el entorno de fondo</label>
+    <section class="sec envp" data-module="render">
+      <h2>Entornos</h2>
+      <div class="envgrid" id="env-grid" role="group" aria-label="Todos los entornos"></div>
+      <input type="file" id="env-file" accept=".hdr" hidden>
+      <h2 class="envh">Opciones</h2>
+      <label class="numrow"><span>Rotación</span><input type="number" id="env-rot" min="0" max="360" step="1" value="0"><i>°</i></label>
+      <label class="numrow"><span>Intensidad</span><input type="number" id="env-int" min="0" max="5" step="0.1" value="1"></label>
+      <label class="swrow"><span>Ver el entorno de fondo</span><input type="checkbox" class="sw" id="env-bg" checked></label>
       <div class="row"><label for="env-blur">Desenfoque</label><input id="env-blur" type="range" min="0" max="1" step="0.01" value="0.55"><output id="env-blur-o">0.55</output></div>
+      <label class="swrow"><span>Mostrar aristas</span><input type="checkbox" class="sw" id="show-edges"></label>
+      <label class="swrow"><span>Mostrar curvas</span><input type="checkbox" class="sw" id="show-curves" checked></label>
+      <label class="swrow"><span>Mostrar caras</span><input type="checkbox" class="sw" id="show-faces" checked></label>
     </section>
 
     <section class="sec" data-module="render">

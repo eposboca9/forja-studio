@@ -648,6 +648,15 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (3) AO más profundo: muestras 14 y intensidad ×1,55 en Arcilla (main.js, antes de ao.apply); (4) normal de reserva con derivadas de pantalla cuando la del vértice es indefinida (polos).
   Prueba: forja/trot.mjs, tpole.mjs (montajes mont-classic.png / mont-gpu.png). El resto de modos clásicos (Showroom...) no cambió.
 
+- (v0.34) DECISIÓN del usuario: el motor clásico "va muy bien, los shaders no se tocan"; el problema eran Arcilla, Shade-Sky y Difuso en el HÍBRIDO. Ahora el híbrido SOLO toma VISU
+  (GPU_MODELING = false en main.js: los modos de modelado usan siempre los shaders clásicos; el código de Forja/Arcilla en WGSL queda desactivado, no borrado).
+  Panel de ENTORNOS en el panel de Visu (Plasticity "All environments"): miniaturas de esfera espejo (envlib.js thumb) de los 4 entornos de siempre + los .hdr que cargue el usuario
+  (botón "+", RGBELoader media precisión; solo en memoria, no se guardan), OPCIONES con Rotación (°) e Intensidad (numéricas; setEnvOpts) y interruptores Mostrar aristas / curvas / caras
+  (prefs.showEdges [defecto apagado: aristas de cada cara en Visu y en cualquier modo], showCurves, showFaces; applyVisibility y el bucle de renderPane). selectEnv(id): híbrido
+  = backend.setEnv(mapa | null=estudio procedural); clásico = envKey + envTexture(k, rot) (PMREM; custom desde equirectangular; el giro se rehace con un retardo de 140 ms porque three 0.160 no
+  tiene environmentRotation). Intensidad: envMapIntensity de los materiales + backend.envIntensity. envlib.js: mapas equirectangulares procedurales (estudio, exterior, atardecer, nublado),
+  rollMap (giro), thumb. Las preferencias › Motor de render comparten las mismas funciones. Pruebas: forja/tenvp.mjs, tenvp2.mjs (capturas envp-*.png).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
