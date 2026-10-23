@@ -673,6 +673,17 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   tabla de clases 'aw.*' y luego un 'Cube' con texturas .pix (p. ej. AST20C0.pix de 512x512, RLE) y luces: el entorno es la geometría + texturas, no un HDRI. Falta parsear las texturas (PIX) y la
   malla para reconstruir un mapa de entorno; alternativa más simple: pedir al usuario HDR/EXR exportados o capturas de esfera espejo.
 
+- (v0.36) Barra izquierda = Capas ARRIBA y herramientas DEBAJO (las herramientas se bajan lo que mida Capas: --ly-h, layersWin.measure con ResizeObserver). Botón ●/○ en la cabecera de Capas (y Ventanas ›
+  Anclar barra izquierda) = prefs.leftPin: anclada = clase .app.left-pinned y no se oculta; sin anclar sale al acercar el ratón al borde izquierdo. Ya no hay ventana flotante (se quitó el arrastre).
+- (v0.36) ENTORNOS DE ALIAS: Showroom, Difuso (Diffuse), Evaluación y Abstracto, sacados de los archivos del usuario (el de Hall NO, por decisión suya). Extracción (scratchpad extract.py, tifflzw.py,
+  lzw3.py): el flujo comprimido contiene registros [0x32 00 00 00 00 00 00 00 | u32 | ruta\0 | u32 LE longitud | datos] en trozos de 16384 B que se juntan por nombre de archivo; los TIFF son LZW de 341x341
+  RGBA (cada tira se recorta a su tamaño: una tira sale 3 bytes larga); Abstract usa 3 texturas .pix (RLE BGR, 512x512): lados = AST20C0, arriba = AST20C1 (blanca), abajo = AST20C2 (asignación SUPUESTA).
+  Cubo -> equirectangular 512x256 (convención de envlib: y arriba, izquierda -> frente(-Z) -> derecha -> atrás por azimut creciente) guardado como PNG base64 en src/env-alias.js (ALIAS_ENVS);
+  envlib.decodePngEnv pasa sRGB -> lineal y estira las luces hasta x4 (el PNG de 8 bits las recorta); main.js loadAliasEnvs() los añade a envLib.items (aparecen como miniaturas en el panel de Visu).
+- (v0.36) Freeform Blend revisado con la ficha del usuario: ya existían Lado 1/2 G0–G3 independientes, Forma, Corona, flujo (inicio/fin/interior) y sentido detectado solo. Añadido: flecha de giro (Flip,
+  r.flip, kind 'f') en el lado 2 del blend (freeform.js orient invierte el sentido; con flip no se usa el blend exacto). PENDIENTE de la ficha: flujo "Perpendicular al lado 1" y "por vector";
+  cebra/peines de curvatura en vivo sobre las secciones al arrastrar Corona/Forma (hoy solo se ven con el diagnóstico normal).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

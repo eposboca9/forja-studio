@@ -91,3 +91,20 @@ export function thumb(m, size = 56) {
   g.putImageData(img, 0, 0);
   return c;
 }
+
+// Entornos de Alias: PNG sRGB de 8 bits -> mapa lineal en media precisión. Un PNG de 8 bits recorta las luces a blanco, así que se estiran
+// suavemente (hasta x4 en lo más blanco) para que la franja del horizonte o las cajas de luz sigan iluminando y reflejándose como luces de verdad.
+export async function decodePngEnv(b64) {
+  const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode();
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+  const px = g.getImageData(0, 0, c.width, c.height).data, data = new Uint16Array(c.width * c.height * 4);
+  for (let i = 0; i < px.length; i += 4) {
+    for (let q = 0; q < 3; q++) {
+      const s = px[i + q] / 255, lin = s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      data[i + q] = half(lin * (1 + 3 * ss(0.8, 1, s)));
+    }
+    data[i + 3] = half(1);
+  }
+  return { w: c.width, h: c.height, data };
+}

@@ -130,6 +130,7 @@ function orient(r, A, B) {
     const a0 = A.at(mA(0)).P, a1 = A.at(mA(1)).P, b0 = B.at(rB[0]).P, b1 = B.at(rB[1]).P;
     rev = a0.distanceTo(b0) + a1.distanceTo(b1) > a0.distanceTo(b1) + a1.distanceTo(b0);
   }
+  if (r.flip) rev = !rev;   // flecha de giro (Flip) del lado 2: invierte el sentido que se detectó solo
   return { rA, rB, offA, offB, rev };
 }
 

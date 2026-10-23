@@ -20,7 +20,8 @@ import * as FL from './fillet.js';
 import { getOCC } from './occ.js';
 import { createAO } from './ao.js';
 import { createBackend } from './render/backend.js';
-import { BUILTIN, builtinMap, rollMap, thumb } from './envlib.js';
+import { BUILTIN, builtinMap, rollMap, thumb, decodePngEnv } from './envlib.js';
+import { ALIAS_ENVS } from './env-alias.js';
 import { probeWebGPU, describeProbe } from './render/webgpu-probe.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
@@ -2408,6 +2409,13 @@ function buildEnvGrid() {
   add.addEventListener('click', () => $('env-file').click());
   g.append(add);
 }
+// Entornos de Alias (de los archivos del usuario): se decodifican al arrancar y se añaden a la biblioteca
+async function loadAliasEnvs() {
+  for (const e of ALIAS_ENVS) {
+    try { envLib.items.push({ id: e.id, name: e.name, map: await decodePngEnv(e.png) }); } catch (err) { console.warn('entorno', e.id, err); }
+  }
+  buildEnvGrid();
+}
 async function loadHdrFile(f) {
   try {
     const { RGBELoader } = await import('three/addons/loaders/RGBELoader.js');
@@ -4004,7 +4012,7 @@ function sideOf(ids, edge) {
 const blendSides = (r) => [sideOf(r.aIds || [r.a], r.aEdge), sideOf(r.bIds || [r.b], r.bEdge)];
 // con dos bordes completos y flujo isoparamétrico se usa el Blend exacto de CVs (history.js); si no, el Freeform por estaciones
 const exactBlend = (r) => r.type === 'blend' && byId(r.a)?.kind === 'surface' && byId(r.b)?.kind === 'surface'
-  && !r.explicit && !r.modRange && !r.crown && (r.flowInt ?? 'iso') === 'iso';
+  && !r.explicit && !r.modRange && !r.crown && !r.flip && (r.flowInt ?? 'iso') === 'iso';
 function blendRelData(r) {
   if (exactBlend(r)) {
     if (r.lockShape) r.tensionB = r.tensionA ?? r.tension;
@@ -4861,6 +4869,8 @@ function relHandles(r) {
     // con "Bloquear formas" las dos flechas azules mueven la misma forma
     rows('v0', r.contA ?? r.cont, 'tensionA', 'shapeA');
     rows('v1', r.contB ?? r.cont, r.lockShape ? 'tensionA' : 'tensionB', 'shapeB');
+    // flecha de giro (Flip) del lado 2: si las direcciones no fluyen hacia el mismo lado la superficie se retuerce; un clic invierte el lado 2
+    { const b0 = HX.row(d, 'v1', 0), fa = v3(b0[0]), fb = v3(b0[1]); H.push({ pos: fa, dir: fb.clone().sub(fa).normalize(), kind: 'f', label: 'invertir lado 2', click: () => { r.flip = !r.flip; } }); }
   } else if (r.type === 'extend') {
     const p0 = v3(mid(HX.row(d, 'v0', 0))), p = v3(mid(HX.row(d, 'v1', 0))), dir = p.clone().sub(p0).normalize();
     H.push({ pos: p, dir: dir.lengthSq() ? dir : new THREE.Vector3(0, 1, 0), kind: 'd', label: 'distancia', start: () => r.dist, drag: (delta, s0) => { r.dist = Math.max(0.01, Math.round((s0 + delta) * 100) / 100); } });
@@ -5899,7 +5909,7 @@ function resize() {
 }
 
 // ---------- Arranque ----------
-buildEnvGrid(); setEnvOpts({ rot: prefs.envRot ?? 0, int: prefs.envInt ?? 1 });
+buildEnvGrid(); setEnvOpts({ rot: prefs.envRot ?? 0, int: prefs.envInt ?? 1 }); loadAliasEnvs();
 new ResizeObserver(resize).observe(view);
 resize();
 buildMaterialLibrary();
