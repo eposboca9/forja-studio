@@ -512,7 +512,7 @@ const envDiagMat = new THREE.ShaderMaterial({
         // uBlue = cuánto azul de marca · uSpec = brillo puntual
         float graze = pow(1.0 - max(dot(ve, ne), 0.0), uSharp);
         float wrap = clamp(dot(ne, L) * 0.5 + 0.5, 0.0, 1.0);
-        vec3 base = vec3(0.105, 0.11, 0.125) * (0.6 + 1.5 * wrap * wrap + 0.5 * dif2) * uBase + vec3(0.03, 0.034, 0.045) * hemi;
+        vec3 base = vec3(0.12, 0.125, 0.145) * (0.25 + 2.4 * wrap * wrap * wrap + 0.3 * dif2) * uBase + vec3(0.03, 0.034, 0.045) * hemi;
         float below = smoothstep(0.1, -0.7, ne.y);
         base *= 1.0 - 0.55 * below;
         float side = smoothstep(-0.35, 0.55, ne.x);                                   // lado de la pantalla hacia el que mira
@@ -525,11 +525,11 @@ const envDiagMat = new THREE.ShaderMaterial({
         // donde el estudio se refleja nítido y traza el recorrido de la luz sobre bordes y biseles (continuidad G1/G2).
         float graze = pow(1.0 - max(dot(ve, ne), 0.0), 2.4);                          // 0 de frente, 1 rasante
         float wrap = clamp(dot(ne, L) * 0.5 + 0.5, 0.0, 1.0);
-        vec3 base = vec3(0.13, 0.135, 0.145) * (0.55 + 1.5 * wrap * wrap + 0.5 * dif2) + vec3(0.06) * hemi;
+        vec3 base = vec3(0.15, 0.155, 0.165) * (0.2 + 2.6 * wrap * wrap * wrap + 0.3 * dif2) + vec3(0.04) * hemi;   // luz principal fija en el mundo: lado iluminado y lado en sombra bien marcados
         float below = smoothstep(0.1, -0.7, ne.y);                                    // lo que mira al suelo queda asentado
         base *= 1.0 - 0.55 * below;
         vec3 env = showroom(r);
-        col = base + env * (0.025 + 0.95 * graze * (0.35 + 0.65 * fres)) * (1.0 - 0.6 * below) + vec3(0.35) * spec;
+        col = base + env * (0.025 + 0.6 * graze * (0.35 + 0.65 * fres)) * (1.0 - 0.6 * below) + vec3(0.35) * spec + vec3(0.1) * pow(max(dot(ne, normalize(L + ve)), 0.0), 18.0);
       } else if (uMode == 2) {
         col = vec3(0.78, 0.77, 0.75) * (0.08 + 0.62 * dif + 0.12 * dif2 + 0.3 * hemi) + vec3(0.12) * spec;
       } else {

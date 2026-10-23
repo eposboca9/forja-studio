@@ -636,6 +636,11 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   mundo (con giro opcional del entorno). Sombra rara al girar: la luz de la sombra (key) estaba en (4, 9, 3) y la sombra cambiaba de lado según la vista; ahora casi vertical (0,9, 12, 0,7)
   = sombra debajo del objeto, igual desde cualquier ángulo; y el suelo ya no entra en el pase de AO (ground.userData.noAO) porque ensuciaba la sombra con ruido. Pruebas: forja/tworld.mjs, tshadow.mjs.
 
+- (v0.32.1) El usuario dijo que el brillo seguía sin recorrer la pieza: con la luz ya en mundo, la pieza (vaso de revolución) casi no cambiaba al girar porque el sombreado era muy suave
+  (arcilla clásica 0,55 + 1,5·wrap²; híbrido solo entorno desenfocado). Ahora: arcilla/forja clásicas usan wrap³ (0,2 + 2,6·wrap³: lado iluminado y lado en sombra marcados) y un brillo ancho
+  extra; el híbrido añade una luz principal direccional FIJA EN EL MUNDO (ld = (-0,5, 0,78, 0,38), gira con el "giro del entorno") con difuso + GGX + barniz. Verificado con 4 acimuts
+  (0/60/120/180) en clásico e híbrido: forja/trot.mjs (montajes mont-classic.png, mont-gpu.png).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

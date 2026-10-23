@@ -52,6 +52,22 @@ fn envBRDF(noV: f32, rough: f32) -> vec2f {
   // barniz: capa transparente de F0 = 0.04 con su propia rugosidad; atenúa lo de debajo
   let fc = (0.04 + 0.96 * pow(1.0 - noV, 5.0)) * cc;
   let coat = textureSampleLevel(envT, envS, r, ccr * mm).rgb * fc * fr.misc.y;
+  // luz principal FIJA EN EL MUNDO (gira solo con el "giro del entorno"): sombra y brillo recorren la pieza al mover la cámara
+  let ld = normalize(vec3f(-0.5, 0.78, 0.38));
+  let lw = vec3f(ld.x * cs + ld.z * sn, ld.y, -ld.x * sn + ld.z * cs);
+  let nol = max(dot(n, lw), 0.0);
+  let hv = normalize(lw + v);
+  let noh = max(dot(n, hv), 0.0); let voh = max(dot(v, hv), 0.0);
+  let a = rough * rough; let a2 = a * a;
+  let dd = noh * noh * (a2 - 1.0) + 1.0;
+  let dg = a2 / (3.14159265 * dd * dd);
+  let kk = a * 0.5;
+  let vis = 0.25 / max((nol * (1.0 - kk) + kk) * (noV * (1.0 - kk) + kk), 1e-3);
+  let fl = f0 + (vec3f(1.0) - f0) * pow(1.0 - voh, 5.0);
+  let keyI = 2.4 * fr.misc.y;
+  col += (base * (1.0 - metal) * nol / 3.14159265 * 1.6 + dg * vis * fl * nol) * keyI;
+  let ac = ccr * ccr; let ac2 = ac * ac; let dc = noh * noh * (ac2 - 1.0) + 1.0;
+  col += vec3f(dg * 0.0 + (ac2 / (3.14159265 * dc * dc)) * 0.25 / max(nol * noV, 1e-3) * (0.04 + 0.96 * pow(1.0 - voh, 5.0)) * nol * cc) * keyI;
   col = col * (1.0 - fc) + coat;
   col = aces(col * fr.misc.x);
   let srgb = select(col * 12.92, 1.055 * pow(col, vec3f(1.0 / 2.4)) - 0.055, col > vec3f(0.0031308));
