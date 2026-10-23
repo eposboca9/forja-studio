@@ -631,6 +631,11 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   blanca y plana (difuso = último mip, luz uniforme). Ahora el difuso toma el entorno poco desenfocado (mip·0,62 ×0,8) para que la luz tenga dirección (lado iluminado y lado en sombra, como
   la figura de arcilla de la referencia 6) y las cajas del estudio son menos intensas y más neutras (arriba 3,6; laterales 3,4 / frío; contraluz 6). Siguiente: pintura con flakes, cajas editables.
 
+- (v0.32) Iluminación en espacio MUNDO: en los modos clásicos (envDiagMat: Forja, Arcilla, Showroom...) "Luz ligada a la cámara" venía ENCENDIDA por defecto (como Alias), por eso los brillos
+  se quedaban pegados a la pantalla como un MatCap; ahora uLink = 0 y la casilla viene apagada (Visualización, sigue disponible). El motor híbrido (WGSL) ya usaba normales y entorno en
+  mundo (con giro opcional del entorno). Sombra rara al girar: la luz de la sombra (key) estaba en (4, 9, 3) y la sombra cambiaba de lado según la vista; ahora casi vertical (0,9, 12, 0,7)
+  = sombra debajo del objeto, igual desde cualquier ángulo; y el suelo ya no entra en el pase de AO (ground.userData.noAO) porque ensuciaba la sombra con ruido. Pruebas: forja/tworld.mjs, tshadow.mjs.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

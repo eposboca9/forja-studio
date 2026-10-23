@@ -164,7 +164,7 @@ const ao = createAO(renderer, scene, camera);
 const AO_MODES = new Set(['clay', 'forja']);
 let aoLastKey = '', aoMovedAt = 0;
 const key = new THREE.DirectionalLight(0xffffff, 1.6);
-key.position.set(4, 9, 3);
+key.position.set(0.9, 12, 0.7);   // luz casi vertical: la sombra queda DEBAJO del objeto (como sombra de contacto) y no cambia de lado al girar la vista
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
 Object.assign(key.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8 });
@@ -174,6 +174,7 @@ scene.add(key);
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(80, 80), new THREE.ShadowMaterial({ opacity: 0.35 }));
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
+ground.userData.noAO = true;   // el suelo no entra en el pase de oclusión: ensuciaba la sombra con ruido
 scene.add(ground);
 const grid = new THREE.GridHelper(30, 30, 0x8a8781, 0xa3a09a);
 grid.position.y = 0.001;
@@ -449,10 +450,10 @@ const zebraMat = new THREE.ShaderMaterial({
 zebraMat.extensions = { derivatives: true };
 // Entornos de evaluación (Map Type de Alias), generados en el shader a partir del reflejo o de la normal.
 // 1 = Showroom (paneles de techo, tiras laterales, horizonte), 2 = Difuso (mate), 3 = Shade-Sky (cielo y tierra).
-// uLink = luz ligada a la cámara: el entorno gira con la vista, como "Link Light to Camera" en Alias.
+// uLink = luz ligada a la cámara: el entorno gira con la vista, como "Link Light to Camera" en Alias. Por defecto APAGADO (luz fija en el mundo): con la luz ligada los brillos se quedan pegados a la pantalla y parece una textura pintada.
 const envDiagMat = new THREE.ShaderMaterial({
   side: THREE.DoubleSide,
-  uniforms: { uMode: { value: 1 }, uLink: { value: 1 }, uBase: { value: 1 }, uRim: { value: 1 }, uSharp: { value: 2.6 }, uBlue: { value: 1 }, uSpec: { value: 1 } },
+  uniforms: { uMode: { value: 1 }, uLink: { value: 0 }, uBase: { value: 1 }, uRim: { value: 1 }, uSharp: { value: 2.6 }, uBlue: { value: 1 }, uSpec: { value: 1 } },
   vertexShader: `
     varying vec3 vWN; varying vec3 vWP;
     void main() {

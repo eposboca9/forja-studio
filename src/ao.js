@@ -25,7 +25,7 @@ export function createAO(renderer, scene, camera) {
     this.scene.traverse((o) => {
       cache.set(o, o.visible);
       const m = o.material;
-      if (o.isPoints || o.isLine || o.isLineSegments || o.isLine2 || o.isLineSegments2 || o.isSprite || (m && (m.isLineMaterial || m.isSpriteMaterial || (m.colorWrite === false && !o.userData.gpuSurf) || m.visible === false))) o.visible = false;
+      if (o.isPoints || o.isLine || o.isLineSegments || o.isLine2 || o.isLineSegments2 || o.isSprite || (m && (m.isLineMaterial || m.isSpriteMaterial || (m.colorWrite === false && !o.userData.gpuSurf) || m.visible === false)) || o.userData.noAO) o.visible = false;
     });
   };
   // Mezcla "por encima": en el motor híbrido las superficies están en el lienzo de abajo (WebGPU), así que multiplicar el lienzo de WebGL no oscurece nada.
