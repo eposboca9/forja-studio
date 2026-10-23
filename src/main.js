@@ -583,6 +583,8 @@ const isoDepMat = LM({ color: 0xff5fb0, linewidth: 1.8 });
 const curveHistMat = LM({ color: 0x2fb36b, linewidth: 2.5 });
 // bordes de recorte (límite entre caras): líneas finas y nítidas, como los filos de Plasticity
 const edgeCurveMat = LM({ color: 0x1b1d21, linewidth: 1.1, transparent: true, opacity: 0.9 });
+// aristas finas de cada cara (bordes de los parches) en ARCILLA, como el modo gris con aristas de Plasticity
+const faceEdgeMat = LM({ color: 0x08090b, linewidth: 1.15, transparent: true, opacity: 0.85 });
 const curveDepMat = LM({ color: 0xff5fb0, linewidth: 2.5 });
 // Polígono de control: punteado en naranja claro; las aristas (borde de la red de una superficie), continuas en naranja oscuro
 const hullMat = new THREE.LineDashedMaterial({ color: '#ffb46b', dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.85 });
@@ -3844,6 +3846,8 @@ function initPrefs() {
       } catch (err) { toast('No se pudo leer el .hdr: ' + err.message); }
       e.target.value = '';
     });
+    $('pref-edges').checked = prefs.edges !== false;
+    $('pref-edges').addEventListener('change', (e) => { prefs.edges = e.target.checked; savePrefs(); });
     $('pref-ao-visu').checked = prefs.aoVisu !== false;
     $('pref-ao-visu').addEventListener('change', (e) => { prefs.aoVisu = e.target.checked; savePrefs(); aoLastKey = ''; });
   }
@@ -5257,7 +5261,7 @@ function viewName() {
   return (proj.ortho ? 'ORTOGONAL' : 'PERSPECTIVA') + (face ? ' · ' + face : '');
 }
 function updateViewName() {
-  const n = viewName(), el = $('vi-proj');
+  const n = viewName() + (backend.hybrid ? ' · MOTOR WEBGPU' : ''), el = $('vi-proj');
   if (el && el.textContent !== n) el.textContent = n;
   const t = proj.ortho ? 'ORTO' : 'PERSP';
   if (projBtn.textContent !== t) projBtn.textContent = t;
@@ -5293,6 +5297,11 @@ function renderPane(p) {
   objects.forEach((o) => {
     if (o.kind === 'curve') return;
     setSurfaceMaterial(o, diag, dm, wire);
+    if (o.kind === 'surface' && o.parts.bound && !wire) {
+      const show = diag && diagMode === 'clay' && prefs.edges !== false && o.visible && !modelClean;
+      o.parts.bound.visible = show;
+      if (show) { const L = layerById(o.layer); o.parts.bound.material = selObjs.includes(o) ? isoSelMat : layerStyled(L) ? layerMats(L).bound : faceEdgeMat; }
+    }
     if (o.parts.mesh.castShadow === wire) { o.parts.mesh.castShadow = !wire; renderer.shadowMap.needsUpdate = true; }   // el wireframe no da sombra
     if (o.kind === 'mesh') meshFeatures(o, wire);
   });

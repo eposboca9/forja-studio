@@ -623,6 +623,10 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (la cabecera es position:relative con z-index auto, y .view no crea capa propia). Ahora SIN z-index (el orden lo da el DOM: WebGPU primero, WebGL después). Salida de
   emergencia: abrir la página con ?motor=clasico (vuelve al motor clásico y lo guarda). Prueba: forja/tz.mjs (elementFromPoint sobre el menú en clásico e híbrido).
 
+- (v0.30) Aristas finas de cada cara en ARCILLA (faceEdgeMat, bordes de parche p.bound; prefs.edges) y etiqueta "· MOTOR WEBGPU" en la barra de estado cuando el híbrido está activo
+  (para que el usuario sepa si lo está usando; vi-proj). Probado con el modelo del usuario en pintura roja (Visu) y Forja/Arcilla: forja/tegg.mjs, tegg2.mjs. El usuario pidió seguir
+  hasta igualar las referencias (Plasticity/Alias): siguen pendientes cajas de luz editables, pintura con flakes, Forge/IA en WebGPU y probar en su laptop (aún no vio el híbrido bien).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
