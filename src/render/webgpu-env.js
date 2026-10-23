@@ -22,7 +22,7 @@ fn faceDir(face: u32, uv: vec2f) -> vec3f {
   return normalize(d);
 }`;
 
-const GEN = `${COMMON}
+const GEN = (fn) => `${COMMON}
 @group(0) @binding(0) var dst: texture_storage_2d_array<rgba16float, write>;
 // caja de luz: centro c (unitario), ejes ex / ey del plano, medias anchuras w, h. El borde es muy suave y el centro más brillante que los
 // extremos (como un softbox real): así los reflejos largos tienen degradado y no se queman a blanco plano
@@ -45,11 +45,21 @@ fn studio(d: vec3f) -> vec3f {
   c += box(d, normalize(vec3f(-0.1, 0.1, 1.0)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), 0.6, 0.14, vec3f(1.2, 1.2, 1.3));        // relleno de frente
   return c;
 }
+// estudio "Horizonte" (como el de Alias): cielo claro, franja luminosa en el horizonte y suelo oscuro. Para materiales mates: el degradado barre la pieza al orbitar
+fn horizon(d: vec3f) -> vec3f {
+  let y = d.y;
+  var c: vec3f;
+  if (y > 0.0) { c = mix(vec3f(1.5, 1.5, 1.56), vec3f(0.5, 0.52, 0.58), smoothstep(0.0, 0.9, y)); }
+  else { c = mix(vec3f(0.11, 0.1, 0.09), vec3f(0.018, 0.017, 0.016), smoothstep(0.0, -0.8, y)); }
+  c += vec3f(0.6) * exp(-pow((y - 0.03) * 12.0, 2.0));
+  c += box(d, normalize(vec3f(-0.3, 1.0, 0.2)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 0.0, 1.0), 0.8, 0.6, vec3f(1.6));
+  return c;
+}
 @compute @workgroup_size(8, 8, 1) fn gen(@builtin(global_invocation_id) id: vec3u) {
   let s = textureDimensions(dst).xy;
   if (id.x >= s.x || id.y >= s.y) { return; }
   let uv = (vec2f(id.xy) + 0.5) / vec2f(s) * 2.0 - 1.0;
-  textureStore(dst, id.xy, id.z, vec4f(studio(faceDir(id.z, uv)), 1.0));
+  textureStore(dst, id.xy, id.z, vec4f(${fn}(faceDir(id.z, uv)), 1.0));
 }`;
 
 const GEN_EQ = `${COMMON}
@@ -117,7 +127,7 @@ fn ggxD(noh: f32, a: f32) -> f32 { let a2 = a * a; let d = noh * noh * (a2 - 1.0
 }`;
 
 // Devuelve { view (cubo con mips para muestrear), maxMip }
-export function buildStudioEnv(device, hdr = null) {   // hdr = { w, h, data: Uint16Array (rgba16float) } o null = estudio procedural
+export function buildStudioEnv(device, hdr = null, kind = 'studio') {   // hdr = { w, h, data: Uint16Array (rgba16float) } o null = estudio procedural
   const mk = (usage) => device.createTexture({ size: [ENV_SIZE, ENV_SIZE, 6], format: 'rgba16float', mipLevelCount: ENV_MIPS, usage });
   const base = mk(GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING);
   const pf = mk(GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING);
@@ -128,7 +138,7 @@ export function buildStudioEnv(device, hdr = null) {   // hdr = { w, h, data: Ui
     p.setPipeline(pipe); p.setBindGroup(0, device.createBindGroup({ layout: pipe.getBindGroupLayout(0), entries }));
     p.dispatchWorkgroups(Math.ceil(w / 8), Math.ceil(h / 8), 6); p.end();
   };
-  const gen = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: GEN }), entryPoint: 'gen' } });
+  const gen = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: GEN(kind === 'horizon' ? 'horizon' : 'studio') }), entryPoint: 'gen' } });
   const down = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: DOWN }), entryPoint: 'down' } });
   const filt = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: FILTER }), entryPoint: 'filt' } });
   let eqTex = null;

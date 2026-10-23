@@ -641,6 +641,13 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   extra; el híbrido añade una luz principal direccional FIJA EN EL MUNDO (ld = (-0,5, 0,78, 0,38), gira con el "giro del entorno") con difuso + GGX + barniz. Verificado con 4 acimuts
   (0/60/120/180) en clásico e híbrido: forja/trot.mjs (montajes mont-classic.png, mont-gpu.png).
 
+- (v0.33) Videos del usuario (Video Project 9 = objetivo: Plasticity/Alias con estudio de HORIZONTE — cielo claro, franja luminosa en el horizonte, suelo oscuro — cuyos brillos barren la
+  pieza al orbitar; Video Project 10 = Arcilla con la luz pegada a la cámara). Pedido: Arcilla industrial y mate, evaluada en espacio mundo, rugosidad 0,7-0,85, especular baja y AO profundo.
+  Hecho: (1) Arcilla clásica (uMode 4) reescrita: hemisferio mundo (cielo 0,8 / suelo 0,045) + luz principal fija + reflejo de cielo muy ancho, sin puntos de luz; (2) Arcilla en el híbrido
+  usa rugosidad 0,82, sin barniz y un SEGUNDO entorno "Horizonte" (webgpu-env.js buildStudioEnv(device, hdr, 'horizon'); userData.gpuEnv = 'horizon'; con un .hdr propio todos usan el .hdr);
+  (3) AO más profundo: muestras 14 y intensidad ×1,55 en Arcilla (main.js, antes de ao.apply); (4) normal de reserva con derivadas de pantalla cuando la del vértice es indefinida (polos).
+  Prueba: forja/trot.mjs, tpole.mjs (montajes mont-classic.png / mont-gpu.png). El resto de modos clásicos (Showroom...) no cambió.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

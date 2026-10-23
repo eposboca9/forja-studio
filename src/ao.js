@@ -14,7 +14,7 @@ export function createAO(renderer, scene, camera) {
     vertexShader: 'varying vec3 vP; void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); vP = mv.xyz; gl_Position = projectionMatrix * mv; }',
     fragmentShader: 'varying vec3 vP; void main() { vec3 n = normalize(cross(dFdx(vP), dFdy(vP))); gl_FragColor = vec4(n * 0.5 + 0.5, 1.0); }',
   });
-  pass.updateGtaoMaterial({ radius: 0.7, distanceExponent: 1.4, thickness: 1.5, scale: 1.7, samples: 8, distanceFallOff: 1, screenSpaceRadius: false });
+  pass.updateGtaoMaterial({ radius: 0.7, distanceExponent: 1.4, thickness: 1.5, scale: 1.7, samples: 14, distanceFallOff: 1, screenSpaceRadius: false });
   pass.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 5, rings: 2, samples: 8 });
   pass.blendIntensity = 2.1;
   // El pase de normales solo debe ver superficies. GTAOPass solo esconde Line y Points, pero las líneas gruesas de Forja (Line2 y

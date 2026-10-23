@@ -489,7 +489,9 @@ const envDiagMat = new THREE.ShaderMaterial({
       return col;
     }
     void main() {
+      vec3 nd = normalize(cross(dFdx(vWP), dFdy(vWP)));   // normal de reserva: en los polos de una superficie de revolución la normal del vértice sale indefinida (punto negro)
       vec3 n = normalize(vWN);
+      if (!(dot(n, n) > 0.5)) n = nd;
       if (!gl_FrontFacing) n = -n;
       vec3 v = normalize(vWP - cameraPosition);
       vec3 r = toEnv(reflect(v, n));
@@ -521,15 +523,16 @@ const envDiagMat = new THREE.ShaderMaterial({
         float k = graze * (0.35 + 0.65 * fres);
         col = base + (env * 0.55 + vec3(0.45)) * rim * k * 0.9 * uRim * (1.0 - 0.6 * below) + vec3(0.25, 0.36, 0.6) * spec * 0.6 * uSpec;
       } else if (uMode == 4) {
-        // Arcilla oscura (estilo Plasticity): base mate que absorbe la luz de frente y solo brilla en ángulos rasantes,
-        // donde el estudio se refleja nítido y traza el recorrido de la luz sobre bordes y biseles (continuidad G1/G2).
-        float graze = pow(1.0 - max(dot(ve, ne), 0.0), 2.4);                          // 0 de frente, 1 rasante
+        // ARCILLA (industrial y mate, como Plasticity) evaluada en el espacio MUNDO: hemisferio de cielo claro arriba y suelo oscuro abajo + una luz
+        // principal fija. Al orbitar la cámara el degradado y la sombra recorren la pieza (el horizonte "barre" la superficie), sin puntos de luz afilados:
+        // el brillo es muy ancho (rugosidad alta) y de poca intensidad. La lectura de volúmenes la completa la oclusión ambiental.
+        float sky = smoothstep(-0.3, 0.7, ne.y);
+        vec3 amb = mix(vec3(0.045, 0.045, 0.05), vec3(0.8, 0.82, 0.86), sky);
         float wrap = clamp(dot(ne, L) * 0.5 + 0.5, 0.0, 1.0);
-        vec3 base = vec3(0.15, 0.155, 0.165) * (0.2 + 2.6 * wrap * wrap * wrap + 0.3 * dif2) + vec3(0.04) * hemi;   // luz principal fija en el mundo: lado iluminado y lado en sombra bien marcados
-        float below = smoothstep(0.1, -0.7, ne.y);                                    // lo que mira al suelo queda asentado
-        base *= 1.0 - 0.55 * below;
-        vec3 env = showroom(r);
-        col = base + env * (0.025 + 0.6 * graze * (0.35 + 0.65 * fres)) * (1.0 - 0.6 * below) + vec3(0.35) * spec + vec3(0.1) * pow(max(dot(ne, normalize(L + ve)), 0.0), 18.0);
+        vec3 albedo = vec3(0.42, 0.43, 0.46);
+        vec3 base = albedo * (amb * 0.5 + vec3(1.0) * wrap * wrap * 0.85 + 0.12 * dif2);
+        vec3 broad = mix(vec3(0.03), vec3(0.62), smoothstep(-0.5, 0.5, r.y)) * (0.05 + 0.22 * fres);   // reflejo difuso del cielo, muy amplio
+        col = base + broad + vec3(0.035) * pow(max(dot(ne, normalize(L + ve)), 0.0), 5.0);
       } else if (uMode == 2) {
         col = vec3(0.78, 0.77, 0.75) * (0.08 + 0.62 * dif + 0.12 * dif2 + 0.3 * hemi) + vec3(0.12) * spec;
       } else {
@@ -557,13 +560,14 @@ const wireMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: fal
 const depthOnlyMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2 });
 // material de la superficie de un objeto en el panel actual; en modo híbrido la deja marcada para que el lienzo de WebGPU la pinte (color plano)
 // Modos de modelado que ya viven en el motor nuevo (PBR con estudio HDR): FORJA = grafito azulado con barniz tenue; ARCILLA = gris mate
-const GPU_DIAG = { forja: { color: 0x1d2028, pbr: [0, 0.36, 0.5, 0.16] }, clay: { color: 0x4d4e53, pbr: [0, 0.8, 0, 0.3] } };
+const GPU_DIAG = { forja: { color: 0x1d2028, pbr: [0, 0.36, 0.5, 0.16] }, clay: { color: 0x6a6b70, pbr: [0, 0.82, 0, 0.3], env: 'horizon' } };
 const gpuDiag = () => (backend.hybrid ? GPU_DIAG[diagMode] : null);
 function setSurfaceMaterial(o, diag, dm, wire, hy = backend.hybrid && (!diag || !!gpuDiag())) {
   const mesh = o.parts.mesh, mt = materials[o.mat], gd = diag ? gpuDiag() : null;
   mesh.material = hy ? depthOnlyMat : diag ? dm : mt;
   mesh.userData.gpuSurf = hy && !wire;
   mesh.userData.gpuColor = gd ? gd.color : mt.color.getHex();
+  mesh.userData.gpuEnv = gd?.env || 'studio';
   mesh.userData.gpuPbr = gd ? gd.pbr : [mt.metalness ?? 0, mt.roughness ?? 0.6, mt.clearcoat ?? 0, mt.clearcoatRoughness ?? 0.1];
 }
 const wireFeatMat = new THREE.LineBasicMaterial({ color: 0xe8e8e8, transparent: true, opacity: 0.8 });
@@ -661,7 +665,7 @@ function syncGhosts() {
         x.g.visible = x.s.visible && o.visible;
         if (x.g.geometry !== x.s.geometry) x.g.geometry = x.s.geometry;
         if (x.g.material !== x.s.material) x.g.material = x.s.material;
-        if (x.s.userData.gpuSurf !== undefined) { Object.assign(x.g.userData, { gpuSurf: x.s.userData.gpuSurf, gpuColor: x.s.userData.gpuColor, gpuPbr: x.s.userData.gpuPbr }); }
+        if (x.s.userData.gpuSurf !== undefined) { Object.assign(x.g.userData, { gpuSurf: x.s.userData.gpuSurf, gpuColor: x.s.userData.gpuColor, gpuPbr: x.s.userData.gpuPbr, gpuEnv: x.s.userData.gpuEnv }); }
       }
     }
   }
@@ -5317,6 +5321,7 @@ function renderPane(p) {
     // la oclusión se calcula cuando la vista está quieta (y se reutiliza mientras no cambie la cámara ni la escena)
     const e = camera.matrixWorld.elements, pe = camera.projectionMatrix.elements;
     const key = `${p.w}x${p.h}|${e[12].toFixed(4)},${e[13].toFixed(4)},${e[14].toFixed(4)},${e[0].toFixed(4)},${e[1].toFixed(4)},${e[2].toFixed(4)},${e[4].toFixed(4)},${e[5].toFixed(4)},${e[6].toFixed(4)}|${pe[0].toFixed(4)},${pe[5].toFixed(4)}|${sceneChangedAt}|${proj.ortho}`;
+    ao.intensity = (prefs.aoInt ?? 2.1) * (diag && diagMode === 'clay' ? 1.55 : 1);   // arcilla: oclusión más profunda para leer los volúmenes
     if (key !== aoLastKey) { aoLastKey = key; aoMovedAt = performance.now(); }
     ao.apply(p.w, p.h, key, performance.now() - aoMovedAt < 140 || !!gizmoDrag || !!navDrag, backend.hybrid && !!(diag ? gpuDiag() : true));
   }

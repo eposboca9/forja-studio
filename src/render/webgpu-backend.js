@@ -33,7 +33,8 @@ fn envBRDF(noV: f32, rough: f32) -> vec2f {
   return vec2f(-1.04, 1.04) * a004 + r.zw;
 }
 @fragment fn fs(i: VO) -> @location(0) vec4f {
-  var n = normalize(i.n);
+  let nd = normalize(cross(dpdx(i.wp), dpdy(i.wp)));       // normal de reserva si la del vértice es indefinida (polos)
+  var n = select(nd, normalize(i.n), dot(i.n, i.n) > 0.25);
   let v = normalize(fr.cam.xyz - i.wp);
   if (dot(n, v) < 0.0) { n = -n; }                       // dos caras: siempre la normal que mira al observador
   let noV = max(dot(n, v), 1e-3);
@@ -129,17 +130,19 @@ export class HybridBackend extends WebGLBackend {
       fragment: { module, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list', cullMode: 'none' },
       depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' }, multisample: { count: 4 },
     });
-    const env = buildStudioEnv(device, this._pendingHdr || null); this._pendingHdr = null;
+    const env = buildStudioEnv(device, this._pendingHdr || null); const custom = !!this._pendingHdr; this._pendingHdr = null;
+    const envH = buildStudioEnv(device, null, 'horizon');
     const fbuf = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const bind1 = device.createBindGroup({ layout: bgl1, entries: [{ binding: 0, resource: { buffer: fbuf } }, { binding: 1, resource: env.view }, { binding: 2, resource: env.sampler }] });
-    this.gpu = { device, canvas, context, format, pipe, bgl, bgl1, bind1, fbuf, env, ubuf: null, ucap: 0, bind: null, msaa: null, depth: null, w: 0, h: 0 };
+    const mkBind = (e) => device.createBindGroup({ layout: bgl1, entries: [{ binding: 0, resource: { buffer: fbuf } }, { binding: 1, resource: e.view }, { binding: 2, resource: e.sampler }] });
+    this.gpu = { device, canvas, context, format, pipe, bgl, bgl1, bind1, bind1H: mkBind(envH), envH, custom, mkBind, fbuf, env, ubuf: null, ucap: 0, bind: null, msaa: null, depth: null, w: 0, h: 0 };
   }
   // cambia el entorno: hdr = { w, h, data: Uint16Array rgba16float } o null para volver al estudio procedural
   setEnv(hdr) {
     const g = this.gpu; if (!g) { this._pendingHdr = hdr; return; }
     const old = g.env, env = buildStudioEnv(g.device, hdr);
     g.env = env;
-    g.bind1 = g.device.createBindGroup({ layout: g.bgl1, entries: [{ binding: 0, resource: { buffer: g.fbuf } }, { binding: 1, resource: env.view }, { binding: 2, resource: env.sampler }] });
+    g.bind1 = g.mkBind(env); g.custom = !!hdr;   // con un .hdr propio, todos los materiales usan ese entorno
     old.textures.forEach((t) => t.destroy());
   }
   // ---- tamaño ----
@@ -203,7 +206,7 @@ export class HybridBackend extends WebGLBackend {
       col.setHex(o.userData.gpuColor ?? 0x888888);   // Color pasa de sRGB a lineal al guardarse
       data.set([col.r, col.g, col.b, 1], q + 32);
       data.set(o.userData.gpuPbr ?? [0, 0.6, 0, 0.1], q + 36);
-      draws.push({ b, k });
+      draws.push({ b, k, h: o.userData.gpuEnv === 'horizon' });
     });
     if (draws.length) g.device.queue.writeBuffer(g.ubuf, 0, data.buffer, 0, draws.length * STRIDE);
     const ce = cam.matrixWorld.elements;
@@ -215,8 +218,8 @@ export class HybridBackend extends WebGLBackend {
     });
     const vx = Math.round(p.x * dpr), vw = Math.max(1, Math.min(g.w - vx, Math.round(p.w * dpr))), vh = Math.min(g.h, Math.round(p.h * dpr));
     pass.setViewport(vx, g.h - vh, vw, vh, 0, 1); pass.setScissorRect(vx, g.h - vh, vw, vh);
-    pass.setPipeline(g.pipe); pass.setBindGroup(1, g.bind1);
-    for (const d of draws) { pass.setBindGroup(0, g.bind, [d.k * STRIDE]); pass.setVertexBuffer(0, d.b.vb); pass.setVertexBuffer(1, d.b.nb); pass.setIndexBuffer(d.b.ib, d.b.fmt); pass.drawIndexed(d.b.count); }
+    pass.setPipeline(g.pipe);
+    for (const d of draws) { pass.setBindGroup(1, d.h && !g.custom ? g.bind1H : g.bind1); pass.setBindGroup(0, g.bind, [d.k * STRIDE]); pass.setVertexBuffer(0, d.b.vb); pass.setVertexBuffer(1, d.b.nb); pass.setIndexBuffer(d.b.ib, d.b.fmt); pass.drawIndexed(d.b.count); }
     pass.end();
     g.device.queue.submit([enc.finish()]);
     this._drew = true;
