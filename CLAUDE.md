@@ -684,6 +684,11 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   r.flip, kind 'f') en el lado 2 del blend (freeform.js orient invierte el sentido; con flip no se usa el blend exacto). PENDIENTE de la ficha: flujo "Perpendicular al lado 1" y "por vector";
   cebra/peines de curvatura en vivo sobre las secciones al arrastrar Corona/Forma (hoy solo se ven con el diagnóstico normal).
 
+- (v0.37.1) REVERTIDA la v0.37 completa por pedido del usuario (video: quiere el estado de la v0.36). Vuelven la lista Forja 8 / Showroom 4 / Arcilla 7 / Difuso 5 / Shade-Sky 6 /
+  Cebra 1 / Curvatura 2 / Malla 3 con los shaders clásicos, y los mapas de Alias vuelven al panel de entornos de Visu. Ya no hay "Sombreado realista" en Modelado ni mapTypeMat.
+  Nota: el shader de Forja (envDiagMat) es idéntico desde v0.35.1; el cambio que notaba el usuario era la reestructuración de la v0.37. Prueba: forja/trv.mjs.
+  Si se retoma la separación Map Types / Entornos, hacerlo SIN quitar los modos clásicos de la lista y preguntando antes.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
