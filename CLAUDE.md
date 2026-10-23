@@ -570,6 +570,8 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   de huevo con una cavidad y el redondeo del borde; juntas dan las dos cavidades de su 2.ª captura. Prueba: scratchpad forja/tface2.mjs, tstep7.mjs;
   captura docs/capturas/v0.25.1-step-huevo.png. Pendiente: la cara 21 y la 44 son la misma superficie en las dos mitades (no duplicadas, espejo).
 
+- (v0.25.2) Cruces de CVs: tamaño CONSTANTE en píxeles (scaleHandles usa la matriz de proyección: sirve en perspectiva y ortogonal, con cualquier zoom; HANDLE_PX = 5,5 px por unidad, cruz ≈ 6,6 px, esfera de elegir 2,2 unidades ≈ 12 px). Prueba: forja/tcvsize.mjs.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

@@ -580,13 +580,13 @@ const envMat = new THREE.LineBasicMaterial({ color: '#e07a1f' });
 // tumbada sobre el plano tangente, con los brazos en U y V; en curvas, sobre la tangente y la normal) y,
 // en las esquinas de las superficies, un cubo pequeño para distinguirlas. Cada CV es una esfera invisible (fácil de elegir) con la figura dentro;
 // se escalan con la distancia a la cámara para verse siempre del mismo tamaño.
-const handleGeo = new THREE.SphereGeometry(0.75, 10, 8);
+const handleGeo = new THREE.SphereGeometry(2.2, 10, 8);
 const handlePickMat = new THREE.MeshBasicMaterial({ visible: false });
-const plusGeo = mergeGeometries([new THREE.BoxGeometry(1.2, 0.121, 0.055), new THREE.BoxGeometry(0.121, 1.2, 0.055)]);
+const plusGeo = mergeGeometries([new THREE.BoxGeometry(1.2, 0.2, 0.055), new THREE.BoxGeometry(0.2, 1.2, 0.055)]);
 const cornerGeo = new THREE.BoxGeometry(0.42, 0.42, 0.42);
 const handleMat = new THREE.MeshStandardMaterial({ color: '#2f7bff', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true, opacity: 0.85 });
 const handleSelMat = new THREE.MeshStandardMaterial({ color: '#ff8a1f', emissive: '#5a2400', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true });
-const HANDLE_PX = 0.013;   // tamaño en pantalla (fracción de la distancia a la cámara)
+const HANDLE_PX = 5.5;   // píxeles de pantalla por unidad de la cruz (la cruz mide 1,2 unidades ≈ 6,6 px de punta a punta)
 function makeHandle(corner, sel) {
   const h = new THREE.Mesh(handleGeo, handlePickMat);
   const shape = new THREE.Mesh(corner ? cornerGeo : plusGeo, sel ? handleSelMat : handleMat);
@@ -598,7 +598,15 @@ function makeHandle(corner, sel) {
 function scaleHandles() {
   const groups = objects.filter((o) => o.parts.handles.visible).map((o) => o.parts.handles);
   if (draftHandles.visible) groups.push(draftHandles);
-  for (const g of groups) for (const h of g.children) h.scale.setScalar(camera.position.distanceTo(h.position) * HANDLE_PX);
+  // tamaño CONSTANTE en pantalla (perspectiva y ortogonal, con cualquier zoom): unidades de mundo por píxel = 2·w / (m5·alto),
+  // con w = profundidad en la matriz de proyección (en ortogonal w = 1 y sale alto visible / alto en píxeles)
+  const e = camera.projectionMatrix.elements, mi = camera.matrixWorldInverse.elements;
+  const H = Math.max(200, renderer.domElement.clientHeight || 800), k = (2 / (e[5] * H)) * HANDLE_PX;
+  for (const g of groups) for (const h of g.children) {
+    const p = h.position, vz = mi[2] * p.x + mi[6] * p.y + mi[10] * p.z + mi[14], vx = mi[0] * p.x + mi[4] * p.y + mi[8] * p.z + mi[12], vy = mi[1] * p.x + mi[5] * p.y + mi[9] * p.z + mi[13];
+    const w = e[3] * vx + e[7] * vy + e[11] * vz + e[15];
+    h.scale.setScalar(Math.max(1e-6, Math.abs(w)) * k);
+  }
 }
 
 const THEME_3D = {
