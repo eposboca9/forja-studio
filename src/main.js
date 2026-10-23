@@ -2554,19 +2554,55 @@ async function importFile(file) {
     const skipped = Object.entries(r.skipped).map(([t, n]) => `${n}× tipo ${t}`).join(', ');
     if (skipped) toast(`IGES: importadas las superficies y curvas NURBS. Sin soporte todavía: ${skipped}.`);
   } else if (ext === 'step' || ext === 'stp') {
-    toast('Cargando OpenCASCADE para leer STEP…');
-    const occt = await loadOCCT();
-    const r = occt.ReadStepFile(new Uint8Array(await file.arrayBuffer()), null);
-    if (!r.success) throw new Error('OpenCASCADE no pudo leer el archivo');
-    const grp = new THREE.Group();
-    r.meshes.forEach((mm, k) => {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.Float32BufferAttribute(mm.attributes.position.array, 3));
-      if (mm.attributes.normal) g.setAttribute('normal', new THREE.Float32BufferAttribute(mm.attributes.normal.array, 3));
-      g.setIndex(Array.from(mm.index.array));
-      const me = new THREE.Mesh(g); me.name = mm.name || `${base} ${k + 1}`; grp.add(me);
-    });
-    created = meshesFrom(grp, o, base);
+    // 1) lector propio (sin WebAssembly): superficies y curvas B-spline como NURBS reales, con sus recortes; funciona también en el Artifact
+    const text = await file.text();
+    let nat = null;
+    try { nat = X.readSTEP(text, o); } catch (e) { console.warn('STEP propio:', e); }
+    const hasNat = nat && (nat.surfaces.length || nat.curves.length);
+    let viaOCC = false;
+    // 2) si hay caras que no son B-spline (planos, cilindros...), OpenCascade las convierte en malla (necesita descargar su WebAssembly)
+    if (!hasNat || nat.other) {
+      try {
+        toast('Cargando OpenCASCADE para leer STEP…');
+        const occt = await loadOCCT();
+        const r = occt.ReadStepFile(new Uint8Array(await file.arrayBuffer()), null);
+        if (!r.success) throw new Error('OpenCASCADE no pudo leer el archivo');
+        const grp = new THREE.Group();
+        r.meshes.forEach((mm, k) => {
+          const g = new THREE.BufferGeometry();
+          g.setAttribute('position', new THREE.Float32BufferAttribute(mm.attributes.position.array, 3));
+          if (mm.attributes.normal) g.setAttribute('normal', new THREE.Float32BufferAttribute(mm.attributes.normal.array, 3));
+          g.setIndex(Array.from(mm.index.array));
+          const me = new THREE.Mesh(g); me.name = mm.name || `${base} ${k + 1}`; grp.add(me);
+        });
+        created = meshesFrom(grp, o, base);
+        viaOCC = true;
+      } catch (err) {
+        if (!hasNat) throw new Error(`${err.message || err}. En el Artifact OpenCascade no puede cargarse; en GitHub Pages sí`);
+        toast(`OpenCASCADE no se pudo cargar (${err.message || err}): se importan solo las superficies NURBS (${nat.other} caras analíticas quedan fuera)`);
+      }
+    }
+    if (!viaOCC && hasNat) {
+      const V4 = (q) => new THREE.Vector4(q.x, q.y, q.z, q.w);
+      let nTrim = 0;
+      nat.surfaces.forEach((d, k) => {
+        const so = addSurface({ degU: d.degU, degV: d.degV, knotsU: d.knotsU, knotsV: d.knotsV, cvs: d.cvs.map((row) => row.map(V4)) }, nat.surfaces.length === 1 ? base : `${base} ${k + 1}`);
+        created.push(so);
+        // recortes: una curva sobre superficie por contorno (fuera del exterior, dentro de cada agujero), como las del redondeo
+        for (const l of d.loops || []) {
+          const cd = FF.cosCurveData(so.data, l.uv);
+          cd.cos = { surf: so.id, uv: l.uv, closed: true, trim: l.trim, edge: true };
+          created.push(addCurve(cd, 'Borde de recorte'));
+          nTrim++;
+        }
+        if (d.loops) updateObject(so);
+      });
+      nat.curves.forEach((d, k) => created.push(addCurve({ deg: d.deg, knots: d.knots, plane: 'xz', cvs: d.cvs.map(V4) }, `${base} curva ${k + 1}`)));
+      const extra = [];
+      if (nTrim) extra.push(`${nTrim} recortes importados`);
+      if (nat.trimFailed) extra.push(`${nat.trimFailed} caras con recorte que no se pudo leer (quedan sin recortar)`);
+      toast(`STEP: ${nat.surfaces.length} superficies NURBS${extra.length ? ' · ' + extra.join(' · ') : ''}`);
+    }
   } else if (ext === 'obj') {
     created = meshesFrom(new OBJLoader().parse(await file.text()), o, base);
   } else if (ext === 'stl') {
@@ -5656,7 +5692,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

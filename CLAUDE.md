@@ -554,6 +554,14 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (4) entorno: hacen falta AMBOS (estudio procedural editable y carga de archivos .hdr propios); (5) el usuario tiene UN modelo de prueba pero no
   pudo importar su STEP a Forja: pedirle el archivo para diagnosticar (STEP entra como malla vía OpenCascade WASM; en el Artifact el .wasm está
   bloqueado, en GitHub Pages sí funciona).
+- (v0.25) STEP con lector propio (exporters.js readSTEP, sin WebAssembly): lee B_SPLINE_SURFACE_WITH_KNOTS (también racionales y entidades
+  complejas) y curvas B-spline libres como NURBS reales; las caras con recorte (contorno que no son 4 aristas B-spline, elipses, agujeros) se
+  importan como superficie + curvas sobre superficie (cos.edge, trim 'outside' el contorno exterior / 'inside' los agujeros) proyectando las
+  aristas (B-spline, elipse, círculo, recta) a (u, v) (stepEdgePoints, projectUV). importFile: primero el lector propio; si hay caras analíticas
+  (planos, cilindros: nat.other) usa OpenCascade como malla (jsdelivr; en el Artifact falla y entonces importa solo las NURBS y avisa).
+  Probado con el STEP del usuario (fromaforja.stp, 46 superficies, 6 recortes): 42 coinciden con OpenCascade al milímetro; las 4 recortadas
+  quedan bien con los recortes. Causa del fallo del usuario: en el Artifact no carga el WebAssembly de OpenCascade. Pruebas: forja/tstep2.mjs
+  (Node), tstep4.mjs (en la app). Todavía sin: sólidos con cascarón cerrado (B-rep real), caras analíticas como NURBS, unidades leídas del archivo.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso

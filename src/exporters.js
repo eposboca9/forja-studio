@@ -3,6 +3,8 @@
 //
 // Convención: Forja trabaja en decímetros con Y hacia arriba. Los formatos CAD usan normalmente milímetros
 // y Z hacia arriba (Alias, CATIA, SolidWorks...). `toCAD` y `fromCAD` hacen ese cambio.
+import * as THREE from 'three';
+import * as N from './nurbs.js';
 
 export const UNITS = { mm: 100, cm: 10, dm: 1, m: 0.1 };          // factor desde dm
 const UNIT_NAMES = { mm: 'MM', cm: 'CM', dm: 'MM', m: 'M' };
@@ -132,6 +134,214 @@ export function readIGES(text, o) {
       const cvs = [];
       for (let n = 0; n <= K; n++) { const [x, y, z] = fromCAD(num(i++), num(i++), num(i++), o); cvs.push({ x, y, z, w: w[n] }); }
       out.curves.push({ label, deg: M, knots: knotsNorm(ks), cvs });
+    }
+  }
+  return out;
+}
+
+// ---------- STEP: lectura propia (sin WebAssembly) de superficies y curvas B-spline ----------
+// Lee las superficies B_SPLINE_SURFACE_WITH_KNOTS (también racionales) y las curvas libres como NURBS reales. Las caras analíticas
+// (planos, cilindros...) y los recortes todavía no: se cuentan en `other` y `trimmed` para avisar. Funciona en cualquier sitio,
+// también donde el WebAssembly de OpenCascade está bloqueado (Artifact).
+function stepTokens(text) {
+  const t = text.replace(/\/\*[\s\S]*?\*\//g, '');
+  const a = t.indexOf('DATA;'), b = t.lastIndexOf('ENDSEC;');
+  return t.slice(a >= 0 ? a + 5 : 0, b > a ? b : t.length);
+}
+function parseStepArgs(src, pos) {
+  // devuelve [valor, nueva posición]; valores: número, '#id' (string), texto, enumeración, null ($ y *), arreglo, {type, args}
+  const ws = () => { while (pos < src.length && /\s/.test(src[pos])) pos++; };
+  const value = () => {
+    ws();
+    const c = src[pos];
+    if (c === '(') {
+      pos++;
+      const arr = [];
+      for (;;) {
+        ws();
+        if (src[pos] === ')') { pos++; break; }
+        if (src[pos] === ',') { pos++; continue; }
+        arr.push(value());
+      }
+      return arr;
+    }
+    if (c === "'") {
+      let j = pos + 1, out = '';
+      while (j < src.length) { if (src[j] === "'") { if (src[j + 1] === "'") { out += "'"; j += 2; continue; } break; } out += src[j++]; }
+      pos = j + 1;
+      return out;
+    }
+    if (c === '$' || c === '*') { pos++; return null; }
+    if (c === '#') { const m = /^#\d+/.exec(src.slice(pos, pos + 12)); pos += m[0].length; return m[0]; }
+    if (c === '.') { const j = src.indexOf('.', pos + 1); const e = src.slice(pos, j + 1); pos = j + 1; return e; }
+    const m = /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?/.exec(src.slice(pos, pos + 40));
+    if (m) { pos += m[0].length; return parseFloat(m[0]); }
+    const n = /^[A-Z_0-9]+/i.exec(src.slice(pos, pos + 80));   // entidad tipada: NOMBRE(args)
+    pos += n[0].length; ws();
+    if (src[pos] === '(') return { type: n[0].toUpperCase(), args: value() };
+    return n[0];
+  };
+  const v = value();
+  return [v, pos];
+}
+function parseStepEntities(text) {
+  const body = stepTokens(text), ents = new Map();
+  let i = 0;
+  while (i < body.length) {
+    const h = body.indexOf('#', i);
+    if (h < 0) break;
+    const m = /^#(\d+)\s*=\s*/.exec(body.slice(h, h + 24));
+    if (!m) { i = h + 1; continue; }
+    let pos = h + m[0].length;
+    const id = '#' + m[1];
+    if (body[pos] === '(') {                                   // entidad compleja: (TIPO1(...) TIPO2(...))
+      const [arr, np] = parseStepArgs(body, pos);
+      pos = np;
+      ents.set(id, { complex: true, parts: arr.filter((x) => x && x.type) });
+    } else {
+      const n = /^[A-Z_0-9]+/i.exec(body.slice(pos, pos + 80));
+      pos += n[0].length;
+      const [args, np] = parseStepArgs(body, pos);
+      pos = np;
+      ents.set(id, { type: n[0].toUpperCase(), args });
+    }
+    i = body.indexOf(';', pos) + 1 || body.length;
+  }
+  return ents;
+}
+// --- recortes: contornos de las caras (aristas B-spline, elipses, círculos, rectas) proyectados al espacio (u, v) de la superficie ---
+function stepEdgePoints(E, edgeId, o, n = 32) {
+  const get = (id) => E.get(id), ed = get(edgeId);
+  const P = (vid) => { const c = get(get(vid).args[1]).args[1].map(Number); return new THREE.Vector3(...fromCAD(c[0], c[1], c[2], o)); };
+  const a = P(ed.args[1]), b = P(ed.args[2]), cg = get(ed.args[3]), sense = ed.args[4] !== '.F.';
+  const part = (e, type) => (e.complex ? e.parts.find((p) => p.type === type) : e.type === type ? e : null);
+  const out = [];
+  const crv = cg && part(cg, 'B_SPLINE_CURVE_WITH_KNOTS');
+  if (crv) {
+    const cb = cg.complex ? cg.parts.find((p) => p.type === 'B_SPLINE_CURVE') : crv;
+    const rat = cg.complex ? cg.parts.find((p) => p.type === 'RATIONAL_B_SPLINE_CURVE') : null;
+    const deg = cg.complex ? cb.args[0] : cb.args[1], pts = cg.complex ? cb.args[1] : cb.args[2];
+    const wk = cg.complex ? crv.args : crv.args.slice(6);
+    const ks = []; wk[1].forEach((k, i) => { for (let m = 0; m < wk[0][i]; m++) ks.push(k); });
+    const k0 = ks[0], k1 = ks[ks.length - 1];
+    const cvs = pts.map((ref, i) => { const c = get(ref).args[1].map(Number), q = fromCAD(c[0], c[1], c[2], o); return new THREE.Vector4(q[0], q[1], q[2], rat ? rat.args[0][i] : 1); });
+    const cur = N.curveOf({ deg, knots: ks.map((v) => (v - k0) / (k1 - k0 || 1)), cvs });
+    for (let i = 0; i <= n; i++) out.push(cur.getPoint(i / n));
+    if (out[0].distanceTo(a) + out[n].distanceTo(b) > out[0].distanceTo(b) + out[n].distanceTo(a)) out.reverse();
+    return out;
+  }
+  const cir = cg && (part(cg, 'ELLIPSE') || part(cg, 'CIRCLE'));
+  if (cir) {
+    const ax = get(cir.args[1]).args, C = get(ax[1]).args[1].map(Number), Z = get(ax[2]).args[1].map(Number), Xd = get(ax[3]).args[1].map(Number);
+    const c = new THREE.Vector3(...fromCAD(C[0], C[1], C[2], o)), z = new THREE.Vector3(...fromCAD(Z[0], Z[1], Z[2], { ...o, unit: 'dm' }).map((v) => v * 1)),
+      x = new THREE.Vector3(...fromCAD(Xd[0], Xd[1], Xd[2], { ...o, unit: 'dm' }));
+    // fromCAD con unit dm no cambia la longitud: sirve para girar direcciones al sistema de Forja
+    z.normalize(); x.normalize();
+    const y = z.clone().cross(x), r1 = (cir.type === 'ELLIPSE' ? cir.args[2] : cir.args[2]) / UNITS[o.unit], r2 = cir.type === 'ELLIPSE' ? cir.args[3] / UNITS[o.unit] : r1;
+    const ang = (v) => Math.atan2(v.clone().sub(c).dot(y) / r2, v.clone().sub(c).dot(x) / r1);
+    let t1 = ang(a), t2 = ang(b);
+    if (a.distanceTo(b) < 1e-6) t2 = t1 + (sense ? 2 * Math.PI : -2 * Math.PI);
+    else if (sense) { if (t2 <= t1) t2 += 2 * Math.PI; } else if (t2 >= t1) t2 -= 2 * Math.PI;
+    for (let i = 0; i <= n; i++) { const t = t1 + (t2 - t1) * (i / n); out.push(c.clone().addScaledVector(x, r1 * Math.cos(t)).addScaledVector(y, r2 * Math.sin(t))); }
+    return out;
+  }
+  const ln = cg && part(cg, 'LINE');
+  if (ln) { for (let i = 0; i <= 2; i++) out.push(a.clone().lerp(b, i / 2)); return out; }
+  return null;
+}
+// punto 3D -> (u, v) más cercano de la superficie
+function projectUV(surf, grid, G, pt) {
+  let bi = 0, bj = 0, bd = Infinity;
+  for (let i = 0; i <= G; i++) for (let j = 0; j <= G; j++) { const d = grid[i][j].distanceToSquared(pt); if (d < bd) { bd = d; bi = i; bj = j; } }
+  let u = bi / G, v = bj / G, h = 1 / G;
+  const q = new THREE.Vector3(), f = (uu, vv) => { surf.getPoint(Math.min(1, Math.max(0, uu)), Math.min(1, Math.max(0, vv)), q); return q.distanceToSquared(pt); };
+  let cur = f(u, v);
+  for (let it = 0; it < 40 && h > 1e-7; it++) {
+    let moved = false;
+    for (const [du, dv] of [[h, 0], [-h, 0], [0, h], [0, -h], [h, h], [-h, -h], [h, -h], [-h, h]]) {
+      const d = f(u + du, v + dv);
+      if (d < cur) { cur = d; u = Math.min(1, Math.max(0, u + du)); v = Math.min(1, Math.max(0, v + dv)); moved = true; break; }
+    }
+    if (!moved) h /= 2;
+  }
+  return { uv: [u, v], dist: Math.sqrt(cur) };
+}
+export function readSTEP(text, o) {
+  const E = parseStepEntities(text), out = { surfaces: [], curves: [], skipped: {}, trimmed: 0, other: 0, faces: 0 };
+  const get = (id) => E.get(id);
+  const part = (e, type) => (e.complex ? e.parts.find((p) => p.type === type) : e.type === type ? e : null);
+  const pt = (id) => { const c = get(id).args[1]; return c; };
+  const expand = (ks, ms) => { const r = []; ks.forEach((k, i) => { for (let n = 0; n < ms[i]; n++) r.push(k); }); return r; };
+  const norm = (ks) => { const a = ks[0], b = ks[ks.length - 1]; return ks.map((v) => (v - a) / (b - a || 1)); };
+  const used = new Set();   // curvas que son bordes de una cara (no se importan como curvas sueltas)
+  for (const [, e] of E) if (e.type === 'EDGE_CURVE') used.add(e.args[3]);
+  let k = 0;
+  for (const [id, e] of E) {
+    const surf = part(e, 'B_SPLINE_SURFACE_WITH_KNOTS'), crv = part(e, 'B_SPLINE_CURVE_WITH_KNOTS');
+    if (surf) {
+      const a = surf.args, base = e.complex ? e.parts.find((p) => p.type === 'B_SPLINE_SURFACE') : surf;
+      // entidad simple: (nombre, gradoU, gradoV, puntos, ...); compleja: B_SPLINE_SURFACE(gradoU, gradoV, puntos, ...)
+      const degU = e.complex ? base.args[0] : a[1], degV = e.complex ? base.args[1] : a[2], grid = e.complex ? base.args[2] : a[3];
+      const rat = e.complex ? e.parts.find((p) => p.type === 'RATIONAL_B_SPLINE_SURFACE') : null;
+      // en la entidad compleja los datos de nudos están en WITH_KNOTS (args: mults U, V, nudos U, V, tipo)
+      const wk = e.complex ? surf.args : a.slice(8);
+      const mu = wk[0], mv = wk[1], ku = wk[2], kv = wk[3];
+      const nu = grid.length, nv = grid[0].length;
+      const W = rat ? rat.args[0] : null;
+      const cvs = grid.map((row, i) => row.map((ref, j) => {
+        const [x, y, z] = pt(ref).map(Number), [fx, fy, fz] = fromCAD(x, y, z, o);
+        return { x: fx, y: fy, z: fz, w: W ? W[i][j] : 1 };
+      }));
+      out.surfaces.push({ label: '', degU, degV, knotsU: norm(expand(ku, mu)), knotsV: norm(expand(kv, mv)), cvs, step: id });
+    } else if (crv && !used.has(id)) {
+      const rat = e.complex ? e.parts.find((p) => p.type === 'RATIONAL_B_SPLINE_CURVE') : null;
+      const cb = e.complex ? e.parts.find((p) => p.type === 'B_SPLINE_CURVE') : crv;
+      const deg = e.complex ? cb.args[0] : cb.args[1], pts = e.complex ? cb.args[1] : cb.args[2];
+      const wk = e.complex ? crv.args : crv.args.slice(6);
+      const cvs = pts.map((ref, i) => { const [x, y, z] = pt(ref).map(Number), [fx, fy, fz] = fromCAD(x, y, z, o); return { x: fx, y: fy, z: fz, w: rat ? rat.args[0][i] : 1 }; });
+      out.curves.push({ label: '', deg, knots: norm(expand(wk[1], wk[0])), cvs });
+    }
+  }
+  for (const [, e] of E) {
+    if (e.type === 'ADVANCED_FACE') {
+      out.faces++;
+      const s0 = get(e.args[2]);
+      if (!s0 || (!part(s0, 'B_SPLINE_SURFACE_WITH_KNOTS'))) out.other++;
+      // ¿hay recortes? más de un contorno, o el contorno exterior no son 4 bordes de curva B-spline
+      const bounds = e.args[1] || [];
+      let trimmed = bounds.length > 1;
+      bounds.forEach((b) => {
+        const bd = get(b), lp = bd && get(bd.args[1]);
+        const edges = lp && lp.args[1] || [];
+        if (edges.length !== 4) trimmed = true;
+        edges.forEach((oe) => { const ec = get(get(oe).args[3]); const cg = ec && get(ec.args[3]); if (cg && !part(cg, 'B_SPLINE_CURVE_WITH_KNOTS')) trimmed = true; });
+      });
+      if (trimmed) {
+        out.trimmed++;
+        const idx = out.surfaces.findIndex((sf) => sf.step === e.args[2]);
+        if (idx >= 0) {
+          const sd = out.surfaces[idx], loops = [];
+          const surf = N.surfaceOf({ degU: sd.degU, degV: sd.degV, knotsU: sd.knotsU, knotsV: sd.knotsV, cvs: sd.cvs.map((row) => row.map((c) => new THREE.Vector4(c.x, c.y, c.z, c.w))) });
+          const G = 40, grid = [], tmp = new THREE.Vector3();
+          for (let i = 0; i <= G; i++) { grid.push([]); for (let j = 0; j <= G; j++) { surf.getPoint(i / G, j / G, tmp); grid[i].push(tmp.clone()); } }
+          let fail = false;
+          bounds.forEach((b) => {
+            const bd = get(b), lp = get(bd.args[1]), poly = [];
+            for (const oe of lp.args[1]) {
+              const ed = get(oe), pts = stepEdgePoints(E, ed.args[3], o);
+              if (!pts) { fail = true; return; }
+              if (ed.args[4] === '.F.') pts.reverse();
+              pts.forEach((p, i) => { if (!(poly.length && i === 0)) poly.push(p); });
+            }
+            if (fail) return;
+            const uv = [];
+            poly.forEach((p) => { const r = projectUV(surf, grid, G, p); if (r.dist > 0.03) fail = true; uv.push(r.uv); });
+            if (uv.length > 1 && Math.hypot(uv[0][0] - uv[uv.length - 1][0], uv[0][1] - uv[uv.length - 1][1]) > 1e-4) uv.push(uv[0].slice());
+            loops.push({ uv, trim: bd.type === 'FACE_OUTER_BOUND' ? 'outside' : 'inside' });
+          });
+          if (fail) out.trimFailed = (out.trimFailed || 0) + 1; else sd.loops = loops;
+        }
+      }
     }
   }
   return out;
