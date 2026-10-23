@@ -691,6 +691,15 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Comparación: con la configuración por defecto Forja da 0 píxeles distintos entre v0.36 y v0.37 (forja/tcmp.mjs); montaje con el video: forja/fj-sheet2.png (tfj2.mjs).
   LECCIÓN: ante "regresa X", cambiar SOLO X; no revertir versiones enteras.
 
+- (v0.38) Menús radiales (Puck/Tab, Espacio, Ctrl+Shift+botón: todos son makeRadial) con NEUMORFISMO (Soft UI), pedido del usuario con referencia "SHADOW" (botones extruidos
+  del mismo material). Reemplaza las esferas 3D de la v0.10.1 (el usuario cambió de opinión). CSS en index.html ("Menú radial ... NEUMORFISMO"): variables --nm, --nm-hi, --nm-lo,
+  --nm-ink, --nm-text por tema; botones circulares con sombra clara arriba-izquierda y oscura abajo-derecha; opción marcada = hundida (sombras inset) con icono azul #2f7bff.
+  Sin fondo: .radial-veil (div al final de #view, backdrop-filter blur 9px) desenfoca SOLO el visor 3D (cabecera y paneles no); syncRadialVeil() lo enciende si algún menú está abierto.
+  Anillo circular (RADIAL_TILT = 1), sin elipses ni línea guía, sin escalado por profundidad (base 1, aumento al pasar 1,14). Apertura en flor: show() quita .bloom, fuerza un reflow y la
+  vuelve a poner; el centro escala .55→1 y sus sombras pasan de planas a extruidas (170 ms); los pétalos brotan desde el centro (--bx/--by = -x/-y, escala 0→1, opacidad, 200 ms,
+  retraso n·8 ms); los del submenú brotan desde su opción (retraso j·10 ms, separación 62 px). .settled (280 ms) acorta las transiciones del aumento. El centro ya no está en INK_SEL.
+  Prueba: forja/tnm2_dark.mjs / tnm2_light.mjs (montaje nm-sheet.png). En SwiftShader los cuadros tardan > 2 s: usar keyboard.down('Tab') real y esperar.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

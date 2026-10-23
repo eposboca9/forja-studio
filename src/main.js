@@ -3392,19 +3392,26 @@ const DISPLAY_MM = [
   { k: 'info', label: 'Información', run: () => $('panel').classList.add('show') },
 ];
 
-const RADIAL_TILT = 0.6;   // achatamiento vertical del anillo (vista elevada)
+const RADIAL_TILT = 1;     // anillo circular (neumorfismo plano; antes 0,6 = anillo 3D visto desde arriba)
+// desenfoque del visor 3D bajo los menús radiales (solo el visor: la cabecera y los paneles no se desenfocan)
+const radialVeil = document.createElement('div');
+radialVeil.className = 'radial-veil';
+$('view').append(radialVeil);
+const syncRadialVeil = () => radialVeil.classList.toggle('on', MENUS.some((m) => m?.open));
 function makeRadial(items, { r = 140, title = '' } = {}) {
   const K = RADIAL_TILT, r2 = r + 78, R = r2 + 46;
   const el = document.createElement('div');
-  el.className = 'puck'; el.hidden = true; el.dataset.inkTint = '0.5';
+  el.className = 'puck'; el.hidden = true;
   el.innerHTML = `<svg class="puck-lines" viewBox="${-R} ${-R} ${2 * R} ${2 * R}" width="${2 * R}" height="${2 * R}" style="left:${-R}px;top:${-R}px">
       <ellipse rx="${r}" ry="${r * K}" /><ellipse class="outer" rx="${r2}" ry="${r2 * K}" /><line x1="0" y1="0" x2="0" y2="0" /></svg>
     <div class="puck-center"><b></b><span></span></div>`;
   document.body.append(el);
   const line = el.querySelector('line'), cName = el.querySelector('.puck-center b'), cHint = el.querySelector('.puck-center span');
   const mains = [], all = [];
-  const button = (it, x, y, depth, cls) => {
+  const button = (it, x, y, depth, cls, from = [0, 0], delay = 0) => {
     const b = document.createElement('button');
+    // de dónde brota (el centro, o su opción si es de un submenú) y su pequeño retraso: apertura en flor
+    b.style.setProperty('--bx', from[0] - x + 'px'); b.style.setProperty('--by', from[1] - y + 'px'); b.style.setProperty('--d', delay + 'ms');
     b.className = 'puck-item ' + cls + (it.soon ? ' soon' : '');
     b.innerHTML = `<i>${icon(it.k)}</i><span>${esc(it.label)}</span>`;
     b.style.left = x + 'px'; b.style.top = y + 'px';
@@ -3416,15 +3423,15 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
   items.forEach((it, n) => {
     const a = -Math.PI / 2 + (n / items.length) * Math.PI * 2, depth = (Math.sin(a) + 1) / 2;
     const x = Math.cos(a) * r, y = Math.sin(a) * r * K;
-    const m = { it, a, x, y, base: 0.76 + 0.34 * depth, subs: [] };
-    m.b = button(it, x, y, depth, 'main');
+    const m = { it, a, x, y, base: 1, subs: [] };
+    m.b = button(it, x, y, depth, 'main', [0, 0], n * 8);
     // submenú: esferas pequeñas en un arco hacia fuera, centrado en la dirección de su esfera
-    const subs = it.sub || [], step = 44 / r2;
+    const subs = it.sub || [], step = 62 / r2;   // 62 px entre pétalos del submenú: deja sitio a su etiqueta
     subs.forEach((sit, j) => {
       const sa = a + (j - (subs.length - 1) / 2) * step, sd = (Math.sin(sa) + 1) / 2;
       const sx = Math.cos(sa) * r2, sy = Math.sin(sa) * r2 * K;
-      const sm = { it: sit, a: sa, x: sx, y: sy, base: 0.62 + 0.24 * sd, parent: m, sub: true };
-      sm.b = button(sit, sx, sy, sd, 'sub');
+      const sm = { it: sit, a: sa, x: sx, y: sy, base: 1, parent: m, sub: true };
+      sm.b = button(sit, sx, sy, sd, 'sub', [x, y], j * 10);
       m.subs.push(sm); all.push(sm);
     });
     mains.push(m); all.push(m);
@@ -3432,7 +3439,7 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
   const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, active: null, sticky: false };
   const magnify = (mx, my) => all.forEach((x) => {
     const d = mx == null ? 1e9 : Math.hypot(x.x - mx, x.y - my);
-    const s = x.base * (1 + 0.35 * Math.exp(-(d * d) / (2 * 42 * 42))) * (x === st.hover ? 1.12 : 1);
+    const s = x.base * (1 + 0.14 * Math.exp(-(d * d) / (2 * 42 * 42))) * (x === st.hover ? 1.06 : 1);
     x.b.style.setProperty('--s', s.toFixed(3));
   });
   st.highlight = (h) => {
@@ -3465,11 +3472,17 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
     const m = R * 0.92;
     st.at = { x: Math.min(innerWidth - m, Math.max(m, x)), y: Math.min(innerHeight - m * K - 40, Math.max(m * K + 40, y)) };
     el.style.left = st.at.x + 'px'; el.style.top = st.at.y + 'px';
+    el.classList.remove('bloom', 'settled');
     el.hidden = false; st.open = true; st.sticky = false; st.active = null; st.highlight(null); magnify(null); st.t0 = performance.now();
+    syncRadialVeil();
+    void el.offsetWidth;                       // parte del estado cerrado (todo en el centro) para que la flor se abra
+    el.classList.add('bloom');
+    clearTimeout(st.settleT); st.settleT = setTimeout(() => st.open && el.classList.add('settled'), 280);
   };
   st.close = (run) => {
     if (!st.open) return;
-    st.open = false; el.hidden = true;
+    st.open = false; el.hidden = true; el.classList.remove('bloom', 'settled');
+    syncRadialVeil();
     const h = st.hover;
     if (run && h) (h.it.soon || !h.it.run ? soon(h.it.label) : h.it.run)();
   };
@@ -5489,7 +5502,7 @@ function updateXfPrompt() {
 // Color del texto de los menús según lo que tiene detrás: se leen los píxeles de la vista bajo cada rótulo
 // (donde no hay objeto se ve el muro) y el texto pasa entero a negro o a blanco.
 let inkT = 0;
-const INK_SEL = '.cube-probe:not([hidden]), .proj-btn, .app .panel .sec > *, .app .panel .panel-head, .app[data-layout-now="forge"] .panel .bf-ui details.grp > summary, .app[data-layout-now="forge"] .panel .bf-ui .grp-body > *, .app[data-layout-now="forge"] .bf-hud .chip:not([hidden]), .app[data-layout-now="forge"] .bf-loader:not([hidden]), #toolwin:not([hidden]) .tw-head, #toolwin:not([hidden]) .tw-body > *, #quickpick:not([hidden]) > b, #layers-win:not([hidden]) .fw-head, #layers-win:not([hidden]) .ly-head, #layers-win:not([hidden]) .ly-item, #layers-win:not([hidden]) .ol-item, #layers-win:not([hidden]) .fw-body > p, .puck:not([hidden]) .puck-item span, .puck:not([hidden]) .puck-center, #rel-labels:not([hidden]) .rel-label, .top .brand, .top .light-switch, .cube-tools .ct-col button, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
+const INK_SEL = '.cube-probe:not([hidden]), .proj-btn, .app .panel .sec > *, .app .panel .panel-head, .app[data-layout-now="forge"] .panel .bf-ui details.grp > summary, .app[data-layout-now="forge"] .panel .bf-ui .grp-body > *, .app[data-layout-now="forge"] .bf-hud .chip:not([hidden]), .app[data-layout-now="forge"] .bf-loader:not([hidden]), #toolwin:not([hidden]) .tw-head, #toolwin:not([hidden]) .tw-body > *, #quickpick:not([hidden]) > b, #layers-win:not([hidden]) .fw-head, #layers-win:not([hidden]) .ly-head, #layers-win:not([hidden]) .ly-item, #layers-win:not([hidden]) .ol-item, #layers-win:not([hidden]) .fw-body > p, .puck:not([hidden]) .puck-item span, #rel-labels:not([hidden]) .rel-label, .top .brand, .top .light-switch, .cube-tools .ct-col button, .top .mb-btn, .top .seg button, .top .tag, .top .file, .pane-head .pane-title, .status > span, .status .viewinfo > span, .mb-drop:not([hidden]) .mb-item, .mb-drop:not([hidden]) .mb-title';
 function adaptInk(now) {
   if (now - inkT < 400) return;
   inkT = now;

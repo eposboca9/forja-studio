@@ -717,49 +717,49 @@
   .ol-group.open .ol-fold { transform: rotate(90deg); }
   .ol-group.sel > .ol-gh .ol-name { color: #2f7bff; }
   .ol-group small { color: var(--muted); font-family: var(--font-mono); font-size: 9px; }
+  /* --- Menú radial (Puck, Espacio, Ctrl+Shift): NEUMORFISMO (Soft UI) ---
+     Botones circulares "extruidos" del mismo material, con dos sombras contrapuestas (clara arriba-izquierda, oscura abajo-derecha).
+     Sin fondo sólido: debajo solo se desenfoca el visor 3D (.radial-veil, dentro de #view). Apertura "flor": el centro emerge
+     (escala + sombras de plano a extruido) y los pétalos brotan del centro hacia su sitio escalando de 0 a 1 (≈ 200 ms). */
+  :root { --nm: #d6d4cf; --nm-hi: rgba(255,255,255,.72); --nm-lo: rgba(84,77,68,.34); --nm-ink: #5d6068; --nm-text: #3a3c42; }
+  :root[data-theme="dark"] { --nm: #2b2b2e; --nm-hi: rgba(255,255,255,.055); --nm-lo: rgba(0,0,0,.62); --nm-ink: #a7abb3; --nm-text: #d9dbe0; }
+  .radial-veil { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .15s ease-out;
+    backdrop-filter: blur(9px) saturate(.9); -webkit-backdrop-filter: blur(9px) saturate(.9); }
+  .radial-veil.on { opacity: 1; }
   .puck { position: fixed; width: 0; height: 0; z-index: 70; pointer-events: none; }
-  .puck::before { content: ""; position: absolute; left: -380px; top: -240px; width: 760px; height: 480px;
-    background: color-mix(in srgb, var(--bg) 50%, transparent); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
-    --g: radial-gradient(closest-side, #000 0, rgba(0,0,0,.98) 20%, rgba(0,0,0,.9) 35%, rgba(0,0,0,.75) 48%, rgba(0,0,0,.55) 60%, rgba(0,0,0,.35) 71%, rgba(0,0,0,.18) 81%, rgba(0,0,0,.07) 90%, transparent 100%);
-    -webkit-mask-image: var(--g); mask-image: var(--g); }
-  .puck-lines { position: absolute; overflow: visible; pointer-events: none; }
-  .puck-lines ellipse { fill: none; stroke: color-mix(in srgb, var(--fg) 16%, transparent); stroke-width: 1; }
-  .puck-lines ellipse.outer { stroke-dasharray: 2 5; stroke: color-mix(in srgb, var(--fg) 10%, transparent); }
-  .puck-lines line { stroke: #2f7bff; stroke-width: 1.5; }
-  /* centro: un disco visto desde arriba */
-  .puck-center { position: absolute; left: -64px; top: -35px; width: 128px; height: 70px; border-radius: 50%; display: grid; place-content: center; text-align: center; gap: 2px;
-    background: radial-gradient(ellipse at 50% 30%, color-mix(in srgb, var(--panel) 92%, #fff 8%), color-mix(in srgb, var(--bg) 94%, transparent) 75%);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 14%, transparent), inset 0 -6px 12px rgba(0,0,0,.35), 0 12px 20px -12px rgba(0,0,0,.8); z-index: 5; }
-  .puck-center b { font-weight: 500; font-size: 11px; letter-spacing: .08em; color: var(--fg); text-transform: uppercase; max-width: 112px; line-height: 1.2; }
-  .puck-center span { font-family: var(--font-mono); font-size: 8.5px; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
-  .puck-item { --s: 1; position: absolute; transform: translate(-50%, -50%) scale(var(--s)); transition: transform .14s ease-out, opacity .16s; pointer-events: auto; background: none; border: 0; padding: 0; cursor: pointer;
-    display: flex; flex-direction: column; align-items: center; gap: 4px; font: inherit; }
-  /* cada opción es una esfera: luz arriba a la izquierda, brillo especular, borde oscuro, luz rebotada abajo y sombra en el suelo */
-  .puck-item i { position: relative; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; transition: background .12s, box-shadow .12s;
-    background: radial-gradient(circle at 34% 28%, #ffffff 0, #f1f3f7 9%, #c9cfda 34%, #8a93a3 62%, #4b525f 84%, #2a2e36 100%);
-    box-shadow: inset 0 -7px 12px rgba(0,0,0,.38), inset 0 -2px 3px rgba(160,180,210,.35), inset 0 4px 6px rgba(255,255,255,.55), 0 3px 4px rgba(0,0,0,.3); }
-  .puck-item i::before { content: ""; position: absolute; left: 22%; top: 12%; width: 34%; height: 22%; border-radius: 50%;
-    background: radial-gradient(closest-side, rgba(255,255,255,.95), rgba(255,255,255,0)); transform: rotate(-30deg); }
-  .puck-item i::after { content: ""; position: absolute; left: 6px; right: 6px; bottom: -11px; height: 9px; border-radius: 50%;
-    background: radial-gradient(closest-side, rgba(0,0,0,.5), transparent); z-index: -1; }
-  /* icono grabado en la esfera: trazo hundido con luz en el borde inferior */
-  .puck-item svg { position: relative; width: 21px; height: 21px; color: rgba(28,34,46,.8); stroke-width: 2;
-    filter: drop-shadow(0 1px 0 rgba(255,255,255,.8)) drop-shadow(0 -.6px 0 rgba(0,0,0,.35)); }
-  .puck-item span { font-size: 9.5px; letter-spacing: .08em; white-space: nowrap; color: var(--muted); text-shadow: 0 0 3px var(--bg), 0 1px 2px rgba(0,0,0,.5); }
-  .puck-item.on i, .puck-item.parent i { background: radial-gradient(circle at 34% 28%, #f2f7ff 0, #9cc3ff 10%, #4b8dff 36%, #1f5fd6 64%, #0f347f 88%, #0a2457 100%);
-    box-shadow: inset 0 -7px 12px rgba(0,0,20,.45), inset 0 4px 6px rgba(255,255,255,.5), 0 0 0 4px color-mix(in srgb, #2f7bff 22%, transparent), 0 10px 18px -6px rgba(47,123,255,.7); }
-  .puck-item.on svg, .puck-item.parent svg { color: rgba(4,22,66,.82); filter: drop-shadow(0 1px 0 rgba(190,215,255,.75)) drop-shadow(0 -.6px 0 rgba(0,0,0,.4)); }
-  .puck-item.parent:not(.on) i { filter: saturate(.6) brightness(.95); }
+  .puck-lines { display: none; }
+  .puck-center { position: absolute; left: -52px; top: -52px; width: 104px; height: 104px; border-radius: 50%; display: grid; place-content: center; text-align: center; gap: 3px;
+    background: var(--nm); z-index: 5; opacity: 0; transform: scale(.55);
+    box-shadow: 0 0 0 var(--nm-hi), 0 0 0 var(--nm-lo);
+    transition: transform .17s cubic-bezier(.2,.9,.3,1.15), opacity .12s ease-out, box-shadow .17s ease-out; }
+  .puck.bloom .puck-center { opacity: 1; transform: scale(1); box-shadow: -7px -7px 16px var(--nm-hi), 8px 8px 18px var(--nm-lo); }
+  .puck-center b { font-weight: 500; font-size: 10.5px; letter-spacing: .1em; color: var(--nm-text); text-transform: uppercase; max-width: 84px; line-height: 1.2; }
+  .puck-center span { font-family: var(--font-mono); font-size: 8px; letter-spacing: .08em; color: var(--nm-ink); text-transform: uppercase; max-width: 84px; }
+  /* pétalos: cerrados = en el centro (--bx, --by), escala 0 y transparentes; abiertos = en su sitio */
+  .puck-item { --s: 1; --bx: 0px; --by: 0px; --d: 0ms; position: absolute; pointer-events: none; background: none; border: 0; padding: 0; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; font: inherit;
+    opacity: 0; transform: translate(-50%, -50%) translate(var(--bx), var(--by)) scale(0);
+    transition: transform .2s cubic-bezier(.18,.9,.32,1.16) var(--d), opacity .14s ease-out var(--d); }
+  .puck.bloom .puck-item.main { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) translate(0px, 0px) scale(var(--s)); }
+  .puck.settled .puck-item { --d: 0ms; transition-duration: .12s, .12s; }
+  .puck-item i { position: relative; width: 50px; height: 50px; border-radius: 50%; display: grid; place-items: center; background: var(--nm);
+    box-shadow: -5px -5px 12px var(--nm-hi), 6px 6px 14px var(--nm-lo); transition: box-shadow .12s ease-out; }
+  .puck-item svg { width: 20px; height: 20px; color: var(--nm-ink); stroke-width: 1.8; transition: color .12s; }
+  .puck-item span { font-size: 9.5px; letter-spacing: .1em; white-space: nowrap; color: var(--muted); text-transform: uppercase; }
+  /* opción marcada: el botón se "hunde" (sombras hacia dentro) y el icono se pone azul Forja */
+  .puck-item.on i { box-shadow: inset 4px 4px 9px var(--nm-lo), inset -4px -4px 9px var(--nm-hi); }
+  .puck-item.on svg { color: #2f7bff; }
+  .puck-item.parent:not(.on) i { box-shadow: inset 2px 2px 5px var(--nm-lo), inset -2px -2px 5px var(--nm-hi); }
+  .puck-item.parent svg { color: #2f7bff; }
   .puck-item.on span { color: var(--fg); }
-  .puck-item.soon { opacity: .4; }
-  /* submenú: esferas más pequeñas, solo visibles alrededor de la esfera activa */
-  .puck-item.sub { opacity: 0; pointer-events: none; transform: translate(-50%, -50%) scale(calc(var(--s) * .5)); }
-  .puck-item.sub.open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(var(--s)); }
-  .puck-item.sub.open.soon { opacity: .4; }
-  .puck-item.sub i { width: 32px; height: 32px; }
+  .puck-item.soon i { opacity: .45; }
+  /* submenú: pétalos pequeños que brotan desde su opción */
+  .puck.bloom .puck-item.sub.open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) translate(0px, 0px) scale(var(--s)); }
+  .puck-item.sub i { width: 36px; height: 36px; box-shadow: -4px -4px 9px var(--nm-hi), 4px 4px 10px var(--nm-lo); }
+  .puck-item.sub.on i { box-shadow: inset 3px 3px 7px var(--nm-lo), inset -3px -3px 7px var(--nm-hi); }
   .puck-item.sub svg { width: 15px; height: 15px; }
-  .puck-item.sub span { font-size: 9px; }
-  @media (prefers-reduced-motion: reduce) { .puck-item, .puck-item i { transition: none; } }
+  .puck-item.sub span { font-size: 8.5px; }
+  @media (prefers-reduced-motion: reduce) { .puck-item, .puck-center, .radial-veil { transition: none !important; } }
 
   /* Módulo IA */
   #ai-prompt { width: 100%; resize: vertical; background: rgba(255,255,255,.06); color: var(--fg); border: 0; border-radius: 0; padding: 10px; font: inherit; font-size: 13px; line-height: 1.4; }
