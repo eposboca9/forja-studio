@@ -667,6 +667,12 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (base lineal 0.019/0.066/0.070, escamas 0.243/0.546/0.600, rugosidad 0.26, barniz rugosidad 0.08, flakeSize 7.7, densidad 0.94). Entró como `aerolite` en `materials` (Visu, clásico e híbrido) SIN escamas
   (aproximación: metal 0.7 + barniz). Pendiente: escamas procedurales (flakes) y un lector .osb general.
 
+- (Investigación, sin código en la app) Archivos de entorno de Alias (Abstract, Diffuse, Evaluation, Hall, Showroom; 'StudioPacketFile', Autodesk Automotive 2010): cabecera de texto + bloques de
+  4106 bytes (00 00 10 00 | ff ff ef ff | 2 bytes | 4096 de datos; el último más corto) cuya concatenación (sin las cabeceras) es UN flujo Unix-compress (.Z, magic 1f 9d 90) con una variante:
+  primer código libre 258 (256 y 257 reservados), ancho 9 -> 16 bits, y al subir de ancho se alinea a grupos de 8 códigos. Decodificador de prueba: scratchpad/lzw3.py. Contiene una escena binaria de Alias:
+  tabla de clases 'aw.*' y luego un 'Cube' con texturas .pix (p. ej. AST20C0.pix de 512x512, RLE) y luces: el entorno es la geometría + texturas, no un HDRI. Falta parsear las texturas (PIX) y la
+  malla para reconstruir un mapa de entorno; alternativa más simple: pedir al usuario HDR/EXR exportados o capturas de esfera espejo.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
