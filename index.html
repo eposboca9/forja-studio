@@ -636,12 +636,14 @@
     background: color-mix(in srgb, var(--panel) 90%, transparent); backdrop-filter: blur(8px);
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 12%, transparent), 0 18px 40px -16px rgba(0,0,0,.6); }
   .float-win[hidden] { display: none; }
-  /* anclada: columna fija a la izquierda, al lado de las herramientas, siempre visible */
-  .float-win.docked { left: 72px !important; top: 96px !important; width: 232px; max-height: calc(100vh - 170px); z-index: 3; }
+  /* barra izquierda: Capas arriba (fija, a la izquierda) y las herramientas debajo; aparece al acercar el ratón al borde o se queda si está anclada */
+  .float-win.docked { left: 10px !important; top: 96px !important; width: 232px; max-height: calc(100vh - 170px); z-index: 3; opacity: 0; pointer-events: none; transform: translateX(-8px); transition: opacity .25s ease, transform .25s ease; }
   .float-win.docked .fw-head { cursor: default; }
-  /* como las herramientas: aparece al acercar el ratón al borde izquierdo y se queda mientras el ratón esté encima */
-  .float-win.docked { opacity: 0; pointer-events: none; transform: translateX(-8px); transition: opacity .25s ease, transform .25s ease; }
-  .app.near-left .float-win.docked, .float-win.docked:hover, .float-win.docked:focus-within { opacity: 1; pointer-events: auto; transform: none; }
+  .app.near-left .float-win.docked, .app.left-pinned .float-win.docked, .float-win.docked:hover, .float-win.docked:focus-within { opacity: 1; pointer-events: auto; transform: none; }
+  #ly-dock { font-size: 11px; }
+  #ly-dock[aria-pressed="true"] { color: #2f7bff; }
+  .app.left-pinned .tools, .app.left-pinned .tools.show { opacity: 1; pointer-events: auto; transform: none; }
+  .tools, .app.auto .tools { align-self: start; margin-top: var(--ly-h, 0px); max-height: calc(100% - var(--ly-h, 0px)); }
   .fw-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 12px; cursor: grab; user-select: none; touch-action: none; }
   .fw-head:active { cursor: grabbing; }
   .fw-head b { font-size: 10.5px; font-weight: 500; letter-spacing: .16em; text-transform: uppercase; }

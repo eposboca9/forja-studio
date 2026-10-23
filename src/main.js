@@ -3765,7 +3765,8 @@ const MENUBAR = [
   ['Capas', [
     { label: 'Nueva capa', run: newLayer }, { label: 'Pasar selección a la capa activa', run: () => assignToLayer() },
     { label: 'Mostrar todas las capas', run: () => { checkpoint(); layers.forEach((l) => (l.visible = true)); selectionChanged(); renderLayers(); } },
-    { sep: true }, { label: 'Ventana de capas', run: () => (prefs.layersWin?.open === false ? layersWin.show() : layersWin.set({ open: false })), ...chk(() => prefs.layersWin?.open !== false) }]],
+    { sep: true }, { label: 'Anclar barra izquierda', run: () => layersWin.togglePin(), ...chk(() => !!prefs.leftPin) },
+    { label: 'Ventana de capas', run: () => (prefs.layersWin?.open === false ? layersWin.show() : layersWin.set({ open: false })), ...chk(() => prefs.layersWin?.open !== false) }]],
   ['Visualización', [
     ...EVAL_MODES.map((m) => ({ label: m.label, key: m.key, run: () => setDiag(m.k), ...chk(() => layout !== 'render' && diagMode === m.k) })),
     { label: 'Oclusión ambiental', run: () => { prefs.ao = prefs.ao === false; savePrefs(); $('pref-ao').checked = prefs.ao !== false; }, ...chk(() => prefs.ao !== false) },
@@ -3930,49 +3931,36 @@ $('ly-new').addEventListener('click', (e) => { e.preventDefault(); newLayer(); }
 // Ventana flotante de capas: se arrastra por la cabecera, se pliega o se cierra; recuerda su sitio
 const layersWin = {
   el: $('layers-win'),
+  // Barra izquierda = Capas arriba + herramientas debajo. Se muestra al acercar el ratón al borde izquierdo o, si está anclada (prefs.leftPin), se queda siempre.
   apply() {
-    if ((prefs.layersWin || {}).v !== 2) { prefs.layersWin = { open: true, docked: true, v: 2 }; savePrefs(); }   // v0.35: anclada a la izquierda por defecto
-    const w = prefs.layersWin || {}, el = this.el, docked = w.docked !== false;
-    el.classList.toggle('docked', docked);
-    $('ly-dock').textContent = docked ? '◧' : '◫';
-    $('ly-dock').title = docked ? 'Soltar (ventana flotante)' : 'Anclar a la izquierda';
+    if ((prefs.layersWin || {}).v !== 3) { prefs.layersWin = { open: true, v: 3 }; savePrefs(); }
+    const w = prefs.layersWin || {}, el = this.el, pin = !!prefs.leftPin;
+    el.classList.add('docked');
     el.hidden = w.open === false;
     el.classList.toggle('folded', !!w.folded);
     $('ly-fold').setAttribute('aria-expanded', String(!w.folded));
-    if (docked) { el.style.left = ''; el.style.top = ''; return; }
-    const x = w.x ?? innerWidth - 270 - 330, y = w.y ?? 84;
-    el.style.left = Math.max(8, Math.min(innerWidth - 120, x)) + 'px';
-    el.style.top = Math.max(8, Math.min(innerHeight - 60, y)) + 'px';
+    app.classList.toggle('left-pinned', pin);
+    const b = $('ly-dock');
+    b.textContent = pin ? '●' : '○'; b.setAttribute('aria-pressed', String(pin));
+    b.title = pin ? 'Anclada: la barra izquierda no se oculta (clic para que se oculte sola)' : 'Anclar la barra izquierda (que no se oculte)';
+    this.measure();
+  },
+  // las herramientas se bajan lo que mida la ventana de Capas
+  measure() {
+    const t = $('tools'), root = document.documentElement.style, cur = parseFloat(root.getPropertyValue('--ly-h')) || 0;
+    const base = t.getBoundingClientRect().top - cur;   // dónde empezarían las herramientas sin Capas
+    root.setProperty('--ly-h', (this.el.hidden ? 0 : Math.max(0, Math.round(this.el.getBoundingClientRect().bottom - base + 12))) + 'px');
   },
   set(patch) { prefs.layersWin = { ...(prefs.layersWin || {}), ...patch }; savePrefs(); this.apply(); },
   show() { this.set({ open: true, folded: false }); },
+  togglePin() { prefs.leftPin = !prefs.leftPin; savePrefs(); this.apply(); },
 };
 {
-  const head = $('layers-head');
-  let drag = null;
-  head.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('button') || prefs.layersWin?.docked !== false) return;
-    const r = layersWin.el.getBoundingClientRect();
-    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
-    head.setPointerCapture(e.pointerId);
-  });
-  head.addEventListener('pointermove', (e) => {
-    if (!drag) return;
-    layersWin.el.style.left = e.clientX - drag.dx + 'px'; layersWin.el.style.top = e.clientY - drag.dy + 'px';
-  });
-  head.addEventListener('pointerup', () => {
-    if (!drag) return;
-    drag = null;
-    const r = layersWin.el.getBoundingClientRect();
-    layersWin.set({ x: Math.round(r.left), y: Math.round(r.top) });
-  });
-  $('ly-dock').addEventListener('click', () => {
-    const d = prefs.layersWin?.docked !== false;
-    if (d) { const r = layersWin.el.getBoundingClientRect(); layersWin.set({ docked: false, x: Math.round(r.left + 24), y: Math.round(r.top + 24) }); } else layersWin.set({ docked: true });
-  });
+  $('ly-dock').addEventListener('click', () => layersWin.togglePin());
   $('ly-fold').addEventListener('click', () => layersWin.set({ folded: !prefs.layersWin?.folded }));
   $('ly-close').addEventListener('click', () => layersWin.set({ open: false }));
-  addEventListener('resize', () => layersWin.apply());
+  addEventListener('resize', () => layersWin.measure());
+  if (window.ResizeObserver) new ResizeObserver(() => layersWin.measure()).observe(layersWin.el);
   layersWin.apply();
 }
 // opción C: la esfera del modo actual despliega las demás al pasar el ratón
