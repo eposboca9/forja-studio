@@ -506,6 +506,8 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   nu·M' en la 3.ª derivada) en los CVs 1–3 de curvas y superficies; flechas mucho más finas y pequeñas (escala 0,04·distancia, eje 0,011).
   "Mezcla (Blending)": r.extra filas de CVs extra y r.blendF (factor); las filas detrás de la continuidad siguen el desplazamiento de la
   última con caída lineal, siempre desde r.orig (forma original, 10 filas). Probado con Node (extra / factor) y talign2.mjs.
+- (v0.22.2) Rejilla: GridHelper multiplica el color del material por el de sus vértices (gris medio), por eso en oscuro casi no se veía.
+  THEME_3D.dark.grid = blanco (antes gris); applyGridOp(): opacidad = prefs.gridOp × 1,15 en oscuro y × 1,05 en claro. Celda = 1 dm = 100 mm.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso

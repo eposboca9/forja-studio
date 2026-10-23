@@ -591,15 +591,20 @@ function scaleHandles() {
 }
 
 const THEME_3D = {
-  dark: { curve: 0xe8e6e1, grid: 0x8a8781, iso: '#000000', shadow: 0.55 },
+  dark: { curve: 0xe8e6e1, grid: 0xffffff, iso: '#000000', shadow: 0.55 },
   light: { curve: 0x2b2a27, grid: 0x6e6b66, iso: '#0b0d10', shadow: 0.35 },
 };
+// la rejilla multiplica su color por el de los vértices (gris medio): en oscuro se deja blanca para que se vea clara sobre el fondo,
+// y la opacidad lleva +15 % en oscuro y +5 % en claro sobre el valor de Preferencias
+let gridBaseOp = GRID_OP0;
+function applyGridOp() { const m = theme === 'dark' ? 1.15 : 1.05; for (const g of [grid, gridXY, gridYZ]) g.material.opacity = Math.min(1, gridBaseOp * m); }
 function applyTheme3D() {
   const t = THEME_3D[theme];
   curveMat.color.setHex(t.curve);
   edgeCurveMat.color.setHex(theme === 'dark' ? 0xd6dae2 : 0x1b1d21);
   grid.material.color.setHex(t.grid); gridXY.material.color.setHex(t.grid); gridYZ.material.color.setHex(t.grid);
   ground.material.opacity = t.shadow;
+  applyGridOp();
 }
 function setTheme(t) {
   theme = t;
@@ -3572,7 +3577,7 @@ function initPrefs() {
     const txt = JSON.stringify({ modo: 'forja', ...FJ, ao: { activa: prefs.ao !== false, intensidad: prefs.aoInt ?? 2.1, radio: prefs.aoRad ?? 0.7 } });
     try { await navigator.clipboard.writeText(txt); toast('Valores copiados: pégalos en el chat'); } catch (e) { prompt('Copia estos valores:', txt); }
   });
-  const setGridOp = (v) => { for (const g of [grid, gridXY, gridYZ]) g.material.opacity = v; $('pref-grid-op-o').textContent = (+v).toFixed(3); };
+  const setGridOp = (v) => { gridBaseOp = +v; applyGridOp(); $('pref-grid-op-o').textContent = (+v).toFixed(3); };
   $('pref-grid-op').value = prefs.gridOp ?? GRID_OP0; setGridOp(prefs.gridOp ?? GRID_OP0);
   $('pref-grid-op').addEventListener('input', (e) => { prefs.gridOp = +e.target.value; setGridOp(+e.target.value); savePrefs(); });
   const aoInt = prefs.aoInt ?? 2.1, aoRad = prefs.aoRad ?? 0.7;
