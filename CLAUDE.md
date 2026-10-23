@@ -531,6 +531,13 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Elegir maestra: en el 2.º clic 'all' = también isoparamétricas (lineCandidates kinds 'all', menú con el nombre).
   NO hecho: esclavo = curva sobre superficie o isoparamétrica (no está claro qué se deforma; se avisa y se pide curva libre o borde).
   Pruebas: forja/talign8.mjs (letras, flecha, explícito), talign9.mjs (CoS, iso, tipos), tfree.mjs (Node).
+- (Plan, sin código) Pedido del usuario: cambiar el solver del viewport a un rasterizador "Vulkan" (Forward+ o Deferred) con PBR GGX, IBL
+  split-sum, SSAO, SSR, ACES y antialiasing, sin tocar cámara, inputs ni rendimiento. Vulkan no corre en una página web ni en el Artifact:
+  la alternativa del navegador es WebGPU (WGSL; el mismo código serviría luego en escritorio con wgpu, que usa Vulkan por debajo).
+  Propuesta pendiente de aprobación: interfaz RenderBackend (WebGL actual movido tal cual + backend nuevo), snapshot de escena de solo lectura,
+  Forward con prepass de profundidad/normales (no deferred completo), fases F0 spike de viabilidad ... F8 teselado GPU. Puntos de enganche
+  en main.js: renderer (l. 77), renderPane (5044), renderCarousel (2131), renderViewCube (4946), renderForgePane (5455), adaptInk (5104,
+  lee píxeles), ao.js (GTAO sobre el lienzo), miniaturas con WebGLRenderer temporales (2273, 3411).
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso
