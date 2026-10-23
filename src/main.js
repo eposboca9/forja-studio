@@ -4334,6 +4334,10 @@ function relSpec(r, group = [r]) {
       // la forma (mu) cambia cómo llega la superficie al borde sin cambiar la curvatura en él: solo aplica desde G2
       { type: 'range', label: 'Forma', min: -2, max: 2, step: 0.05, get: () => r.shape ?? 0, start: checkpoint, set: live('shape'), fmt: (v) => v.toFixed(2), show: () => r.cont >= 2 },
       { type: 'range', label: 'Escala G3', min: -2, max: 2, step: 0.05, get: () => r.shape3 ?? 0, start: checkpoint, set: live('shape3'), fmt: (v) => v.toFixed(2), show: () => r.cont >= 3 },
+      { type: 'group', key: 'alexp', label: 'Control explícito (grado y spans)', fields: [
+        { type: 'check', label: 'Control explícito', get: () => !!r.explicit, set: (v) => { if (v && r.xDeg == null) { const d = byId(r.slave)?.data; r.xDeg = r.curve ? d.deg : (r.sEdge[0] === 'u' ? d.degU : d.degV); r.xSpans = r.curve ? d.cvs.length - d.deg : (r.sEdge[0] === 'u' ? d.cvs.length - d.degU : d.cvs[0].length - d.degV); } set('explicit', v); TW.show(relSpec(r, group)); } },
+        { type: 'seg', label: r.curve ? 'Grado' : 'Grado (cruzando el borde)', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], show: () => !!r.explicit, get: () => r.xDeg ?? 3, set: (v) => set('xDeg', v) },
+        { type: 'range', label: r.curve ? 'Spans' : 'Spans (cruzando el borde)', min: 1, max: 16, step: 1, show: () => !!r.explicit, get: () => r.xSpans ?? 4, start: checkpoint, set: live('xSpans'), fmt: (v) => String(v) }] },
       { type: 'group', key: 'alblend', label: 'Mezcla (Blending)', fields: [
         { type: 'range', label: 'Filas de CVs extra', min: 0, max: 6, step: 1, get: () => r.extra || 0, start: checkpoint, set: live('extra'), fmt: (v) => String(v) },
         { type: 'range', label: 'Factor de mezcla', min: 0, max: 1, step: 0.01, show: () => (r.extra || 0) > 0, get: () => r.blendF ?? 1, start: checkpoint, set: live('blendF'), fmt: (v) => v.toFixed(2) }] },
@@ -4425,7 +4429,7 @@ function relSpec(r, group = [r]) {
 const relArrows = new THREE.Group();
 relArrows.renderOrder = 40;
 scene.add(relArrows);
-const ARROW_COLORS = { t: '#2f7bff', s: '#ff9a1f', g: '#a46bff', d: '#2fb36b' };
+const ARROW_COLORS = { t: '#2f7bff', s: '#ff9a1f', g: '#a46bff', d: '#2fb36b', f: '#ff5fb0' };
 function makeArrow(color) {
   const g = new THREE.Group(), m = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true });
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.8, 8), m); shaft.position.y = 0.4;
@@ -4448,6 +4452,7 @@ function relHandles(r) {
     const p0 = at(0), p1 = at(1), l1 = p1.distanceTo(p0) || 1e-3;
     if (r.cont >= 1) H2.push({ pos: p1, dir: p1.clone().sub(p0).normalize(), kind: 't', label: 'tensión', start: () => r.tension, drag: (delta, s0) => { r.tension = Math.max(0.05, s0 * (1 + delta / l1)); } });
     if (r.cont >= 2) { const p2 = at(2), l2 = p2.distanceTo(p1) || 1e-3; H2.push({ pos: p2, dir: p2.clone().sub(p1).normalize(), kind: 's', label: 'forma', start: () => r.shape || 0, drag: (delta, s0) => { r.shape = s0 + delta / l2; } }); }
+    H2.push({ pos: p0, dir: p1.clone().sub(p0).normalize(), kind: 'f', label: 'invertir', click: () => { r.rev = !r.rev; } });
     if (r.cont >= 3) { const p2 = at(2), p3 = at(3), l3 = p3.distanceTo(p2) || 1e-3; H2.push({ pos: p3, dir: p3.clone().sub(p2).normalize(), kind: 'g', label: 'G3', start: () => r.shape3 || 0, drag: (delta, s0) => { r.shape3 = s0 + delta / l3; } }); }
     return H2;
   }
@@ -4468,7 +4473,12 @@ function relHandles(r) {
       H.push({ pos: p3, dir: p3.clone().sub(p2).normalize(), kind: 'g', label: 'G3', start: () => r.shape3 || 0, drag: (delta, s0) => { r.shape3 = s0 + delta / l3; } });
     }
   };
-  if (r.type === 'align') rows(r.sEdge, r.cont, 'tension', 'shape');
+  if (r.type === 'align') {
+    rows(r.sEdge, r.cont, 'tension', 'shape');
+    // flecha de giro (Flip): en el inicio del borde, apunta a lo largo de él; un clic invierte su dirección
+    const a0 = HX.row(d, r.sEdge, 0), fa = v3(a0[0]), fb = v3(a0[1]);
+    H.push({ pos: fa, dir: fb.clone().sub(fa).normalize(), kind: 'f', label: 'invertir', click: () => { r.rev = !r.rev; } });
+  }
   else if (r.type === 'blend') {
     // con "Bloquear formas" las dos flechas azules mueven la misma forma
     rows('v0', r.contA ?? r.cont, 'tensionA', 'shapeA');
@@ -4512,8 +4522,30 @@ const relLabelBox = document.createElement('div');
 relLabelBox.id = 'rel-labels';
 document.body.append(relLabelBox);
 let relLabelPts = [];
+// letras P (posición), T (tangente), C (curvatura) en la costura de un Align: verde = dentro de la tolerancia, rojo = no
+function alignLetters(r) {
+  const out = byId(r.slave), m = byId(r.master);
+  if (!out || !m) return null;
+  let d, at;
+  try {
+    if (r.curve) { d = HX.diagnoseCurve(r, m.data, out.data); const c = out.data.cvs; at = v3(c[r.sEnd ? c.length - 1 : 0]); }
+    else { d = HX.diagnose(m.data, r.mEdge, out.data, r.sEdge, r.rev); at = v3(mid(HX.row(out.data, r.sEdge, 0))); }
+  } catch (e) { return null; }
+  const L = (ok, k, v) => `<b style="color:${ok ? '#2fb36b' : '#e5484d'}">${k}</b> ${v}`;
+  const parts = [L(d.gap < 1e-3, 'P', d.gap.toFixed(4) + ' dm')];
+  if (r.cont >= 1) parts.push(L(d.angle < 0.1, 'T', d.angle.toFixed(2) + '°'));
+  if (r.cont >= 2) parts.push(L(d.curv < 0.05, 'C', (d.curv * 100).toFixed(1) + ' %'));
+  return [at, '', parts.join(' · ')];
+}
 function updateRelLabels() {
-  const r = arrowsFor, out = r && ['blend', 'skin'].includes(r.type) && byId(r.out);
+  const r = arrowsFor;
+  if (r && r.type === 'align') {
+    const a = alignLetters(r);
+    relLabelPts = a ? [a] : [];
+    relLabelBox.innerHTML = relLabelPts.map(([, , h]) => `<span class="rel-label">${h}</span>`).join('');
+    return;
+  }
+  const out = r && ['blend', 'skin'].includes(r.type) && byId(r.out);
   relLabelPts = [];
   if (!out) { relLabelBox.innerHTML = ''; return; }
   const O = FF.surfEval(out.data);
@@ -4549,6 +4581,12 @@ addEventListener('pointerdown', (e) => {
   e.stopImmediatePropagation(); e.preventDefault();
   const a = hit.object.parent, h = a.userData.h;
   checkpoint();
+  if (h.click) {   // flecha de un solo clic (invertir dirección)
+    h.click();
+    if (applyRelation(arrowsFor)) { const out = byId(outputOf(arrowsFor)); if (out) propagateFrom(out); }
+    updateRelArrows(); TW.render(); renderHistory(); scheduleHistoryDiag();
+    return;
+  }
   arrowDrag = { h, s0: h.start(), x: e.clientX, y: e.clientY, pos: h.pos.clone(), dir: h.dir.clone(), pane: paneAt(e.clientX) };
   renderer.domElement.setPointerCapture(e.pointerId);
 }, true);
@@ -4576,9 +4614,9 @@ addEventListener('pointerup', () => {
 function historyBlockers() {
   if (!relations.length) return [];
   const outs = new Set(relations.map(outputOf));
+  // como en Alias: tocar a mano lo que sale de una operación (también las filas atadas de un Align) rompe el historial, con aviso
   const objs = pickMode === 'cv'
-    // en modo CV, la superficie de un Align se puede retocar: sus filas del borde siguen atadas a la maestra
-    ? [...new Set([...selCVs.values()].map((r) => r.obj))].filter((o) => outs.has(o.id) && !relations.some((r) => r.type === 'align' && r.slave === o.id))
+    ? [...new Set([...selCVs.values()].map((r) => r.obj))].filter((o) => outs.has(o.id))
     : selObjs.filter((o) => outs.has(o.id));
   return objs;
 }
@@ -4634,7 +4672,7 @@ function relDiag(r) {
 let histDiagT = 0;
 function scheduleHistoryDiag() {
   clearTimeout(histDiagT);
-  histDiagT = setTimeout(() => document.querySelectorAll('[data-diag-of]').forEach((el) => { const r = relations.find((x) => x.id === +el.dataset.diagOf); if (r) el.innerHTML = relDiag(r); }), 250);
+  histDiagT = setTimeout(() => { document.querySelectorAll('[data-diag-of]').forEach((el) => { const r = relations.find((x) => x.id === +el.dataset.diagOf); if (r) el.innerHTML = relDiag(r); }); if (arrowsFor?.type === 'align') updateRelLabels(); }, 250);
 }
 function renderHistory() {
   recomputeDeps(); objects.forEach(applyVisibility);

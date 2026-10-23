@@ -70,7 +70,7 @@ const xyz = (v) => new THREE.Vector3(v.x, v.y, v.z);
 
 // Deja la superficie que se ajusta lista: misma estructura que la maestra a lo largo del borde (grado, CVs y nudos)
 // y grado y filas suficientes al cruzarlo. Devuelve los datos (nuevos solo si hizo falta reconstruir).
-export function prepareSlave(S, sEdge, M, mEdge, cont, rev) {
+export function prepareSlave(S, sEdge, M, mEdge, cont, rev, ex = null) {
   const ma = along(M, mEdge);
   let d = S;
   const sa = along(d, sEdge);
@@ -81,6 +81,11 @@ export function prepareSlave(S, sEdge, M, mEdge, cont, rev) {
   if (sc.deg < cont || sc.n < cont + 2) {
     const n = Math.max(sc.n, cont + 2), deg = Math.min(Math.max(sc.deg, cont, 1), n - 1);
     d = isU(sEdge) ? N.rebuildSurface(d, deg, n - deg, d.degV, d.cvs[0].length - d.degV) : N.rebuildSurface(d, d.degU, d.cvs.length - d.degU, deg, n - deg);
+  }
+  if (ex) {
+    // control explícito: grado y spans al cruzar el borde (nunca menos de lo que pide la continuidad)
+    const c2 = cross(d, sEdge), deg = Math.min(7, Math.max(ex.deg || c2.deg, cont, 1)), n = Math.max(deg + (ex.spans || (c2.n - c2.deg)), cont + 2, deg + 1);
+    if (c2.deg !== deg || c2.n !== n) d = isU(sEdge) ? N.rebuildSurface(d, deg, n - deg, d.degV, d.cvs[0].length - d.degV) : N.rebuildSurface(d, d.degU, d.cvs.length - d.degU, deg, n - deg);
   }
   const k = rev ? reverseKnots(ma.knots) : ma.knots.slice();
   if (isU(sEdge)) { if (!sameKnots(d.knotsV, k)) d = { ...d, knotsV: k }; } else if (!sameKnots(d.knotsU, k)) d = { ...d, knotsU: k };
@@ -151,7 +156,7 @@ export function rangeWeights(rel, knots, deg, n) {
 }
 export function align(rel, M, S) {
   if (rel.curve) return alignCurve(rel, M, S);
-  const d = prepareSlave(S, rel.sEdge, M, rel.mEdge, rel.cont, rel.rev);
+  const d = prepareSlave(S, rel.sEdge, M, rel.mEdge, rel.cont, rel.rev, rel.explicit ? { deg: rel.xDeg, spans: rel.xSpans } : null);
   const sc = cross(d, rel.sEdge), sa = along(d, rel.sEdge);
   const nr = Math.min(10, sc.n), rowsAt = () => { const R = []; for (let k = 0; k < nr; k++) R.push(row(d, rel.sEdge, k).map((q) => [q.x, q.y, q.z, q.w])); return R; };
   // forma original de las filas del borde (para el rango parcial)
@@ -259,7 +264,12 @@ export function edgeParamNear(M, mEdge, p, n = 200) {
   }
   return best;
 }
-export function prepareCurve(S, cont) {
+export function prepareCurve(S, cont, ex = null) {
+  if (ex) {
+    const deg = Math.min(7, Math.max(ex.deg || S.deg, cont, 1)), n = Math.max(deg + (ex.spans || (S.cvs.length - S.deg)), cont + 2, deg + 1);
+    if (S.deg === deg && S.cvs.length === n) return S;
+    const d = N.rebuildCurve(S, deg, n - deg); d.plane = 'free'; return d;
+  }
   if (S.deg >= cont && S.cvs.length >= cont + 2) return S;
   const n = Math.max(S.cvs.length, cont + 2), deg = Math.min(Math.max(S.deg, cont, 1), n - 1);
   const d = N.rebuildCurve(S, deg, n - deg);
@@ -271,7 +281,7 @@ export function curveNaturalLambda(S, sEnd, M, rel) {
   return a > 1e-9 && b > 1e-9 ? a / b : 1;
 }
 export function alignCurve(rel, M, S) {
-  const d = prepareCurve(S, rel.cont), end = rel.sEnd || 0, K = rel.cont;
+  const d = prepareCurve(S, rel.cont, rel.explicit ? { deg: rel.xDeg, spans: rel.xSpans } : null), end = rel.sEnd || 0, K = rel.cont;
   const Dm = masterDerivs(rel, M, K);
   const f = curveFromEnd(d, end), P = f.P.map(xyz);
   const sign = rel.rev ? 1 : -1, lam = rel.lambda0 * rel.tension, mu = (rel.shape || 0) * lam;
