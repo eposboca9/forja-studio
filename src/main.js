@@ -4045,7 +4045,7 @@ function continueEdgeOp(r) {
   const sp = relSpec(r);
   sp.actions = [{ label: 'Quitar historial', run: () => removeRelation(r.id) }, { label: 'Terminar', primary: true, run: () => { setTool('select'); TW.hide(); } }];
   sp.hint = () => (r.type === 'skin' ? 'Cambia sus opciones aquí · clic en otra curva = nuevo Skin' : r.type === 'extend' ? 'Arrastra la flecha verde (distancia) · clic en otro borde = otra extensión'
-    : 'Arrastra las flechas: azul = forma, naranja = curvatura · clic en otro borde = nueva unión');
+    : 'Arrastra las flechas: azul = tangente (G1), naranja = curvatura (G2), violeta = G3 · clic en otro borde = nueva unión');
   TW.show(sp);
 }
 function endEdgeOp() { markEnd(0, null); markEnd(1, null); edgeOp = null; [0, 1, 2].forEach((k) => markEdge(k, null)); if (TW.spec && !TW.spec.rel) TW.hide(); }
@@ -4292,6 +4292,10 @@ function relSpec(r, group = [r]) {
       { type: 'range', label: r.curve || !r.varT ? 'Tensión' : 'Tensión inicio', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) },
       // la forma (mu) cambia cómo llega la superficie al borde sin cambiar la curvatura en él: solo aplica desde G2
       { type: 'range', label: 'Forma', min: -2, max: 2, step: 0.05, get: () => r.shape ?? 0, start: checkpoint, set: live('shape'), fmt: (v) => v.toFixed(2), show: () => r.cont >= 2 },
+      { type: 'range', label: 'Escala G3', min: -2, max: 2, step: 0.05, get: () => r.shape3 ?? 0, start: checkpoint, set: live('shape3'), fmt: (v) => v.toFixed(2), show: () => r.cont >= 3 },
+      { type: 'group', key: 'alblend', label: 'Mezcla (Blending)', fields: [
+        { type: 'range', label: 'Filas de CVs extra', min: 0, max: 6, step: 1, get: () => r.extra || 0, start: checkpoint, set: live('extra'), fmt: (v) => String(v) },
+        { type: 'range', label: 'Factor de mezcla', min: 0, max: 1, step: 0.01, show: () => (r.extra || 0) > 0, get: () => r.blendF ?? 1, start: checkpoint, set: live('blendF'), fmt: (v) => v.toFixed(2) }] },
       { type: 'check', label: r.curve ? 'Continuar hacia el otro lado' : 'Invertir la dirección del borde', get: () => !!r.rev, set: (v) => set('rev', v) });
     if (r.curve) {
       const ms = byId(r.master);
@@ -4379,13 +4383,13 @@ function relSpec(r, group = [r]) {
 const relArrows = new THREE.Group();
 relArrows.renderOrder = 40;
 scene.add(relArrows);
-const ARROW_COLORS = { t: '#2f7bff', s: '#ff9a1f', d: '#2fb36b' };
+const ARROW_COLORS = { t: '#2f7bff', s: '#ff9a1f', g: '#a46bff', d: '#2fb36b' };
 function makeArrow(color) {
   const g = new THREE.Group(), m = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true });
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.8, 10), m); shaft.position.y = 0.4;
-  const head = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 16), m); head.position.y = 0.95;
-  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.09, 14, 10), m);
-  const pick = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.2, 8), new THREE.MeshBasicMaterial({ visible: false })); pick.position.y = 0.55;
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.8, 8), m); shaft.position.y = 0.4;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.17, 12), m); head.position.y = 0.885;
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), m);
+  const pick = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 1.1, 8), new THREE.MeshBasicMaterial({ visible: false })); pick.position.y = 0.5;
   [shaft, head, ball].forEach((x) => { x.renderOrder = 41; });
   g.add(shaft, head, ball, pick);
   g.userData.pick = pick;
@@ -4402,6 +4406,7 @@ function relHandles(r) {
     const p0 = at(0), p1 = at(1), l1 = p1.distanceTo(p0) || 1e-3;
     if (r.cont >= 1) H2.push({ pos: p1, dir: p1.clone().sub(p0).normalize(), kind: 't', label: 'tensión', start: () => r.tension, drag: (delta, s0) => { r.tension = Math.max(0.05, s0 * (1 + delta / l1)); } });
     if (r.cont >= 2) { const p2 = at(2), l2 = p2.distanceTo(p1) || 1e-3; H2.push({ pos: p2, dir: p2.clone().sub(p1).normalize(), kind: 's', label: 'forma', start: () => r.shape || 0, drag: (delta, s0) => { r.shape = s0 + delta / l2; } }); }
+    if (r.cont >= 3) { const p2 = at(2), p3 = at(3), l3 = p3.distanceTo(p2) || 1e-3; H2.push({ pos: p3, dir: p3.clone().sub(p2).normalize(), kind: 'g', label: 'G3', start: () => r.shape3 || 0, drag: (delta, s0) => { r.shape3 = s0 + delta / l3; } }); }
     return H2;
   }
   if (!out || out.kind !== 'surface') return [];
@@ -4415,6 +4420,10 @@ function relHandles(r) {
       const p2 = v3(mid(HX.row(d, edge, 2))), l2 = p2.distanceTo(p1) || 1e-3;
       H.push({ pos: p2, dir: p2.clone().sub(p1).normalize(), kind: 's', label: 'forma',
         start: () => r[sKey] || 0, drag: (delta, s0) => { r[sKey] = s0 + delta / l2; } });
+    }
+    if (cont >= 3 && sKey === 'shape') {
+      const p2 = v3(mid(HX.row(d, edge, 2))), p3 = v3(mid(HX.row(d, edge, 3))), l3 = p3.distanceTo(p2) || 1e-3;
+      H.push({ pos: p3, dir: p3.clone().sub(p2).normalize(), kind: 'g', label: 'G3', start: () => r.shape3 || 0, drag: (delta, s0) => { r.shape3 = s0 + delta / l3; } });
     }
   };
   if (r.type === 'align') rows(r.sEdge, r.cont, 'tension', 'shape');
@@ -4487,7 +4496,7 @@ function placeRelLabels() {
   });
 }
 function scaleRelArrows() {
-  for (const a of relArrows.children) a.scale.setScalar(camera.position.distanceTo(a.position) * 0.075);
+  for (const a of relArrows.children) a.scale.setScalar(camera.position.distanceTo(a.position) * 0.04);
 }
 // en captura sobre la ventana: así la flecha gana a la selección y a mover con los botones
 addEventListener('pointerdown', (e) => {

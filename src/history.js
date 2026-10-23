@@ -92,7 +92,7 @@ export function prepareSlave(S, sEdge, M, mEdge, cont, rev) {
 // G0 = posición, G1 = tangencia, G2 = curvatura, G3 = variación de curvatura.
 // mu = término de forma: la continuidad geométrica G2 permite S'' = λ²M'' − μM' (y para G3 S''' = −λ³M''' + 3λμM''),
 // así la segunda fila de CVs se puede mover (flecha de "forma") sin romper la curvatura.
-export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev, mu = 0) {
+export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev, mu = 0, nu = 0) {
   const mc = cross(M, mEdge), sc = cross(S, sEdge);
   const mRows = [], sRows = [];
   // la maestra puede tener menos filas que las que pide la continuidad (p. ej. una extrusión tiene 2): sus derivadas
@@ -100,7 +100,7 @@ export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev, mu = 0) {
   for (let k = 0; k <= Math.min(cont, mc.n - 1); k++) mRows.push(row(M, mEdge, k));
   for (let k = 0; k <= cont; k++) sRows.push(row(S, sEdge, k));
   const n = sRows[0].length;
-  const lamF = typeof lambda === 'function' ? lambda : () => lambda, muF = typeof mu === 'function' ? mu : () => mu;
+  const lamF = typeof lambda === 'function' ? lambda : () => lambda, muF = typeof mu === 'function' ? mu : () => mu, nuF = typeof nu === 'function' ? nu : () => nu;
   for (let j = 0; j < n; j++) {
     const lambda = lamF(j, n), mu = muF(j, n, lambda);
     const jm = rev ? n - 1 - j : j;
@@ -113,7 +113,7 @@ export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev, mu = 0) {
     for (let k = 1; k <= cont; k++) {
       const target = Dm[k].clone().multiplyScalar((-lambda) ** k);
       if (k === 2) target.addScaledVector(Dm[1], -mu);
-      if (k === 3) target.addScaledVector(Dm[2], 3 * lambda * mu);
+      if (k === 3) { target.addScaledVector(Dm[2], 3 * lambda * mu); target.addScaledVector(Dm[1], nuF(j, n, lambda)); }
       P[k].set(0, 0, 0);
       const D0 = startDerivs(P.slice(0, k + 1), sc.knots, sc.deg, k)[k];
       P[k].set(1, 1, 1);
@@ -153,14 +153,14 @@ export function align(rel, M, S) {
   if (rel.curve) return alignCurve(rel, M, S);
   const d = prepareSlave(S, rel.sEdge, M, rel.mEdge, rel.cont, rel.rev);
   const sc = cross(d, rel.sEdge), sa = along(d, rel.sEdge);
-  const nr = Math.min(4, sc.n), rowsAt = () => { const R = []; for (let k = 0; k < nr; k++) R.push(row(d, rel.sEdge, k).map((q) => [q.x, q.y, q.z, q.w])); return R; };
+  const nr = Math.min(10, sc.n), rowsAt = () => { const R = []; for (let k = 0; k < nr; k++) R.push(row(d, rel.sEdge, k).map((q) => [q.x, q.y, q.z, q.w])); return R; };
   // forma original de las filas del borde (para el rango parcial)
   if (!rel.orig || rel.orig.n !== sa.n || rel.orig.nc !== sc.n) rel.orig = { n: sa.n, nc: sc.n, rows: rowsAt() };
   const w = rangeWeights(rel, sa.knots, sa.deg, sa.n);
   const g = N.greville(sa.knots, sa.deg, sa.n), g0 = sa.knots[sa.deg], g1 = sa.knots[sa.n];
   // tensión que cambia a lo largo del borde (de "Tensión" al inicio a "Tensión final" al final)
   const tAt = (j) => (rel.varT ? rel.tension + ((rel.tensionEnd ?? rel.tension) - rel.tension) * ((g[j] - g0) / ((g1 - g0) || 1)) : rel.tension);
-  alignRows(d, rel.sEdge, M, rel.mEdge, rel.cont, (j) => rel.lambda0 * tAt(j), rel.rev, (j, n, lam) => (rel.shape || 0) * lam);
+  alignRows(d, rel.sEdge, M, rel.mEdge, rel.cont, (j) => rel.lambda0 * tAt(j), rel.rev, (j, n, lam) => (rel.shape || 0) * lam, (j, n, lam) => (rel.shape3 || 0) * lam ** 2);
   if (w.some((x) => x < 1)) {
     for (let k = 0; k < nr; k++) {
       const r = row(d, rel.sEdge, k);
@@ -171,6 +171,19 @@ export function align(rel, M, S) {
       }
     }
   }
+  // "Blending": filas de CVs extra detrás de las de continuidad se mueven con el desplazamiento de la última, cada vez menos
+  const ex = Math.min(rel.extra || 0, nr - 1 - rel.cont), exPrev = Math.min(rel.extraPrev || 0, nr - 1 - rel.cont);
+  if (ex > 0 || exPrev > 0) {
+    const last = row(d, rel.sEdge, rel.cont), f = rel.blendF ?? 1;
+    for (let k = rel.cont + 1; k <= rel.cont + Math.max(ex, exPrev) && k < nr; k++) {
+      const r = row(d, rel.sEdge, k), e = k - rel.cont, wk = e <= ex ? f * (1 - e / (ex + 1)) : 0;
+      for (let j = 0; j < r.length; j++) {
+        const o = rel.orig.rows[k][j], o0 = rel.orig.rows[rel.cont][j];
+        r[j].set(o[0] + (last[j].x - o0[0]) * wk, o[1] + (last[j].y - o0[1]) * wk, o[2] + (last[j].z - o0[2]) * wk, r[j].w);
+      }
+    }
+  }
+  rel.extraPrev = ex;
   return d;
 }
 
@@ -251,7 +264,7 @@ export function alignCurve(rel, M, S) {
   for (let k = 1; k <= K; k++) {
     const target = Dm[k].clone().multiplyScalar((sign * lam) ** k);
     if (k === 2) target.addScaledVector(Dm[1], mu * sign);
-    if (k === 3) target.addScaledVector(Dm[2], 3 * lam * mu);
+    if (k === 3) { target.addScaledVector(Dm[2], 3 * lam * mu); target.addScaledVector(Dm[1], (rel.shape3 || 0) * lam ** 2); }
     P[k].set(0, 0, 0);
     const D0 = startDerivs(P.slice(0, k + 1), f.knots, f.deg, k)[k];
     P[k].set(1, 1, 1);
@@ -259,9 +272,16 @@ export function alignCurve(rel, M, S) {
     P[k].copy(target.sub(D0).divideScalar(Math.abs(c) > 1e-12 ? c : 1));
   }
   const out = { ...d, cvs: d.cvs.map((q) => q.clone()) };
-  for (let k = 0; k <= K; k++) {
-    const q = out.cvs[end ? out.cvs.length - 1 - k : k];
-    q.set(P[k].x, P[k].y, P[k].z, q.w);
+  const n = out.cvs.length, at = (k) => out.cvs[end ? n - 1 - k : k];
+  // forma original de los primeros CVs desde el extremo (para el "Blending" de filas extra)
+  const nr = Math.min(10, n);
+  if (!rel.orig || rel.orig.n !== n || rel.orig.end !== end) rel.orig = { n, end, pts: Array.from({ length: nr }, (_, k) => { const q = d.cvs[end ? n - 1 - k : k]; return [q.x, q.y, q.z]; }) };
+  for (let k = 0; k <= K; k++) at(k).set(P[k].x, P[k].y, P[k].z, at(k).w);
+  const ex = Math.max(0, Math.min(rel.extra || 0, nr - 2 - K)), bf = rel.blendF ?? 1, top = Math.max(ex, Math.min(rel.extraPrev || 0, nr - 2 - K));
+  rel.extraPrev = ex;
+  for (let k = K + 1; k < nr - 1 && k <= K + top; k++) {
+    const o = rel.orig.pts[k], o0 = rel.orig.pts[K], w = k - K <= ex ? bf * (1 - (k - K) / (ex + 1)) : 0;
+    at(k).set(o[0] + (P[K].x - o0[0]) * w, o[1] + (P[K].y - o0[1]) * w, o[2] + (P[K].z - o0[2]) * w, at(k).w);
   }
   return out;
 }

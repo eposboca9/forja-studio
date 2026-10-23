@@ -502,6 +502,10 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   borde" (r.modRange, r0, r1, soft: pesos por columna, rangeWeights; fuera del rango se vuelve a r.orig = forma original de las 4 filas) y
   "Tensión distinta al final" (r.varT, r.tensionEnd; alignRows acepta lambda/mu como función de la columna). Una superficie no se alinea a una
   curva (avisa). Pruebas: forja/talign2.mjs (matemática y ventana), talign3.mjs (clics reales), ttools.mjs ya elige en el menú.
+- (v0.22.1) Del video 7 de Alias (Align de curva): flechas de G1 (azul, tangente), G2 (naranja, curvatura) y G3 (violeta, r.shape3 = término
+  nu·M' en la 3.ª derivada) en los CVs 1–3 de curvas y superficies; flechas mucho más finas y pequeñas (escala 0,04·distancia, eje 0,011).
+  "Mezcla (Blending)": r.extra filas de CVs extra y r.blendF (factor); las filas detrás de la continuidad siguen el desplazamiento de la
+  última con caída lineal, siempre desde r.orig (forma original, 10 filas). Probado con Node (extra / factor) y talign2.mjs.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso
