@@ -589,6 +589,18 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Pruebas: forja/tlay.mjs (color, simetría, referencia), tlayui.mjs (captura de la ventana). PENDIENTE: Stages (etapas), atenuar también las mallas de capas inactivas,
   incluir el espejo en la exportación.
 
+- (v0.27) WebGPU F2 = backend HÍBRIDO de dos lienzos (src/render/webgpu-backend.js, HybridBackend extiende WebGLBackend; createBackend siempre lo devuelve, arranca
+  en modo clásico y backend.enable() lo activa; Preferencias › Motor de render › "Híbrido (WebGPU + WebGL)", prefs.engine). Lienzo de ABAJO (WebGPU, MSAA 4x,
+  depth32float, z de OpenGL pasada a [0,1] con ZFIX, uniformes dinámicos de 256 B): superficies marcadas con userData.gpuSurf / gpuColor en COLOR PLANO (sin luces ni
+  shaders, a propósito: el usuario pidió no programarlos hasta aprobar el pipeline). Lienzo de ARRIBA (WebGL de siempre, transparente): líneas, CVs, gizmo, cubo, sombra
+  del suelo; las superficies pasan a depthOnlyMat (colorWrite false) con setSurfaceMaterial() para que tapen igual. En híbrido se apagan el AO y el fondo de Visu
+  (taparía el lienzo de abajo). Interfaz del backend: beginFrame / endFrame / readRow (adaptInk lee filas con backend.readRow; el híbrido compone arriba SOBRE abajo
+  con una lectura asíncrona del lienzo de WebGPU). Hay que conservar this.adapter (si no, Chromium pierde el dispositivo).
+  LÍMITE DE ESTE ENTORNO: Chromium sin cabeza (SwiftShader) pierde el dispositivo en cuanto un lienzo WebGPU presenta ("A valid external Instance reference no longer
+  exists"), incluso con una página mínima (forja/tcanvas.mjs); por eso las pruebas usan enable({ offscreen: true }) (dibuja en una textura, la lee y la pinta en un
+  lienzo 2D). La presentación real SOLO está sin probar en la laptop del usuario. Pruebas: forja/thy2.mjs (capturas hy-gpuonly.png, hy-hybrid.png).
+  Siguientes fases: F3a entorno de estudio procedural + prefiltro GGX, F3b PBR + barniz (ver docs/render-webgpu.md); PENDIENTE después: Stages.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

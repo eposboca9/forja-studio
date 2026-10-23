@@ -89,7 +89,7 @@ $('loading').remove();
 
 // Capa de render (src/render): main.js ya no dibuja los paneles directamente, se los pide al backend. Hoy el único es el clásico (WebGL, sin cambios);
 // el nuevo (WebGPU) se enchufa aquí. renderPane y renderViewCube son las funciones de siempre (se declaran más abajo).
-const backend = createBackend('webgl', { renderer, drawPane: (p) => renderPane(p), drawOverlay: (p) => renderViewCube(p) });
+const backend = createBackend('webgl', { renderer, drawPane: (p) => renderPane(p), drawOverlay: (p) => renderViewCube(p), get camera() { return camera; }, get scene() { return scene; } });
 const scene = new THREE.Scene();
 const diagBg = new THREE.Color('#b9b8b4');
 const renderBg = (() => {
@@ -552,6 +552,16 @@ for (const m of [envDiagMat, zebraMat, curvMat, ...Object.values(materials)]) { 
 // Modo Malla como el wireframe de Alias: las superficies no se pintan (siguen sirviendo para elegir) y solo se ven sus
 // líneas: bordes, líneas de parche y curvas sobre superficie. Las mallas muestran solo sus aristas vivas, no los triángulos.
 const wireMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide });
+// Modo híbrido (WebGPU abajo + WebGL arriba): en el lienzo de WebGL las superficies solo escriben profundidad
+const depthOnlyMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2 });
+const GPU_NEUTRAL = 0x8a93a3;
+// material de la superficie de un objeto en el panel actual; en modo híbrido la deja marcada para que el lienzo de WebGPU la pinte (color plano)
+function setSurfaceMaterial(o, diag, dm, wire) {
+  const m = o.parts.mesh, hy = backend.hybrid;
+  m.material = hy ? depthOnlyMat : diag ? dm : materials[o.mat];
+  m.userData.gpuSurf = hy && !wire;
+  m.userData.gpuColor = diag ? GPU_NEUTRAL : materials[o.mat].color.getHex();
+}
 const wireFeatMat = new THREE.LineBasicMaterial({ color: 0xe8e8e8, transparent: true, opacity: 0.8 });
 
 const lineMats = [];
@@ -645,6 +655,7 @@ function syncGhosts() {
         x.g.visible = x.s.visible && o.visible;
         if (x.g.geometry !== x.s.geometry) x.g.geometry = x.s.geometry;
         if (x.g.material !== x.s.material) x.g.material = x.s.material;
+        if (x.s.userData.gpuSurf !== undefined) { x.g.userData.gpuSurf = x.s.userData.gpuSurf; x.g.userData.gpuColor = x.s.userData.gpuColor; }
       }
     }
   }
@@ -3795,7 +3806,20 @@ function initPrefs() {
   $('pref-ao-int-o').textContent = (+aoInt).toFixed(2); $('pref-ao-rad-o').textContent = (+aoRad).toFixed(2);
   $('pref-ao').addEventListener('change', (e) => { prefs.ao = e.target.checked; savePrefs(); });
   // Motor de render: hoy solo el clásico; la prueba dice si este navegador (y este marco) puede correr el nuevo
-  $('pref-engine').value = 'webgl';
+  { const sel = $('pref-engine'), out = $('pref-webgpu-out');
+    sel.value = prefs.engine === 'webgpu' ? 'webgpu' : 'webgl';
+    const apply = async (kind) => {
+      if (kind === 'webgpu') {
+        out.textContent = 'Activando WebGPU (dos lienzos)…';
+        const ok = await backend.enable();
+        if (!ok) { sel.value = 'webgl'; prefs.engine = 'webgl'; savePrefs(); out.textContent = 'No se pudo activar: ' + backend.error; return; }
+        out.textContent = 'Motor híbrido activo: las superficies se dibujan con WebGPU (color plano, F2) y las líneas con WebGL encima.';
+      } else { backend.disable(); out.textContent = ''; }
+      sceneChangedAt = performance.now(); aoLastKey = '';
+    };
+    sel.addEventListener('change', () => { prefs.engine = sel.value; savePrefs(); apply(sel.value); });
+    if (prefs.engine === 'webgpu') apply('webgpu');
+  }
   $('pref-webgpu-test').addEventListener('click', async () => {
     const out = $('pref-webgpu-out');
     out.textContent = 'Probando WebGPU…';
@@ -5241,18 +5265,18 @@ function renderPane(p) {
   if (fil?.preview) fil.preview.material = diag && !wire ? dm : materials[fil.items[0].mat];
   objects.forEach((o) => {
     if (o.kind === 'curve') return;
-    o.parts.mesh.material = diag ? dm : materials[o.mat];
+    setSurfaceMaterial(o, diag, dm, wire);
     if (o.parts.mesh.castShadow === wire) { o.parts.mesh.castShadow = !wire; renderer.shadowMap.needsUpdate = true; }   // el wireframe no da sombra
     if (o.kind === 'mesh') meshFeatures(o, wire);
   });
   syncGhosts();
-  scene.background = !diag && envBg ? scene.environment : null;
+  scene.background = !diag && envBg && !backend.hybrid ? scene.environment : null;   // en híbrido el fondo es el muro (el lienzo de abajo no se tapa)
   renderer.toneMapping = diag ? THREE.ACESFilmicToneMapping : TONES[toneKey];
   scene.environment = diag ? envTexture('studio') : envTexture(envKey);
   camera.layers.set(0);
   if (diag) camera.layers.enable(DIAG);
   renderer.render(scene, camera);
-  if (diag && !carousel && prefs.ao !== false && !window.__forjaNoAO && AO_MODES.has(diagMode)) {
+  if (diag && !carousel && prefs.ao !== false && !window.__forjaNoAO && !backend.hybrid && AO_MODES.has(diagMode)) {
     // la oclusión se calcula cuando la vista está quieta (y se reutiliza mientras no cambie la cámara ni la escena)
     const e = camera.matrixWorld.elements, pe = camera.projectionMatrix.elements;
     const key = `${p.w}x${p.h}|${e[12].toFixed(4)},${e[13].toFixed(4)},${e[14].toFixed(4)},${e[0].toFixed(4)},${e[1].toFixed(4)},${e[2].toFixed(4)},${e[4].toFixed(4)},${e[5].toFixed(4)},${e[6].toFixed(4)}|${pe[0].toFixed(4)},${pe[5].toFixed(4)}|${sceneChangedAt}|${proj.ortho}`;
@@ -5294,7 +5318,7 @@ const INK_SEL = '.cube-probe:not([hidden]), .proj-btn, .app .panel .sec > *, .ap
 function adaptInk(now) {
   if (now - inkT < 400) return;
   inkT = now;
-  const cv = renderer.domElement, gl = renderer.getContext(), r = cv.getBoundingClientRect(), k = cv.width / Math.max(1, r.width);
+  const cv = renderer.domElement, r = cv.getBoundingClientRect(), k = cv.width / Math.max(1, r.width);
   const bgL = theme === 'light' ? 0.86 : 0.1;
   for (const el of document.querySelectorAll(INK_SEL)) {
     const b = el.getBoundingClientRect();
@@ -5304,8 +5328,7 @@ function adaptInk(now) {
     for (const f of [0.35, 0.65]) {
       const y = Math.floor(cv.height - (b.top + b.height * f - r.top) * k);
       if (x1 <= x0 || y < 0 || y >= cv.height) continue;
-      const buf = new Uint8Array((x1 - x0) * 4);
-      gl.readPixels(x0, y, x1 - x0, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      const buf = backend.readRow(x0, y, x1 - x0);
       // el lienzo es transparente donde no hay objeto (color premultiplicado): ahí cuenta el muro
       for (let i = 0; i < buf.length; i += 4) { sum += (0.2126 * buf[i] + 0.7152 * buf[i + 1] + 0.0722 * buf[i + 2]) / 255 + (1 - buf[i + 3] / 255) * bgL; n++; }
     }
@@ -5646,7 +5669,7 @@ function renderForgePane(p) {
   if (forge) { placeForge(); forge.ground.visible = false; forge.grid.visible = false; }
   const hid = [];
   objects.forEach((o) => {
-    if (o.kind !== 'curve') o.parts.mesh.material = materials[o.mat];
+    if (o.kind !== 'curve') setSurfaceMaterial(o, false, null, false);
     if (forgeHidesSource() && (forgeSource.ids.includes(o.id) || o.id === forgeSource.resultId)) for (const part of Object.values(o.parts)) if (part.visible) { part.visible = false; hid.push(part); }
   });
   syncGhosts();
@@ -5764,8 +5787,10 @@ function renderFrame(now) {
   // y siempre en Forge y durante el carrusel (sus objetos cambian por dentro)
   if (gizmoDrag) sceneChangedAt = performance.now();
   if (shadowEvery || layout === 'forge' || carousel || performance.now() - sceneChangedAt < 700) renderer.shadowMap.needsUpdate = true;
+  backend.beginFrame();
   if (carousel) renderCarousel(now);
   else { panes().forEach((p) => backend.drawPane(p)); panes().forEach((p) => backend.drawOverlay(p)); }
+  backend.endFrame();
   scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
   // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
   useAspect(dragPane || paneAt(lastPtr.x));

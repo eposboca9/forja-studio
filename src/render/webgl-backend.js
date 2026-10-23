@@ -16,5 +16,13 @@ export class WebGLBackend {
     gl.readPixels(x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, out);
     return out;
   }
+  // una fila de píxeles RGBA (y desde abajo): adaptInk la usa para elegir texto negro o blanco
+  readRow(x, y, w) {
+    const gl = this.renderer.getContext(), out = new Uint8Array(w * 4);
+    gl.readPixels(x, y, w, 1, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    return out;
+  }
+  beginFrame() {}
+  endFrame() {}
   dispose() { this.renderer.dispose(); }
 }

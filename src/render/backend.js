@@ -9,14 +9,18 @@
 //   drawOverlay(pane)          dibuja lo que va encima del panel (cubo de vistas)
 //   resize(w, h)               tamaño del lienzo en píxeles CSS
 //   readPixels(x, y, w, h)     lee un rectángulo del lienzo (RGBA, origen abajo-izquierda); lo usa adaptInk para el color del texto
+//   beginFrame() / endFrame()  inicio y fin de cada cuadro (el híbrido limpia y lee píxeles)
+//   readRow(x, y, w)           una fila de píxeles (lo usa adaptInk)
 //   dispose()
 // Para pasar de un backend a otro no cambia nada fuera de esta carpeta.
-import { WebGLBackend } from './webgl-backend.js';
+import { HybridBackend } from './webgpu-backend.js';
 
 export const BACKENDS = ['webgl', 'webgpu'];
 
 // ctx: lo que el backend clásico necesita del viewport actual (el renderer de three y las funciones que ya dibujaban cada panel)
 export function createBackend(kind, ctx) {
-  if (kind === 'webgpu') throw new Error('El backend WebGPU todavía no está construido (fase F2 del plan).');
-  return new WebGLBackend(ctx);
+  // siempre se crea el híbrido: arranca en modo clásico (hybrid = false) y backend.enable() lo pasa a dos lienzos si WebGPU funciona
+  const b = new HybridBackend(ctx);
+  if (kind === 'webgpu') b.enable();
+  return b;
 }
