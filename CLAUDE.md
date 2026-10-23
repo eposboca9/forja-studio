@@ -619,6 +619,10 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   media precisión; equirectangular -> cubo con cómputo GEN_EQ, mismo filtro GGX); backend.setEnv(hdr | null). Pruebas: forja/tf4.mjs (capturas f4-*.png).
   PENDIENTE del plan: aristas de 1 px, Forge e IA en WebGPU, cajas de luz editables, modos Cebra/Curvatura en WGSL, sombra de contacto propia.
 
+- (v0.29.1) FALLO: con el motor híbrido activo no se podía usar ninguna pestaña del menú. Causa: v0.28 puso z-index:1 al lienzo de WebGL; eso lo sube sobre la cabecera
+  (la cabecera es position:relative con z-index auto, y .view no crea capa propia). Ahora SIN z-index (el orden lo da el DOM: WebGPU primero, WebGL después). Salida de
+  emergencia: abrir la página con ?motor=clasico (vuelve al motor clásico y lo guarda). Prueba: forja/tz.mjs (elementFromPoint sobre el menú en clásico e híbrido).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

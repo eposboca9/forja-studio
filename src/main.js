@@ -3810,6 +3810,7 @@ function initPrefs() {
   $('pref-ao').addEventListener('change', (e) => { prefs.ao = e.target.checked; savePrefs(); });
   // Motor de render: hoy solo el clásico; la prueba dice si este navegador (y este marco) puede correr el nuevo
   { const sel = $('pref-engine'), out = $('pref-webgpu-out');
+    if (new URLSearchParams(location.search).get('motor') === 'clasico') { prefs.engine = 'webgl'; savePrefs(); }   // salida de emergencia: ?motor=clasico
     sel.value = prefs.engine === 'webgpu' ? 'webgpu' : 'webgl';
     const apply = async (kind) => {
       if (kind === 'webgpu') {

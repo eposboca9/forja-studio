@@ -81,7 +81,8 @@ export class HybridBackend extends WebGLBackend {
   _setLayout(on) {
     const c = this.renderer.domElement;
     if (this.gpu) { this.gpu.canvas.style.display = on ? 'block' : 'none'; }
-    Object.assign(c.style, on ? { position: 'absolute', left: '0', top: '0', zIndex: '1' } : { position: '', left: '', top: '', zIndex: '' });
+    // sin z-index: crearía una capa por encima de la cabecera y taparía los menús; el orden lo da el DOM (WebGPU primero, WebGL después)
+    Object.assign(c.style, on ? { position: 'absolute', left: '0', top: '0' } : { position: '', left: '', top: '' });
   }
   async _init() {
     if (!navigator.gpu) throw new Error('Este navegador (o este marco del Artifact) no ofrece WebGPU.');
@@ -91,7 +92,7 @@ export class HybridBackend extends WebGLBackend {
     const device = await adapter.requestDevice();
     device.lost.then((i) => { this.hybrid = false; this._setLayout(false); this.error = 'Se perdió el dispositivo WebGPU: ' + i.message; });
     const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;display:block;z-index:0';
+    canvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;display:block';
     this.renderer.domElement.parentNode.prepend(canvas);
     const format = this.offscreen ? 'rgba8unorm' : navigator.gpu.getPreferredCanvasFormat();
     const context = this.offscreen ? null : canvas.getContext('webgpu');
