@@ -547,6 +547,13 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   El usuario pidió NO programar iluminación ni shaders todavía: primero aprobar docs/render-webgpu.md (análisis de 6 imágenes de referencia:
   casco rojo Plasticity, robot amarillo, palanca crema/negro/cobre, figura en arcilla gris; pipeline forward con prepass, GTAO, atrapasombra,
   PBR con barniz, aristas de 1 px, ACES/AgX; sin SSR). Pruebas: forja/tprobe_b.mjs.
+- (v0.24.1) Respuestas del usuario al plan WebGPU: (1) probar WebGPU (el resultado de su laptop y del Artifact está pendiente de que lo pegue);
+  (2) look de Visu por defecto = azul metálico con base negra profunda, glossy → material 'candy' (color #0a1d6e, metalness 1, roughness 0.2,
+  clearcoat 1) y matKey inicial 'candy'; con el entorno gris claro actual se ve azul marino brillante: el negro profundo llegará con el entorno
+  de estudio oscuro con cajas de luz del motor nuevo; (3) mantener el fondo actual (muro de concreto) con sombra de contacto encima;
+  (4) entorno: hacen falta AMBOS (estudio procedural editable y carga de archivos .hdr propios); (5) el usuario tiene UN modelo de prueba pero no
+  pudo importar su STEP a Forja: pedirle el archivo para diagnosticar (STEP entra como malla vía OpenCascade WASM; en el Artifact el .wasm está
+  bloqueado, en GitHub Pages sí funciona).
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso

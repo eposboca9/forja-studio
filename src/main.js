@@ -408,6 +408,8 @@ function setPivot(pt) {
 
 // ---------- Materiales ----------
 const materials = {
+  // azul candy: cuerpo casi negro y reflejos azules (metal de color bajo un barniz muy brillante)
+  candy: new THREE.MeshPhysicalMaterial({ color: '#0a1d6e', metalness: 1, roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.02, side: THREE.DoubleSide }),
   paint: new THREE.MeshPhysicalMaterial({ color: '#b0121c', metalness: 0.55, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.03, side: THREE.DoubleSide }),
   black: new THREE.MeshPhysicalMaterial({ color: '#111216', metalness: 0.7, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.02, side: THREE.DoubleSide }),
   pearl: new THREE.MeshPhysicalMaterial({ color: '#1d3f8c', metalness: 0.6, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.03, iridescence: 0.6, iridescenceIOR: 1.4, side: THREE.DoubleSide }),
@@ -418,7 +420,7 @@ const materials = {
   plastic: new THREE.MeshPhysicalMaterial({ color: '#1c1d20', metalness: 0, roughness: 0.55, side: THREE.DoubleSide }),
   clay: new THREE.MeshPhysicalMaterial({ color: '#b3a08c', metalness: 0, roughness: 0.85, side: THREE.DoubleSide }),
 };
-const MAT_NAMES = { paint: 'Pintura roja', black: 'Negro metalizado', pearl: 'Azul perlado', alu: 'Aluminio', chrome: 'Cromo', ceram: 'Cerámica', glass: 'Vidrio', plastic: 'Plástico negro', clay: 'Arcilla' };
+const MAT_NAMES = { candy: 'Azul candy', paint: 'Pintura roja', black: 'Negro metalizado', pearl: 'Azul perlado', alu: 'Aluminio', chrome: 'Cromo', ceram: 'Cerámica', glass: 'Vidrio', plastic: 'Plástico negro', clay: 'Arcilla' };
 const zebraMat = new THREE.ShaderMaterial({
   side: THREE.DoubleSide,
   uniforms: { uFreq: { value: 14 } },
@@ -627,7 +629,7 @@ function setTheme(t) {
 document.querySelectorAll('[data-theme-btn]').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeBtn)));
 $('theme-switch').addEventListener('click', () => setTheme(theme === 'dark' ? 'light' : 'dark'));
 
-let diagMode = 'forja', layout = 'diag', matKey = 'paint', res = 90, combScale = 0.8;
+let diagMode = 'forja', layout = 'diag', matKey = 'candy', res = 90, combScale = 0.8;
 
 // ---------- Objetos de la escena ----------
 const objects = [];
@@ -3009,7 +3011,7 @@ const PUCK_CMDS = {
   del: { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
   eval: { k: 'zebra', label: 'Evaluar', run: () => setDiag('showroom'), sub: EVAL_MODES.map((m) => ({ k: { showroom: 'studio', clay: 'studio', forja: 'studio', diffuse: 'shade', sky: 'sun', zebra: 'zebra', curv: 'curvz', wire: 'wire' }[m.k], label: m.label, run: () => setDiag(m.k) })) },
   // Visu
-  mats: { k: 'mat', label: 'Materiales', run: () => setMaterial(matKey), sub: matSub(['paint', 'black', 'pearl', 'alu', 'chrome']) },
+  mats: { k: 'mat', label: 'Materiales', run: () => setMaterial(matKey), sub: matSub(['candy', 'paint', 'black', 'pearl', 'alu', 'chrome']) },
   mats2: { k: 'mat', label: 'Más materiales', run: () => setMaterial('ceram'), sub: matSub(['ceram', 'glass', 'plastic', 'clay']) },
   env: { k: 'sun', label: 'Entorno', run: env('studio'), sub: [
     { k: 'studio', label: 'Estudio', run: env('studio') }, { k: 'sun', label: 'Exterior', run: env('sun') },
@@ -5608,6 +5610,7 @@ function resize() {
 new ResizeObserver(resize).observe(view);
 resize();
 buildMaterialLibrary();
+syncMaterialEditor(); $('rough').value = materials[matKey].roughness; $('rough-o').textContent = (+materials[matKey].roughness).toFixed(2);
 
 // Escena de ejemplo. Por defecto: un vaso hecho con 4 superficies de revolución unidas por sus bordes
 // (base, cuerpo, labio enrollado y fondo interior), como el modelo de los videos de Alias.
