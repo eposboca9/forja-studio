@@ -684,17 +684,6 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   r.flip, kind 'f') en el lado 2 del blend (freeform.js orient invierte el sentido; con flip no se usa el blend exacto). PENDIENTE de la ficha: flujo "Perpendicular al lado 1" y "por vector";
   cebra/peines de curvatura en vivo sobre las secciones al arrastrar Corona/Forma (hoy solo se ven con el diagnóstico normal).
 
-- (v0.37) SEPARACIÓN pedida por el usuario (flujo de Alias). (1) MAP TYPES = shaders de diagnóstico SOLO para modelar (MAP_TYPES en main.js, antes EVAL_MODES):
-  Forja 8, Showroom 4, Sky Shade 5, Abstracto 6, Cebra 1, Curvatura 2. Showroom / Sky Shade / Abstracto usan los mapas REALES de Alias (ALIAS_MAP_OF: alias-showroom,
-  alias-diffuse, alias-abstract de src/env-alias.js) con un material NUEVO mapTypeMat (reflejo del mapa × (ambiente + difusa·N·L), Ambient/Diffuse 0,5 como Alias,
-  "Luz ligada a la cámara"; prefs.mtAmb/mtDif/mtLink; panel "Map Type · ajustes"). Los shaders clásicos (envDiagMat uMode 1–5, zebra, curv) NO se tocaron: los antiguos
-  Showroom/Difuso/Shade-Sky/Arcilla clásicos siguen en el código pero ya no están en los menús ni tienen tecla (7 libre). Malla (alambre) ya no es Map Type: interruptor
-  aparte (toggleWire, tecla 3, vuelve al último Map Type). Etiquetas "MAP TYPES" en la barra izquierda y el panel. (2) ENTORNOS DE RENDER = materiales PBR + HDRI (envLib):
-  los mapas de Alias SALIERON del panel de entornos de Visu (ahora solo Estudio, Exterior, Atardecer, Nublado y los .hdr del usuario). "Sombreado realista" en Modelado
-  (prefs.shadeReal, setShadeReal; Visualización › Sombreado realista en Modelado; DISPLAY_MM › Realista) = Shade Quality: renderPane usa real -> diag=false para materiales,
-  entorno, tono y AO, pero mantiene la capa DIAG (CVs, líneas) y el fondo de muro; funciona también con el híbrido (gpuSurf en cualquier panel). Elegir un Map Type lo apaga.
-  Selector de entorno #sq-env (misma lista que Visu, se rellena en buildEnvGrid; los ajustes finos siguen solo en Visu). Prueba: forja/tmt.mjs (montaje mt-sheet.png), tmtp.mjs.
-
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

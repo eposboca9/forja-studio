@@ -939,8 +939,8 @@
       <button id="t-fillet" title="Redondear aristas (B): clic en una arista y arrastra el punto amarillo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V12a8 8 0 0 1 8-8h8"/></svg></button>
       <button id="t-chamfer" title="Chaflán de aristas: como Redondear, hacia fuera del punto amarillo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10l6-6h10"/></svg></button>
       <button disabled title="Booleanas (próxima versión)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg></button>
-      <div class="eval-a-wrap"><hr><span class="tl">MAP TYPES</span><div class="eval-a" id="eval-a"></div></div>
-      <div class="eval-c-wrap"><hr><span class="tl">MAP TYPES</span><button class="eval-c-btn" id="eval-c-btn" aria-haspopup="true"></button></div>
+      <div class="eval-a-wrap"><hr><span class="tl">EVALUAR</span><div class="eval-a" id="eval-a"></div></div>
+      <div class="eval-c-wrap"><hr><span class="tl">EVALUAR</span><button class="eval-c-btn" id="eval-c-btn" aria-haspopup="true"></button></div>
     </nav>
     <div class="eval-c-fly" id="eval-c-fly" role="menu" aria-label="Modos de evaluación"></div>
 
@@ -1685,24 +1685,8 @@
     </section>
 
     <section class="sec eval-b-wrap" data-module="diag">
-      <h2>Map Types</h2>
+      <h2>Evaluación</h2>
       <div class="eval-b" id="eval-b"></div>
-    </section>
-
-    <section class="sec" data-module="diag">
-      <h2>Map Type · ajustes</h2>
-      <p class="muted">Shaders de diagnóstico: sustituyen el material solo mientras modelas. Ambiente y difusa valen para Showroom, Sky Shade y Abstracto.</p>
-      <div class="row"><label for="mt-amb">Luz ambiente</label><input id="mt-amb" type="range" min="0" max="1" step="0.01" value="0.5"><output id="mt-amb-o">0.50</output></div>
-      <div class="row"><label for="mt-dif">Luz difusa</label><input id="mt-dif" type="range" min="0" max="1" step="0.01" value="0.5"><output id="mt-dif-o">0.50</output></div>
-      <label class="swrow"><span>Luz ligada a la cámara</span><input type="checkbox" class="sw" id="mt-link"></label>
-      <label class="swrow"><span>Malla (alambre) · 3</span><input type="checkbox" class="sw" id="mt-wire"></label>
-    </section>
-
-    <section class="sec" data-module="diag">
-      <h2>Sombreado realista</h2>
-      <p class="muted">Como Shade Quality de Alias: modela viendo el material y el entorno de render. Los materiales y la luz se ajustan en Visu.</p>
-      <label class="swrow"><span>Activar</span><input type="checkbox" class="sw" id="sq-real"></label>
-      <div class="row"><label for="sq-env">Entorno</label><select id="sq-env" class="sel"></select><span></span></div>
     </section>
 
 
