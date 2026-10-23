@@ -538,6 +538,15 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Forward con prepass de profundidad/normales (no deferred completo), fases F0 spike de viabilidad ... F8 teselado GPU. Puntos de enganche
   en main.js: renderer (l. 77), renderPane (5044), renderCarousel (2131), renderViewCube (4946), renderForgePane (5455), adaptInk (5104,
   lee píxeles), ao.js (GTAO sobre el lienzo), miniaturas con WebGLRenderer temporales (2273, 3411).
+- (v0.24, base del motor nuevo) APROBADO por el usuario: camino A = WebGPU. Hecho: src/render/ (backend.js = interfaz RenderBackend y createBackend;
+  webgl-backend.js = el motor clásico sin cambios; webgpu-probe.js = prueba de viabilidad F0). main.js dibuja los paneles con backend.drawPane /
+  drawOverlay y redimensiona con backend.resize (window.__forja.backend). Preferencias › Motor de render: selector (WebGPU aún desactivado) y
+  botón "Probar WebGPU" (render con MSAA 4x en rgba16float + depth32float + cómputo + lectura). En este entorno WebGPU SÍ funciona con Chromium
+  headless: args '--enable-unsafe-webgpu --enable-features=Vulkan,WebGPU --use-webgpu-adapter=swiftshader' y la página en http://localhost/
+  (navigator.gpu exige contexto seguro; con host "local" no existe). Adaptador por software: sirve para comprobar, no para medir velocidad.
+  El usuario pidió NO programar iluminación ni shaders todavía: primero aprobar docs/render-webgpu.md (análisis de 6 imágenes de referencia:
+  casco rojo Plasticity, robot amarillo, palanca crema/negro/cobre, figura en arcilla gris; pipeline forward con prepass, GTAO, atrapasombra,
+  PBR con barniz, aristas de 1 px, ACES/AgX; sin SSR). Pruebas: forja/tprobe_b.mjs.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso

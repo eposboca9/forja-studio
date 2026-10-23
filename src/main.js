@@ -19,6 +19,8 @@ import * as FF from './freeform.js';
 import * as FL from './fillet.js';
 import { getOCC } from './occ.js';
 import { createAO } from './ao.js';
+import { createBackend } from './render/backend.js';
+import { probeWebGPU, describeProbe } from './render/webgpu-probe.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
 import { STLExporter } from 'three/addons/exporters/STLExporter.js';
 import { PLYExporter } from 'three/addons/exporters/PLYExporter.js';
@@ -85,6 +87,9 @@ renderer.setScissorTest(true);
 view.prepend(renderer.domElement);
 $('loading').remove();
 
+// Capa de render (src/render): main.js ya no dibuja los paneles directamente, se los pide al backend. Hoy el único es el clásico (WebGL, sin cambios);
+// el nuevo (WebGPU) se enchufa aquí. renderPane y renderViewCube son las funciones de siempre (se declaran más abajo).
+const backend = createBackend('webgl', { renderer, drawPane: (p) => renderPane(p), drawOverlay: (p) => renderViewCube(p) });
 const scene = new THREE.Scene();
 const diagBg = new THREE.Color('#b9b8b4');
 const renderBg = (() => {
@@ -2146,7 +2151,7 @@ function renderCarousel(now) {
     if (kind !== c.from && kind !== c.to && V.w < 0.02) return;      // abajo solo se ven los que cambian
     const p = moduleCamera(c, V, angles[i], c.lift[i]);
     camera.position.copy(p.pos); camera.quaternion.copy(p.quat);
-    renderPane({ ...full, kind });
+    backend.drawPane({ ...full, kind });
   });
   // etiquetas sobre cada modelo y zona de cada módulo en pantalla (para elegirlo con el ratón)
   camera.position.copy(V.pos); camera.quaternion.copy(V.quat);
@@ -3612,6 +3617,13 @@ function initPrefs() {
   $('pref-ao').checked = prefs.ao !== false; $('pref-ao-int').value = aoInt; $('pref-ao-rad').value = aoRad;
   $('pref-ao-int-o').textContent = (+aoInt).toFixed(2); $('pref-ao-rad-o').textContent = (+aoRad).toFixed(2);
   $('pref-ao').addEventListener('change', (e) => { prefs.ao = e.target.checked; savePrefs(); });
+  // Motor de render: hoy solo el clásico; la prueba dice si este navegador (y este marco) puede correr el nuevo
+  $('pref-engine').value = 'webgl';
+  $('pref-webgpu-test').addEventListener('click', async () => {
+    const out = $('pref-webgpu-out');
+    out.textContent = 'Probando WebGPU…';
+    try { out.textContent = describeProbe(await probeWebGPU()); } catch (err) { out.textContent = 'La prueba falló: ' + err.message; }
+  });
   $('pref-ao-int').addEventListener('input', (e) => { prefs.aoInt = +e.target.value; ao.intensity = +e.target.value; $('pref-ao-int-o').textContent = (+e.target.value).toFixed(2); aoLastKey = ''; savePrefs(); });
   $('pref-ao-rad').addEventListener('input', (e) => { prefs.aoRad = +e.target.value; ao.radius = +e.target.value; $('pref-ao-rad-o').textContent = (+e.target.value).toFixed(2); aoLastKey = ''; savePrefs(); });
   $('pref-histlive').checked = prefs.histLive !== false;
@@ -5574,7 +5586,7 @@ function renderFrame(now) {
   if (gizmoDrag) sceneChangedAt = performance.now();
   if (shadowEvery || layout === 'forge' || carousel || performance.now() - sceneChangedAt < 700) renderer.shadowMap.needsUpdate = true;
   if (carousel) renderCarousel(now);
-  else { panes().forEach(renderPane); panes().forEach(renderViewCube); }
+  else { panes().forEach((p) => backend.drawPane(p)); panes().forEach((p) => backend.drawOverlay(p)); }
   scene.backgroundIntensity = Math.min(1, (now - bgFadeT0) / 450);   // el fondo de VISU aparece suave tras el giro
   // El ratio de la cámara queda con el de la vista bajo el puntero, para que seleccionar y el gizmo coincidan.
   useAspect(dragPane || paneAt(lastPtr.x));
@@ -5587,7 +5599,7 @@ let camInkKey = '', camMovedAt = 0;
 
 function resize() {
   const w = view.clientWidth, h = view.clientHeight;
-  renderer.setSize(w, h, false);
+  backend.resize(w, h);
   const p = panes()[0];
   lineMats.forEach((m) => m.resolution.set(p.w, p.h));
 }
@@ -5641,7 +5653,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;
