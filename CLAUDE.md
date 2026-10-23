@@ -508,6 +508,16 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   última con caída lineal, siempre desde r.orig (forma original, 10 filas). Probado con Node (extra / factor) y talign2.mjs.
 - (v0.22.2) Rejilla: GridHelper multiplica el color del material por el de sus vértices (gris medio), por eso en oscuro casi no se veía.
   THEME_3D.dark.grid = blanco (antes gris); applyGridOp(): opacidad = prefs.gridOp × 1,15 en oscuro y × 1,05 en claro. Celda = 1 dm = 100 mm.
+- (v0.22.3) Del video 8: moveSnap(pt, modos, ex, p0) = snap al mover CVs/objetos (con el gizmo y con mover con botones): punto, curva,
+  superficie (botón o Shift; no cuenta la superficie que se mueve) y rejilla (punto de la rejilla del plano visible a la altura del CV).
+  Con snap activo el CV cae en el punto exacto (ya no solo la componente del eje del botón). "Nada" tras dibujar una curva la deja elegida
+  con sus CVs. Align: clic en la cara de una superficie = borde VISIBLE más cercano en pantalla (surfaceEdgeAt usa lineCandidates con la
+  superficie impactada); en modo Malla (alambre) se pueden elegir las líneas de atrás pero ganan las más cercanas a la cámara
+  (lineCandidates byDepth; el menú solo sale si están a profundidad parecida). Align curva→curva: "Punto de unión en la maestra"
+  (r.mT 0..1, curveDerivsAt con derivadas en cualquier punto). Rejilla: opacidad × 1,32 en oscuro y × 1,21 en claro. Prueba: forja/talign4.mjs.
+  Mover con botones: el CV agarrado (el más cercano al cursor, anchorOff) es el que cae en el snap, no el centro de todo lo elegido.
+  OJO: forja/tslide.mjs esperaba el snap limitado al eje del botón (altura constante) y ahora falla en 2 comprobaciones; con el cambio el CV
+  cae en el punto exacto de la línea (recorre una línea de parche vertical). Actualizar esa prueba si hace falta. Pruebas nuevas: talign4/5/6/7.mjs.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso

@@ -322,7 +322,13 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   const scr = (q) => { const v = q.clone().project(camera); return new THREE.Vector2(r.left + pane.x + ((v.x + 1) / 2) * pane.w, r.top + ((1 - v.y) / 2) * pane.h); };
   const s0 = scr(a), unit = camera.position.distanceTo(a) * 0.1;
   const dirs = AXES.map((ax) => scr(a.clone().addScaledVector(ax, unit)).sub(s0).divideScalar(unit));
-  mxDrag = { x: e.clientX, y: e.clientY, button: e.button, moved: false, dirs, e0: e, depth: camera.position.distanceTo(a), pane,
+  // el CV que se agarra (el más cercano al cursor): es ese el que cae en el snap, no el centro de todo lo elegido
+  let anchorOff = new THREE.Vector3(), bd = Infinity;
+  for (const cr of selectedCVRefs()) {
+    const q = cvRef(cr), w = new THREE.Vector3(q.x, q.y, q.z), d = scr(w).distanceTo(new THREE.Vector2(e.clientX, e.clientY));
+    if (d < bd) { bd = d; anchorOff = w.sub(a); }
+  }
+  mxDrag = { x: e.clientX, y: e.clientY, button: e.button, moved: false, dirs, e0: e, depth: camera.position.distanceTo(a), pane, anchorOff,
     p0: proxy.position.clone(), q0: proxy.quaternion.clone(), s0: proxy.scale.clone() };
   renderer.domElement.setPointerCapture(e.pointerId);
 }, true);
@@ -343,11 +349,9 @@ addEventListener('pointermove', (e) => {
     // si el eje apunta a la cámara casi no se ve en pantalla: entonces se usa el movimiento vertical
     let t = L > 4 ? (dx * d.x + dy * d.y) / L : (-dy * m.depth) / m.pane.h;
     // snap combinado con la restricción del botón (como en Alias): solo se toma la componente del eje
-    const modes = snapModes(e), sn = gizmoDrag && findSnap(e.clientX, e.clientY, modes, gizmoDrag.ex);
-    if (sn) { t = sn.point.clone().sub(m.p0).dot(ax); showSnap(sn); }
-    else if (modes.grid) { const c = m.p0.dot(ax) + t; t = Math.round(c / gridStep) * gridStep - m.p0.dot(ax); showSnap({ point: m.p0.clone().addScaledVector(ax, t), kind: 'rejilla' }); }
-    else hideSnap();
-    proxy.position.copy(m.p0).addScaledVector(ax, t);
+    const modes = snapModes(e), sn = gizmoDrag && moveSnap(e, modes, gizmoDrag.ex, m.p0);
+    if (sn) { proxy.position.copy(sn.point).sub(m.anchorOff); showSnap(sn); }
+    else { hideSnap(); proxy.position.copy(m.p0).addScaledVector(ax, t); }
   } else if (xform === 'rotate') {
     let ang = (dx - dy) * 0.012;
     if (snapModes(mods).grid) ang = Math.round(ang / (Math.PI / 12)) * (Math.PI / 12);   // Alt: de 15 en 15 grados
@@ -597,7 +601,7 @@ const THEME_3D = {
 // la rejilla multiplica su color por el de los vértices (gris medio): en oscuro se deja blanca para que se vea clara sobre el fondo,
 // y la opacidad lleva +15 % en oscuro y +5 % en claro sobre el valor de Preferencias
 let gridBaseOp = GRID_OP0;
-function applyGridOp() { const m = theme === 'dark' ? 1.15 : 1.05; for (const g of [grid, gridXY, gridYZ]) g.material.opacity = Math.min(1, gridBaseOp * m); }
+function applyGridOp() { const m = theme === 'dark' ? 1.32 : 1.21; for (const g of [grid, gridXY, gridYZ]) g.material.opacity = Math.min(1, gridBaseOp * m); }
 function applyTheme3D() {
   const t = THEME_3D[theme];
   curveMat.color.setHex(t.curve);
@@ -1266,11 +1270,31 @@ function findSnap(x, y, modes, ex = {}) {
   }
   return best;
 }
+// Snap al mover CVs u objetos: punto, curva, superficie (botón o Shift) y rejilla. El resultado es el punto exacto
+// (no solo la componente del eje del botón): el CV cae justo donde está el snap.
+function moveSnap(pt, m, ex, p0) {
+  let s = findSnap(pt.clientX, pt.clientY, m, ex);
+  if (s) return s;
+  setRay(pt);
+  if (m.surface || (pt.shiftKey && !pt.altKey)) {
+    // la superficie que se mueve (la de los CVs elegidos) no cuenta: se persigue a sí misma
+    const own = new Set([...selectedCVRefs().map((r) => r.obj), ...selObjs]);
+    const hit = ray.intersectObjects(objects.filter((o) => o.visible && o.kind !== 'curve' && !own.has(o)).map((o) => o.parts.mesh), false)[0];
+    if (hit) return { point: hit.point.clone(), kind: 'superficie' };
+  }
+  if (m.grid) {
+    // rejilla del plano que se ve (cara ortogonal) o la del suelo, a la altura del punto que se mueve
+    const i = axisView(), k = i != null && proj.ortho ? ['yz', 'xz', 'xy'][i] : 'xz';
+    const n = k === 'xz' ? new THREE.Vector3(0, 1, 0) : k === 'xy' ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+    const q = ray.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(n, p0), new THREE.Vector3());
+    if (q) { snapGrid(q, k); return { point: q, kind: 'rejilla' }; }
+  }
+  return null;
+}
 function applySnapToProxy(ex) {
   const modes = snapModes(mods);
-  const s = findSnap(lastPtr.x, lastPtr.y, modes, ex);
+  const s = moveSnap({ clientX: lastPtr.x, clientY: lastPtr.y, shiftKey: mods.shiftKey, altKey: mods.altKey }, modes, ex, gizmoDrag?.p0 || proxy.position);
   if (s) { proxy.position.copy(s.point); showSnap(s); return; }
-  if (modes.grid) { snapGrid(proxy.position, null); showSnap({ point: proxy.position, kind: 'rejilla' }); return; }
   hideSnap();
 }
 const snapRing = new THREE.Mesh(new THREE.RingGeometry(0.1, 0.15, 28), new THREE.MeshBasicMaterial({ color: '#2f8a57', depthTest: false, transparent: true, side: THREE.DoubleSide }));
@@ -2867,8 +2891,11 @@ addEventListener('keydown', (e) => {
 // ---------- Comandos de los menús radiales ----------
 function pickNothing() {
   // dibujando una curva, "Nada" la termina (con 2 puntos o más) y sale de la herramienta
-  if (tool === 'curve' && draft && draft.pts.length >= 2) finishDraft();
-  setTool('select'); mouseXform = false; clearSelection(); updateHint();
+  const made = tool === 'curve' && draft && draft.pts.length >= 2;
+  if (made) finishDraft();
+  setTool('select'); mouseXform = false;
+  if (!made) clearSelection();   // la curva recién terminada queda elegida, con sus CVs a la vista
+  updateHint();
 }
 const cloneV4 = (v) => new THREE.Vector4(v.x, v.y, v.z, v.w);
 function duplicateSelection() {
@@ -3848,7 +3875,7 @@ function surfaceEdgePts(o) {
 }
 // Candidatos bajo el cursor a menos de `tol` píxeles: [{ obj, edge?, d }] de más cerca a más lejos. kinds: 'edge' | 'curve' | 'both'.
 // Se ignoran las líneas tapadas por otra superficie.
-function lineCandidates(e, kinds = 'both', tol = 8, filter = () => true) {
+function lineCandidates(e, kinds = 'both', tol = 8, filter = () => true, byDepth = diagMode === 'wire') {
   const pn = paneAt(e.clientX);
   useAspect(pn);
   const r = renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3();
@@ -3876,13 +3903,16 @@ function lineCandidates(e, kinds = 'both', tol = 8, filter = () => true) {
   }
   // fuera las que tapa otra superficie (el rayo de la cámara al punto topa antes con una malla ajena)
   const meshes = objects.filter((o) => o.visible && o.kind !== 'curve').map((o) => o.parts.mesh);
-  const vis = out.filter((c) => {
+  // con el modo Malla (alambre) se pueden elegir también las líneas de atrás, pero ganan las más cercanas a la cámara
+  const vis = diagMode === 'wire' ? out : out.filter((c) => {
     const dir = c.q.clone().sub(camera.position), dist = dir.length();
     ray.set(camera.position, dir.normalize());
     const h = ray.intersectObjects(meshes, false)[0];
     return !h || h.distance > dist - Math.max(0.03, dist * 0.03);
   });
-  return vis.sort((a, b) => a.d - b.d);
+  const cd = (c) => camera.position.distanceTo(c.q);
+  vis.forEach((c) => (c.depth = cd(c)));
+  return vis.sort(byDepth ? (a, b) => a.depth - b.depth : (a, b) => a.d - b.d);
 }
 // una persona entiende "Cuerpo" o "Curva 3": el borde solo se nombra cuando hay que distinguir bordes de una misma superficie
 function candLabel(c, withEdge) { return (c.obj.kind === 'curve' ? '∿ ' : '◩ ') + c.obj.name + (withEdge && c.edge ? ` · ${EDGE_NAMES[c.edge]}` : ''); }
@@ -3923,7 +3953,11 @@ function surfaceEdgeAt(e) {
   setRay(e);
   const hit = ray.intersectObjects(objects.filter((o) => o.visible && o.kind === 'surface').map((o) => o.parts.mesh), false)[0];
   if (!hit?.uv) return null;
-  return { obj: hit.object.userData.obj, edge: HX.nearestEdge(hit.uv.x, hit.uv.y) };
+  // clic sobre la cara: el borde VISIBLE más cercano en pantalla de esa superficie (no el que está por detrás)
+  const obj = hit.object.userData.obj;
+  const near = lineCandidates(e, 'edge', 4000, (o) => o === obj, false);
+  if (near.length) return { obj, edge: near[0].edge };
+  return { obj, edge: HX.nearestEdge(hit.uv.x, hit.uv.y) };
 }
 // Opciones de control (como el "Control Options" de Alias)
 const CONTROL_OPTS = () => [
@@ -4058,7 +4092,9 @@ let edgeBusy = false;
 // lado elegido con el ratón: la línea más cercana (≤ 9 px); si hay dos o más juntas, menú junto al puntero
 async function sideChoice(e, kinds) {
   const near = lineCandidates(e, kinds === 'curve' ? 'curve' : kinds === 'both' ? 'both' : 'edge', 9);
-  if (near.length >= 2 && near[1].d - near[0].d < 7) {
+  // en alambre ganan las más cercanas a la cámara; el menú solo sale si están casi a la misma profundidad
+  const closeDepth = diagMode !== 'wire' || Math.abs(near[1]?.depth - near[0]?.depth) < near[0]?.depth * 0.03;
+  if (near.length >= 2 && Math.abs(near[1].d - near[0].d) < 7 && closeDepth) {
     const c = await chooseCandidate(e, near.slice(0, 6), 'Elegir línea', true);
     return c === null ? 'cancel' : { obj: c.obj, edge: c.edge };
   }
@@ -4110,7 +4146,7 @@ function createAlignCurve(s, m, cont = toolDef.alignCont) {
   checkpoint();
   const r = { type: 'align', curve: true, slave: s.obj.id, sEnd: s.end, master: m.obj.id, cont, tension: toolDef.alignTension, shape: toolDef.alignShape ?? 0 };
   try {
-    if (m.obj.kind === 'curve') r.mEnd = m.end;
+    if (m.obj.kind === 'curve') { r.mEnd = m.end; r.mT = m.end ? 1 : 0; }
     else { r.mEdge = m.edge; const c = s.obj.data.cvs[s.end ? s.obj.data.cvs.length - 1 : 0]; r.mT = HX.edgeParamNear(m.obj.data, m.edge, v3(c)); }
     s.obj.data = HX.prepareCurve(s.obj.data, cont);
     r.lambda0 = HX.curveNaturalLambda(s.obj.data, r.sEnd, m.obj.data, r);
@@ -4305,7 +4341,8 @@ function relSpec(r, group = [r]) {
     if (r.curve) {
       const ms = byId(r.master);
       fields.push({ type: 'check', label: 'Extremo contrario de la curva', get: () => !!r.sEnd, set: (v) => { checkpoint(); r.sEnd = v ? 1 : 0; r.lambda0 = HX.curveNaturalLambda(byId(r.slave).data, r.sEnd, ms.data, r); redo(); } });
-      if (ms?.kind === 'curve') fields.push({ type: 'check', label: 'Extremo contrario de la maestra', get: () => !!r.mEnd, set: (v) => set('mEnd', v ? 1 : 0) });
+      if (ms?.kind === 'curve') fields.push({ type: 'check', label: 'Extremo contrario de la maestra', get: () => !!r.mEnd, set: (v) => { checkpoint(); r.mEnd = v ? 1 : 0; r.mT = v ? 1 : 0; redo(); TW.render(); } },
+        { type: 'range', label: 'Punto de unión en la maestra', min: 0, max: 1, step: 0.005, get: () => r.mT ?? (r.mEnd ? 1 : 0), start: checkpoint, set: live('mT'), fmt: (v) => v.toFixed(3) });
       else fields.push({ type: 'range', label: 'Posición en el borde', min: 0, max: 1, step: 0.005, get: () => r.mT ?? 0.5, start: checkpoint, set: live('mT'), fmt: (v) => v.toFixed(3) });
     } else {
       fields.push({ type: 'group', key: 'alrange', label: 'Alcance a lo largo del borde', fields: [
@@ -5483,7 +5520,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

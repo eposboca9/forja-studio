@@ -229,8 +229,23 @@ export function edgeCrossDerivs(M, mEdge, t, K) {
   while (d.length <= K) d.push(new THREE.Vector3());
   return d;
 }
+// derivadas 0..K de una curva en cualquier punto t (0..1); sign = -1 mira hacia el inicio (hacia dentro desde el extremo final)
+export function curveDerivsAt(c, t, K, sign = 1) {
+  const p = c.deg, n = c.cvs.length, u = c.knots[p] + t * (c.knots[n] - c.knots[p]);
+  const ev = (Q, kn, deg) => { const B = basisFns(kn, deg, Q.length, u), q = new THREE.Vector3(); Q.forEach((v, i) => q.addScaledVector(v, B[i])); return q; };
+  let Q = c.cvs.map(xyz);
+  const out = [ev(Q, c.knots, p)];
+  for (let k = 1; k <= K; k++) {
+    if (k > p || Q.length < 2) { out.push(new THREE.Vector3()); continue; }
+    Q = Q.slice(0, -1).map((v, i) => { const den = c.knots[i + p + 1] - c.knots[i + k]; return Q[i + 1].clone().sub(v).multiplyScalar(den > 1e-12 ? (p - k + 1) / den : 0); });
+    out.push(ev(Q, c.knots.slice(k, c.knots.length - k), p - k).multiplyScalar(sign ** k));
+  }
+  return out;
+}
 export function masterDerivs(rel, M, K) {
-  return rel.mEdge ? edgeCrossDerivs(M, rel.mEdge, rel.mT ?? 0.5, K) : curveEndDerivs(M, rel.mEnd || 0, K);
+  if (rel.mEdge) return edgeCrossDerivs(M, rel.mEdge, rel.mT ?? 0.5, K);
+  // curva maestra: el punto de unión se puede recorrer de principio a fin (mT); la curva esclava sale hacia el lado contrario al extremo elegido
+  return curveDerivsAt(M, rel.mT ?? (rel.mEnd ? 1 : 0), K, rel.mEnd ? -1 : 1);
 }
 // punto del borde más cercano a un punto, como fracción 0..1 a lo largo del borde
 export function edgeParamNear(M, mEdge, p, n = 200) {
