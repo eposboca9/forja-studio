@@ -494,6 +494,14 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (herramientas de bordes: Align, Blend, Skin, Extender): ≥ 2 líneas a ≤ 9 px y diferencia < 7 px → menú con el nombre del borde.
   Con el redondeo activo (fil) el pointerup de selección se ignora. Prueba: forja/tmenu.mjs. El snap deslizante (Ctrl+Alt) ya recorre
   las líneas de parche, curvas y bordes: forja/tslide.mjs.
+- (v0.22) Align ampliado. Curvas: la herramienta Align usa pick 'both' (curva o borde, con el menú de líneas juntas) y una curva libre se
+  alinea por su extremo más cercano al clic (curveEndNearRay) a otra curva (extremo) o al borde de una superficie (r.mT = posición 0..1,
+  deslizable). Es la misma relación type 'align' con r.curve = true, r.sEnd, r.mEnd | r.mEdge + r.mT (history.js alignCurve, curveEndDerivs,
+  edgeCrossDerivs con base B-spline, masterDerivs, prepareCurve, curveNaturalLambda, diagnoseCurve); S^(k) = (-λ)^k M^(k) y forma mu como en
+  superficies; r.rev = continuar hacia el otro lado. Flechas azul/naranja en los CVs 1 y 2 de la curva. Superficie: "Alcance a lo largo del
+  borde" (r.modRange, r0, r1, soft: pesos por columna, rangeWeights; fuera del rango se vuelve a r.orig = forma original de las 4 filas) y
+  "Tensión distinta al final" (r.varT, r.tensionEnd; alignRows acepta lambda/mu como función de la columna). Una superficie no se alinea a una
+  curva (avisa). Pruebas: forja/talign2.mjs (matemática y ventana), talign3.mjs (clics reales), ttools.mjs ya elige en el menú.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso

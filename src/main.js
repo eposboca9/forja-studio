@@ -3935,19 +3935,28 @@ function maybeDropHistory(r) {
 }
 const EDGE_OPS = {
   align: {
-    title: 'Align', steps: ['1 · Clic cerca del borde de la superficie que se ajusta (verde)', '2 · Clic en el borde de la superficie maestra (azul)'],
+    title: 'Align', pick: 'both',
+    steps: ['1 · Clic cerca del borde de la superficie (o la curva) que se ajusta (verde)', '2 · Clic en el borde de la superficie o en la curva maestra (azul)'],
     fields: () => [
       { type: 'seg', label: 'Continuidad', opts: [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.alignCont, set: (v) => { toolDef.alignCont = v; saveToolDef(); } },
       { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => toolDef.alignTension, set: (v) => { toolDef.alignTension = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) },
       { type: 'range', label: 'Forma (G2 y G3)', min: -2, max: 2, step: 0.05, get: () => toolDef.alignShape ?? 0, set: (v) => { toolDef.alignShape = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) },
       ...CONTROL_OPTS(),
-      { type: 'html', html: () => '<span class="tw-note">Al elegir la maestra sale G0–G3 junto al cursor (o pulsa 1–4).</span>' }],
+      { type: 'html', html: () => '<span class="tw-note">Una curva se alinea por el extremo más cercano al clic, a otra curva o al borde de una superficie. Si hay varias líneas juntas sale un menú para elegir. Al elegir la maestra sale G0–G3 junto al cursor (o pulsa 1–4). Ya creado, en su ventana: rango, suavizado y tensión inicio / fin.</span>' }],
     async afterPick(i, p, e) {
+      if (i === 0 && p.obj.kind === 'curve') {
+        if (p.obj.data.cos) { toast('Una curva sobre superficie no se puede alinear: elige una curva libre.'); return restartEdgeOp(); }
+        p.end = curveEndNearRay(p.obj, e);
+        markEnd(0, p.obj, p.end);
+      }
       if (i === 1) {
+        const a = edgeOp.picks[0];
+        if (a.obj.kind === 'surface' && p.obj.kind === 'curve') { toast('Una superficie solo se alinea a otra superficie. Para unir una curva, elígela primero (verde).'); return restartEdgeOp(); }
+        if (p.obj.kind === 'curve') { if (p.obj.data.cos) { toast('La maestra no puede ser una curva sobre superficie.'); return restartEdgeOp(); } p.end = curveEndNearRay(p.obj, e); markEnd(1, p.obj, p.end); }
         const c = await quickPick(e.clientX, e.clientY, 'Continuidad', G_OPTS(0, 3), toolDef.alignCont);
         if (c == null) return restartEdgeOp();
         toolDef.alignCont = c; saveToolDef();
-        createAlign(edgeOp.picks[0], edgeOp.picks[1], c);
+        if (a.obj.kind === 'curve') createAlignCurve(a, p, c); else createAlign(a, p, c);
       }
     },
   },
@@ -4025,10 +4034,11 @@ function startEdgeOp(type) {
   TW.show(edgeSpec());
 }
 // tras crear (o cancelar) la herramienta sigue activa para la siguiente unión, como en Alias
-function restartEdgeOp() { if (!edgeOp) return; edgeOp.picks = []; edgeOp.sides = null; edgeOp.cur = 0; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint(); TW.show(edgeSpec()); }
+function restartEdgeOp() { if (!edgeOp) return; markEnd(0, null); markEnd(1, null); edgeOp.picks = []; edgeOp.sides = null; edgeOp.cur = 0; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint(); TW.show(edgeSpec()); }
 // tras crear: se ve la ventana de lo creado (con sus flechas) y la herramienta sigue lista para la siguiente unión
 function continueEdgeOp(r) {
   if (!edgeOp) return;
+  markEnd(0, null); markEnd(1, null);
   edgeOp.picks = []; edgeOp.sides = null; edgeOp.cur = 0; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint();
   const out = byId(outputOf(r));
   if (out) applySelection([out], 'replace');   // lo que se acaba de alinear o unir queda activo, con sus CVs a la vista
@@ -4038,7 +4048,7 @@ function continueEdgeOp(r) {
     : 'Arrastra las flechas: azul = forma, naranja = curvatura · clic en otro borde = nueva unión');
   TW.show(sp);
 }
-function endEdgeOp() { edgeOp = null; [0, 1, 2].forEach((k) => markEdge(k, null)); if (TW.spec && !TW.spec.rel) TW.hide(); }
+function endEdgeOp() { markEnd(0, null); markEnd(1, null); edgeOp = null; [0, 1, 2].forEach((k) => markEdge(k, null)); if (TW.spec && !TW.spec.rel) TW.hide(); }
 let edgeBusy = false;
 // lado elegido con el ratón: la línea más cercana (≤ 9 px); si hay dos o más juntas, menú junto al puntero
 async function sideChoice(e, kinds) {
@@ -4076,6 +4086,36 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   if (p) markEdge(2, p.obj, p.edge); else markEdge(2, null);
 });
 
+// extremo de una curva más cercano al rayo del cursor
+function curveEndNearRay(o, e) {
+  setRay(e);
+  const c = o.data.cvs;
+  return ray.ray.distanceToPoint(v3(c[0])) <= ray.ray.distanceToPoint(v3(c[c.length - 1])) ? 0 : 1;
+}
+// marca un extremo de curva (bolita en el color del lado)
+const endMarks = [];
+function markEnd(i, obj, end) {
+  if (endMarks[i]) { scene.remove(endMarks[i]); endMarks[i] = null; }
+  if (!obj) return;
+  const c = obj.data.cvs[end ? obj.data.cvs.length - 1 : 0];
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 8), new THREE.MeshBasicMaterial({ color: i ? '#2f7bff' : '#2fb36b', depthTest: false, transparent: true }));
+  m.position.set(c.x, c.y, c.z); m.renderOrder = 45; scene.add(m); endMarks[i] = m;
+}
+function createAlignCurve(s, m, cont = toolDef.alignCont) {
+  checkpoint();
+  const r = { type: 'align', curve: true, slave: s.obj.id, sEnd: s.end, master: m.obj.id, cont, tension: toolDef.alignTension, shape: toolDef.alignShape ?? 0 };
+  try {
+    if (m.obj.kind === 'curve') r.mEnd = m.end;
+    else { r.mEdge = m.edge; const c = s.obj.data.cvs[s.end ? s.obj.data.cvs.length - 1 : 0]; r.mT = HX.edgeParamNear(m.obj.data, m.edge, v3(c)); }
+    s.obj.data = HX.prepareCurve(s.obj.data, cont);
+    r.lambda0 = HX.curveNaturalLambda(s.obj.data, r.sEnd, m.obj.data, r);
+    addRelation(r);
+    applyRelation(r);
+  } catch (err) { console.warn(err); toast(`Align no se pudo hacer: ${err.message}`); return restartEdgeOp(); }
+  if (maybeDropHistory(r)) { toast(`Align G${cont} hecho, sin historial`); return restartEdgeOp(); }
+  toast(`Align G${cont}: ${s.obj.name} sigue a ${m.obj.name}. Ajusta con las flechas o en su ventana.`);
+  continueEdgeOp(r);
+}
 function createAlign(s, m, cont = toolDef.alignCont) {
   checkpoint();
   const r = { type: 'align', slave: s.obj.id, sEdge: s.edge, master: m.obj.id, mEdge: m.edge, cont, tension: toolDef.alignTension, shape: toolDef.alignShape ?? 0 };
@@ -4249,10 +4289,24 @@ function relSpec(r, group = [r]) {
   if (r.type === 'align') {
     title += ` · ${nm(r.slave)} → ${nm(r.master)}`;
     fields.push({ type: 'seg', label: 'Continuidad', opts: G(0, 3), get: () => r.cont, set: (v) => set('cont', v) },
-      { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) },
+      { type: 'range', label: r.curve || !r.varT ? 'Tensión' : 'Tensión inicio', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) },
       // la forma (mu) cambia cómo llega la superficie al borde sin cambiar la curvatura en él: solo aplica desde G2
       { type: 'range', label: 'Forma', min: -2, max: 2, step: 0.05, get: () => r.shape ?? 0, start: checkpoint, set: live('shape'), fmt: (v) => v.toFixed(2), show: () => r.cont >= 2 },
-      { type: 'check', label: 'Invertir la dirección del borde', get: () => !!r.rev, set: (v) => set('rev', v) });
+      { type: 'check', label: r.curve ? 'Continuar hacia el otro lado' : 'Invertir la dirección del borde', get: () => !!r.rev, set: (v) => set('rev', v) });
+    if (r.curve) {
+      const ms = byId(r.master);
+      fields.push({ type: 'check', label: 'Extremo contrario de la curva', get: () => !!r.sEnd, set: (v) => { checkpoint(); r.sEnd = v ? 1 : 0; r.lambda0 = HX.curveNaturalLambda(byId(r.slave).data, r.sEnd, ms.data, r); redo(); } });
+      if (ms?.kind === 'curve') fields.push({ type: 'check', label: 'Extremo contrario de la maestra', get: () => !!r.mEnd, set: (v) => set('mEnd', v ? 1 : 0) });
+      else fields.push({ type: 'range', label: 'Posición en el borde', min: 0, max: 1, step: 0.005, get: () => r.mT ?? 0.5, start: checkpoint, set: live('mT'), fmt: (v) => v.toFixed(3) });
+    } else {
+      fields.push({ type: 'group', key: 'alrange', label: 'Alcance a lo largo del borde', fields: [
+        { type: 'check', label: 'Modificar rango', get: () => !!r.modRange, set: (v) => set('modRange', v) },
+        { type: 'range', label: 'Inicio del rango', min: 0, max: 1, step: 0.005, show: () => !!r.modRange, get: () => r.r0 ?? 0, start: checkpoint, set: live('r0'), fmt: (v) => v.toFixed(3) },
+        { type: 'range', label: 'Fin del rango', min: 0, max: 1, step: 0.005, show: () => !!r.modRange, get: () => r.r1 ?? 1, start: checkpoint, set: live('r1'), fmt: (v) => v.toFixed(3) },
+        { type: 'range', label: 'Suavizado', min: 0, max: 0.6, step: 0.005, show: () => !!r.modRange, get: () => r.soft ?? 0, start: checkpoint, set: live('soft'), fmt: (v) => (v ? v.toFixed(3) : 'no') },
+        { type: 'check', label: 'Tensión distinta al final', get: () => !!r.varT, set: (v) => { if (v && r.tensionEnd == null) r.tensionEnd = r.tension; set('varT', v); } },
+        { type: 'range', label: 'Tensión final', min: 0.2, max: 3, step: 0.05, show: () => !!r.varT, get: () => r.tensionEnd ?? r.tension, start: checkpoint, set: live('tensionEnd'), fmt: (v) => v.toFixed(2) }] });
+    }
   } else if (r.type === 'blend' || r.type === 'skin') {
     const sk = r.type === 'skin', ids = (x) => x.map(nm).join(' + ');
     title += ` · ${ids(r.aIds || [r.a])} ↔ ${ids(r.bIds || [r.b])}`;
@@ -4342,6 +4396,14 @@ const v3 = (q) => new THREE.Vector3(q.x, q.y, q.z);
 // manijas de la relación abierta: { pos, dir, kind: 't' | 's' | 'd', drag(delta, start) }
 function relHandles(r) {
   const out = byId(outputOf(r));
+  if (out && out.kind === 'curve' && r.type === 'align') {
+    // curva alineada: flecha azul (tensión) en el CV 1 y naranja (forma) en el CV 2, contados desde el extremo
+    const c = out.data.cvs, at = (k) => v3(c[r.sEnd ? c.length - 1 - k : k]), H2 = [];
+    const p0 = at(0), p1 = at(1), l1 = p1.distanceTo(p0) || 1e-3;
+    if (r.cont >= 1) H2.push({ pos: p1, dir: p1.clone().sub(p0).normalize(), kind: 't', label: 'tensión', start: () => r.tension, drag: (delta, s0) => { r.tension = Math.max(0.05, s0 * (1 + delta / l1)); } });
+    if (r.cont >= 2) { const p2 = at(2), l2 = p2.distanceTo(p1) || 1e-3; H2.push({ pos: p2, dir: p2.clone().sub(p1).normalize(), kind: 's', label: 'forma', start: () => r.shape || 0, drag: (delta, s0) => { r.shape = s0 + delta / l2; } }); }
+    return H2;
+  }
   if (!out || out.kind !== 'surface') return [];
   const d = out.data, H = [];
   const rows = (edge, cont, tKey, sKey) => {
@@ -4501,12 +4563,13 @@ function syncToolWinToSelection() {
 // --- Panel "Historial de construcción" ---
 function relDiag(r) {
   const out = byId(outputOf(r)), ins = inputsOf(r).map(byId);
-  if (!out || ins.some((o) => !o) || out.kind !== 'surface') return '';
+  if (!out || ins.some((o) => !o) || (out.kind !== 'surface' && !(r.type === 'align' && r.curve))) return '';
   const fmtD = (d, cont) => {
     const ok = (c) => `<b class="${c ? 'ok' : 'bad'}">${c ? '✓' : '✗'}</b>`;
     return `${ok(d.gap < 1e-3)} hueco ${d.gap.toFixed(4)} dm · ${cont >= 1 ? ok(d.angle < 0.1) : ''} ángulo ${d.angle.toFixed(2)}° · ${cont >= 2 ? ok(d.curv < 0.05) : ''} curvatura ${(d.curv * 100).toFixed(1)}%`;
   };
   try {
+    if (r.type === 'align' && r.curve) return fmtD(HX.diagnoseCurve(r, ins[0].data, out.data), r.cont);
     if (r.type === 'align') return fmtD(HX.diagnose(ins[0].data, r.mEdge, out.data, r.sEdge, r.rev), r.cont);
     if (r.type === 'blend' && exactBlend(r)) return `1: ${fmtD(HX.diagnose(ins[0].data, r.aEdge, out.data, 'v0', false), r.contA ?? r.cont)}<br>2: ${fmtD(HX.diagnose(ins[1].data, r.bEdge, out.data, 'v1', r.rev), r.contB ?? r.cont)}`;
     if (r.type === 'blend' || r.type === 'skin') {
@@ -5406,7 +5469,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

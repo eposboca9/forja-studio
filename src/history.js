@@ -100,7 +100,9 @@ export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev, mu = 0) {
   for (let k = 0; k <= Math.min(cont, mc.n - 1); k++) mRows.push(row(M, mEdge, k));
   for (let k = 0; k <= cont; k++) sRows.push(row(S, sEdge, k));
   const n = sRows[0].length;
+  const lamF = typeof lambda === 'function' ? lambda : () => lambda, muF = typeof mu === 'function' ? mu : () => mu;
   for (let j = 0; j < n; j++) {
+    const lambda = lamF(j, n), mu = muF(j, n, lambda);
     const jm = rev ? n - 1 - j : j;
     const m0 = mRows[0][jm];
     const s0 = sRows[0][j];
@@ -133,11 +135,143 @@ export function naturalLambda(S, sEdge, M, mEdge, rev) {
   }
   return b > 1e-9 && a > 1e-9 ? a / b : 1;
 }
+// Peso de cada columna del borde (0..1): "Modificar rango" deja el Align solo en el tramo [r0, r1] del borde, con un
+// suavizado (soft) a cada lado para que la superficie vuelva a su forma sin escalón.
+export function rangeWeights(rel, knots, deg, n) {
+  const g = N.greville(knots, deg, n), a = knots[deg], b = knots[n];
+  const r0 = rel.r0 ?? 0, r1 = rel.r1 ?? 1, soft = Math.max(0, rel.soft ?? 0);
+  const sm = (x) => x * x * (3 - 2 * x);
+  return g.map((t) => {
+    t = (t - a) / ((b - a) || 1);
+    if (!rel.modRange) return 1;
+    const wi = soft > 1e-6 ? sm(Math.min(1, Math.max(0, (t - (r0 - soft)) / soft))) : (t >= r0 - 1e-6 ? 1 : 0);
+    const wo = soft > 1e-6 ? sm(Math.min(1, Math.max(0, ((r1 + soft) - t) / soft))) : (t <= r1 + 1e-6 ? 1 : 0);
+    return wi * wo;
+  });
+}
 export function align(rel, M, S) {
+  if (rel.curve) return alignCurve(rel, M, S);
   const d = prepareSlave(S, rel.sEdge, M, rel.mEdge, rel.cont, rel.rev);
-  const lam = rel.lambda0 * rel.tension;
-  alignRows(d, rel.sEdge, M, rel.mEdge, rel.cont, lam, rel.rev, (rel.shape || 0) * lam);
+  const sc = cross(d, rel.sEdge), sa = along(d, rel.sEdge);
+  const nr = Math.min(4, sc.n), rowsAt = () => { const R = []; for (let k = 0; k < nr; k++) R.push(row(d, rel.sEdge, k).map((q) => [q.x, q.y, q.z, q.w])); return R; };
+  // forma original de las filas del borde (para el rango parcial)
+  if (!rel.orig || rel.orig.n !== sa.n || rel.orig.nc !== sc.n) rel.orig = { n: sa.n, nc: sc.n, rows: rowsAt() };
+  const w = rangeWeights(rel, sa.knots, sa.deg, sa.n);
+  const g = N.greville(sa.knots, sa.deg, sa.n), g0 = sa.knots[sa.deg], g1 = sa.knots[sa.n];
+  // tensión que cambia a lo largo del borde (de "Tensión" al inicio a "Tensión final" al final)
+  const tAt = (j) => (rel.varT ? rel.tension + ((rel.tensionEnd ?? rel.tension) - rel.tension) * ((g[j] - g0) / ((g1 - g0) || 1)) : rel.tension);
+  alignRows(d, rel.sEdge, M, rel.mEdge, rel.cont, (j) => rel.lambda0 * tAt(j), rel.rev, (j, n, lam) => (rel.shape || 0) * lam);
+  if (w.some((x) => x < 1)) {
+    for (let k = 0; k < nr; k++) {
+      const r = row(d, rel.sEdge, k);
+      for (let j = 0; j < r.length; j++) {
+        const o = rel.orig.rows[k][j], a = w[j];
+        if (a >= 1) continue;
+        r[j].set(o[0] + (r[j].x - o[0]) * a, o[1] + (r[j].y - o[1]) * a, o[2] + (r[j].z - o[2]) * a, r[j].w);
+      }
+    }
+  }
   return d;
+}
+
+// ---------- Align de una curva (su extremo) a otra curva o al borde de una superficie ----------
+// La curva cruza el punto de unión como un borde de superficie de una sola fila: sus derivadas en el extremo
+// son (-λ)^k veces las de la maestra (más el término de forma μ en G2 / G3), igual que en el Align de superficies.
+function basisFns(knots, p, n, t) {
+  const N0 = new Array(n).fill(0);
+  let span = p;
+  while (span < n - 1 && t >= knots[span + 1]) span++;
+  const left = [], right = [], Nn = [1];
+  for (let j = 1; j <= p; j++) {
+    left[j] = t - knots[span + 1 - j]; right[j] = knots[span + j] - t;
+    let saved = 0;
+    for (let r = 0; r < j; r++) {
+      const den = right[r + 1] + left[j - r], tmp = den ? Nn[r] / den : 0;
+      Nn[r] = saved + right[r + 1] * tmp; saved = left[j - r] * tmp;
+    }
+    Nn[j] = saved;
+  }
+  for (let i = 0; i <= p; i++) N0[span - p + i] = Nn[i];
+  return N0;
+}
+const curveFromEnd = (c, end) => ({ P: (end ? c.cvs.slice().reverse() : c.cvs.slice()), knots: end ? reverseKnots(c.knots) : c.knots, deg: c.deg });
+// derivadas 0..K en el extremo de una curva (hacia dentro de la curva)
+export function curveEndDerivs(c, end, K) {
+  const f = curveFromEnd(c, end), d = startDerivs(f.P.map(xyz), f.knots, f.deg, Math.min(K, f.P.length - 1));
+  while (d.length <= K) d.push(new THREE.Vector3());
+  return d;
+}
+// derivadas en el cruce de un borde de superficie, en la posición t (0..1) a lo largo de él
+export function edgeCrossDerivs(M, mEdge, t, K) {
+  const al = along(M, mEdge), cr = cross(M, mEdge);
+  const u = al.knots[al.deg] + t * (al.knots[al.n] - al.knots[al.deg]);
+  const B = basisFns(al.knots, al.deg, al.n, u);
+  const nr = Math.min(K, cr.n - 1) + 1, P = [];
+  for (let k = 0; k < nr; k++) {
+    const r = row(M, mEdge, k), q = new THREE.Vector3();
+    for (let j = 0; j < r.length; j++) q.addScaledVector(xyz(r[j]), B[j]);
+    P.push(q);
+  }
+  const d = startDerivs(P, cr.knots, cr.deg, nr - 1);
+  while (d.length <= K) d.push(new THREE.Vector3());
+  return d;
+}
+export function masterDerivs(rel, M, K) {
+  return rel.mEdge ? edgeCrossDerivs(M, rel.mEdge, rel.mT ?? 0.5, K) : curveEndDerivs(M, rel.mEnd || 0, K);
+}
+// punto del borde más cercano a un punto, como fracción 0..1 a lo largo del borde
+export function edgeParamNear(M, mEdge, p, n = 200) {
+  const s = N.surfaceOf(M), q = new THREE.Vector3();
+  let best = 0, bd = Infinity;
+  for (let k = 0; k <= n; k++) {
+    const t = k / n;
+    if (isU(mEdge)) s.getPoint(atEnd(mEdge) ? 1 : 0, t, q); else s.getPoint(t, atEnd(mEdge) ? 1 : 0, q);
+    const d = q.distanceToSquared(p);
+    if (d < bd) { bd = d; best = t; }
+  }
+  return best;
+}
+export function prepareCurve(S, cont) {
+  if (S.deg >= cont && S.cvs.length >= cont + 2) return S;
+  const n = Math.max(S.cvs.length, cont + 2), deg = Math.min(Math.max(S.deg, cont, 1), n - 1);
+  const d = N.rebuildCurve(S, deg, n - deg);
+  d.plane = 'free';
+  return d;
+}
+export function curveNaturalLambda(S, sEnd, M, rel) {
+  const a = curveEndDerivs(S, sEnd, 1)[1].length(), b = masterDerivs(rel, M, 1)[1].length();
+  return a > 1e-9 && b > 1e-9 ? a / b : 1;
+}
+export function alignCurve(rel, M, S) {
+  const d = prepareCurve(S, rel.cont), end = rel.sEnd || 0, K = rel.cont;
+  const Dm = masterDerivs(rel, M, K);
+  const f = curveFromEnd(d, end), P = f.P.map(xyz);
+  const sign = rel.rev ? 1 : -1, lam = rel.lambda0 * rel.tension, mu = (rel.shape || 0) * lam;
+  P[0].copy(Dm[0]);
+  for (let k = 1; k <= K; k++) {
+    const target = Dm[k].clone().multiplyScalar((sign * lam) ** k);
+    if (k === 2) target.addScaledVector(Dm[1], mu * sign);
+    if (k === 3) target.addScaledVector(Dm[2], 3 * lam * mu);
+    P[k].set(0, 0, 0);
+    const D0 = startDerivs(P.slice(0, k + 1), f.knots, f.deg, k)[k];
+    P[k].set(1, 1, 1);
+    const c = startDerivs(P.slice(0, k + 1), f.knots, f.deg, k)[k].x - D0.x;
+    P[k].copy(target.sub(D0).divideScalar(Math.abs(c) > 1e-12 ? c : 1));
+  }
+  const out = { ...d, cvs: d.cvs.map((q) => q.clone()) };
+  for (let k = 0; k <= K; k++) {
+    const q = out.cvs[end ? out.cvs.length - 1 - k : k];
+    q.set(P[k].x, P[k].y, P[k].z, q.w);
+  }
+  return out;
+}
+export function diagnoseCurve(rel, M, S) {
+  const A = curveEndDerivs(S, rel.sEnd || 0, 3), B = masterDerivs(rel, M, 3);
+  const sg = rel.rev ? 1 : -1;
+  const kap = (D) => D[1].clone().cross(D[2]).length() / Math.max(1e-12, D[1].length() ** 3);
+  const ang = THREE.MathUtils.radToDeg(Math.acos(Math.min(1, Math.max(-1, A[1].clone().normalize().dot(B[1].clone().normalize().multiplyScalar(sg))))));
+  const ks = kap(A), km = kap(B);
+  return { gap: A[0].distanceTo(B[0]), angle: Number.isNaN(ang) ? 0 : ang, curv: Math.abs(ks - km) / Math.max(ks, km, 0.02) };
 }
 
 // ---------- Blend: superficie de unión entre dos bordes ----------
