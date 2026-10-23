@@ -586,6 +586,70 @@ const plusGeo = mergeGeometries([new THREE.BoxGeometry(1.2, 0.2, 0.055), new THR
 const cornerGeo = new THREE.BoxGeometry(0.42, 0.42, 0.42);
 const handleMat = new THREE.MeshStandardMaterial({ color: '#2f7bff', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true, opacity: 0.85 });
 const handleSelMat = new THREE.MeshStandardMaterial({ color: '#ff8a1f', emissive: '#5a2400', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true });
+
+// ---------- Capas: color heredado, estado (elegible / referencia / inactiva) y simetría dinámica ----------
+// Color de capa: las líneas (isoparamétricas, bordes, curvas) y el polígono de control de todo lo que hay en la capa toman su color.
+// Una capa "inactiva" dibuja esas líneas atenuadas. Los materiales se cachean por color.
+const layerById = (id) => layers.find((l) => l.id === id);
+const layerMatCache = new Map();
+function layerMats(L) {
+  const dim = L.mode === 'inactive', col = L.color || '#8a8d93', key = col + (dim ? '|d' : '');
+  let m = layerMatCache.get(key);
+  if (!m) {
+    const mk = (base) => { const m = LM({ color: col, linewidth: base.linewidth, transparent: dim, opacity: dim ? 0.38 : 1 }); m.resolution.copy(isoMat.resolution); return m; };   // sin copiar la resolución un cuadro dibuja líneas gigantes
+    const hull = hullMat.clone(); hull.color.set(col); if (dim) hull.opacity = 0.3;
+    const hullEdge = hullEdgeMat.clone(); hullEdge.color.set(col);
+    m = { iso: mk(isoMat), bound: mk(wireLineMat), curve: mk(curveMat), edgeCurve: mk(edgeCurveMat), hull, hullEdge };
+    layerMatCache.set(key, m);
+  }
+  return m;
+}
+const layerStyled = (L) => !!L && !!(L.color || L.mode === 'inactive');
+const layerPickable = (o) => (layerById(o.layer)?.mode || 'pick') === 'pick';
+// Simetría por capa: una instancia espejo EN VIVO (fantasmas que comparten la geometría y el material del original, sin copiar datos).
+// Planos con los nombres de CAD (Z arriba, como Alias): XZ = plano central del coche; en Forja (Y arriba) es el plano z = 0.
+const SYM_PLANES = { xz: [0, 0, 1], xy: [0, 1, 0], yz: [1, 0, 0] };
+const SYM_NAMES = { xz: 'XZ (por defecto)', xy: 'XY', yz: 'YZ', custom: 'Plano personalizado' };
+function symNormal(sym) {
+  const a = sym.plane === 'custom' ? sym.n || [0, 0, 1] : SYM_PLANES[sym.plane] || SYM_PLANES.xz;
+  const v = new THREE.Vector3(...a); return v.lengthSq() < 1e-9 ? new THREE.Vector3(0, 0, 1) : v.normalize();
+}
+function mirrorMatrix(n) {
+  return new THREE.Matrix4().set(1 - 2 * n.x * n.x, -2 * n.x * n.y, -2 * n.x * n.z, 0, -2 * n.x * n.y, 1 - 2 * n.y * n.y, -2 * n.y * n.z, 0, -2 * n.x * n.z, -2 * n.y * n.z, 1 - 2 * n.z * n.z, 0, 0, 0, 0, 1);
+}
+const mirrorRoots = new Map();   // id de capa -> { group, ents: Map(id de objeto -> { obj, list: [{ s, g }] }), key }
+function ghostOf(src) {
+  const g = src.isLine2 ? new Line2(src.geometry, src.material) : src.isLineSegments2 ? new LineSegments2(src.geometry, src.material) : new THREE.Mesh(src.geometry, src.material);
+  g.raycast = () => {}; g.castShadow = src.castShadow; g.receiveShadow = src.receiveShadow; g.renderOrder = src.renderOrder; g.layers.mask = src.layers.mask; g.frustumCulled = false;
+  return g;
+}
+function syncGhosts() {
+  if (!mirrorRoots.size && !layers.some((l) => l.sym?.on)) return;
+  const active = layers.filter((l) => l.sym?.on);
+  for (const [id, r] of mirrorRoots) if (!active.some((l) => l.id === id)) { scene.remove(r.group); mirrorRoots.delete(id); sceneChangedAt = performance.now(); }
+  for (const L of active) {
+    let r = mirrorRoots.get(L.id);
+    if (!r) { r = { group: new THREE.Group(), ents: new Map(), key: '' }; r.group.matrixAutoUpdate = false; scene.add(r.group); mirrorRoots.set(L.id, r); sceneChangedAt = performance.now(); }
+    const key = L.sym.plane + (L.sym.plane === 'custom' ? (L.sym.n || []).join(',') : '');
+    if (key !== r.key) { r.key = key; r.group.matrix.copy(mirrorMatrix(symNormal(L.sym))); r.group.matrixWorldNeedsUpdate = true; sceneChangedAt = performance.now(); }
+    const mine = objects.filter((o) => o.layer === L.id);
+    for (const [oid, e] of r.ents) if (!mine.includes(e.obj)) { e.list.forEach((x) => r.group.remove(x.g)); r.ents.delete(oid); sceneChangedAt = performance.now(); }
+    for (const o of mine) {
+      let e = r.ents.get(o.id);
+      if (!e) {
+        const srcs = o.kind === 'surface' ? [o.parts.mesh, o.parts.iso, o.parts.bound] : o.kind === 'curve' ? [o.parts.line] : [o.parts.mesh];
+        e = { obj: o, list: srcs.map((sr) => ({ s: sr, g: ghostOf(sr) })) };
+        e.list.forEach((x) => r.group.add(x.g)); r.ents.set(o.id, e); sceneChangedAt = performance.now();
+      }
+      for (const x of e.list) {
+        x.g.visible = x.s.visible && o.visible;
+        if (x.g.geometry !== x.s.geometry) x.g.geometry = x.s.geometry;
+        if (x.g.material !== x.s.material) x.g.material = x.s.material;
+      }
+    }
+  }
+}
+
 const HANDLE_PX = 5.5;   // píxeles de pantalla por unidad de la cruz (la cruz mide 1,2 unidades ≈ 6,6 px de punta a punta)
 function makeHandle(corner, sel) {
   const h = new THREE.Mesh(handleGeo, handlePickMat);
@@ -961,6 +1025,7 @@ function rebuildHandles(obj) {
 function applyVisibility(obj) {
   sceneChangedAt = performance.now();
   const p = obj.parts, vis = obj.visible, sel = selObjs.includes(obj), cvMode = pickMode === 'cv';
+  const LY = layerById(obj.layer), lm = layerStyled(LY) ? layerMats(LY) : null;   // color / estado de la capa
   // los CVs se ven en el modo CV (los de los objetos encendidos) y, en cualquier modo, en los objetos elegidos: al crear, mover o alinear
   p.handles.visible = p.hull.visible = vis && !modelClean && ((cvMode && cvTargets.has(obj.id)) || (sel && obj.kind !== 'mesh'));
   if (obj.kind === 'mesh') {
@@ -969,12 +1034,14 @@ function applyVisibility(obj) {
     p.mesh.visible = vis;
     const wire = diagMode === 'wire';
     p.iso.visible = vis && (wire || ($('show-iso').checked && !modelClean));
-    p.iso.material = sel ? isoSelMat : histState(obj) === 'dep' ? isoDepMat : histState(obj) === 'hist' ? isoHistMat : wire ? wireLineMat : isoMat;
-    if (p.bound) { p.bound.visible = vis && wire; p.bound.material = sel ? isoSelMat : wireLineMat; }
+    p.iso.material = sel ? isoSelMat : lm ? lm.iso : histState(obj) === 'dep' ? isoDepMat : histState(obj) === 'hist' ? isoHistMat : wire ? wireLineMat : isoMat;
+    if (p.bound) { p.bound.visible = vis && wire; p.bound.material = sel ? isoSelMat : lm ? lm.bound : wireLineMat; }
+    p.hull.material = lm ? lm.hull : hullMat; p.hullEdge.material = lm ? lm.hullEdge : hullEdgeMat;
     p.edge.visible = vis && sel;
   } else {
     p.line.visible = vis;
-    p.line.material = sel ? curveSelMat : histState(obj) === 'dep' ? curveDepMat : histState(obj) === 'hist' ? curveHistMat : obj.data.cos?.edge ? edgeCurveMat : curveMat;
+    p.line.material = sel ? curveSelMat : lm ? (obj.data.cos?.edge ? lm.edgeCurve : lm.curve) : histState(obj) === 'dep' ? curveDepMat : histState(obj) === 'hist' ? curveHistMat : obj.data.cos?.edge ? edgeCurveMat : curveMat;
+    p.hull.material = lm ? lm.hull : hullMat;
     p.comb.visible = p.env.visible = vis && $('show-comb').checked && !modelClean && !obj.data.cos?.edge;   // los bordes de recorte no llevan peine
   }
 }
@@ -986,7 +1053,7 @@ let pickMode = 'object';
 const cvTargets = new Set();
 // Filtro del modo Objetos (como Pick Curves / Pick Surfaces de Alias): null = todo, 'curve' o 'surface'
 let pickFilter = null;
-const pickable = (o) => o.visible && (!pickFilter || (pickFilter === 'curve' ? o.kind === 'curve' : o.kind !== 'curve'));
+const pickable = (o) => o.visible && layerPickable(o) && (!pickFilter || (pickFilter === 'curve' ? o.kind === 'curve' : o.kind !== 'curve'));
 const PICK_NAMES = { curve: 'curvas', surface: 'superficies' };
 const selObjs = []; // en orden de selección (importa para el loft)
 const selCVs = new Map();
@@ -1845,10 +1912,22 @@ function refreshOutliner() {
     const mine = objects.filter((o) => o.layer === l.id);
     const li = document.createElement('li');
     li.className = 'ly' + (l.open ? ' open' : '') + (l.visible ? '' : ' off') + (l.id === activeLayer ? ' active' : '');
+    const mode = l.mode || 'pick', symOn = !!l.sym?.on;
     li.innerHTML = `<div class="ly-head"><button class="ol-fold" title="Abrir / cerrar">▸</button>
       <button class="ly-eye" aria-pressed="${l.visible}" title="${l.visible ? 'Ocultar capa' : 'Mostrar capa'}">${EYE}</button>
+      <span class="ly-symw"><button class="ly-sym" aria-pressed="${symOn}" title="Simetría de la capa: ${symOn ? 'activa (' + SYM_NAMES[l.sym.plane] + ')' : 'apagada'} · clic: encender / apagar · clic derecho o ▾: plano">⇋</button><button class="ly-symp" title="Plano de simetría">▾</button></span>
+      <input type="color" class="ly-col" value="${l.color || '#8a8d93'}" data-set="${l.color ? 1 : 0}" title="Color de la capa: pasa a las líneas, curvas y polígonos de control de todo lo que contiene (clic derecho: quitar color)">
       <button class="ly-name" title="Clic: capa activa (lo nuevo va aquí) · doble clic: renombrar · suelta aquí objetos para pasarlos">${esc(l.name)}</button>
+      <button class="ly-mode" data-mode="${mode}" title="Estado de la capa: ${LAYER_MODES[mode]} (clic: cambiar)">${LAYER_MODE_LETTER[mode]}</button>
       <span class="ly-n">${mine.length}</span></div><ul></ul>`;
+    li.querySelector('.ly-mode').addEventListener('click', () => setLayerMode(l, LAYER_MODE_NEXT[mode]));
+    li.querySelector('.ly-sym').addEventListener('click', () => toggleSym(l));
+    li.querySelector('.ly-sym').addEventListener('contextmenu', (e) => { e.preventDefault(); symMenu(l, e.currentTarget); });
+    li.querySelector('.ly-symp').addEventListener('click', (e) => symMenu(l, e.currentTarget));
+    { const ci = li.querySelector('.ly-col'); let armed = false;
+      ci.addEventListener('input', () => { if (!armed) { checkpoint(); armed = true; } setLayerColor(l, ci.value); });
+      ci.addEventListener('change', () => { armed = false; refreshOutliner(); });
+      ci.addEventListener('contextmenu', (e) => { e.preventDefault(); if (l.color) { checkpoint(); setLayerColor(l, null); refreshOutliner(); } }); }
     const head = li.querySelector('.ly-head'), inner = li.querySelector('ul');
     li.querySelector('.ol-fold').addEventListener('click', () => { l.open = !l.open; refreshOutliner(); });
     li.querySelector('.ly-eye').addEventListener('click', () => setLayerVisible(l, !l.visible));
@@ -3364,6 +3443,50 @@ function setLayerVisible(l, v) {
   selectionChanged(); renderLayers();
 }
 function renderLayers() { refreshOutliner(); }
+// ---------- Capas: estado, color y simetría (acciones de la interfaz) ----------
+const LAYER_MODES = { pick: 'Elegible (editable)', ref: 'Referencia (visible, no se elige ni se edita)', inactive: 'Inactiva (visible, atenuada, no se elige)' };
+const LAYER_MODE_LETTER = { pick: 'E', ref: 'R', inactive: 'I' };
+const LAYER_MODE_NEXT = { pick: 'ref', ref: 'inactive', inactive: 'pick' };
+function setLayerMode(l, m) {
+  checkpoint();
+  l.mode = m;
+  if (m !== 'pick') for (let i = selObjs.length - 1; i >= 0; i--) if (selObjs[i].layer === l.id) { cvTargets.delete(selObjs[i].id); selObjs.splice(i, 1); }
+  for (const [k, c] of selCVs) { if (c.obj?.layer === l.id && m !== 'pick') selCVs.delete(k); }
+  objects.forEach(applyVisibility); selectionChanged(); renderLayers();
+  toast(`${l.name}: ${LAYER_MODES[m]}`);
+}
+function setLayerColor(l, c) {
+  l.color = c || null;
+  objects.forEach(applyVisibility);
+}
+function toggleSym(l, on = !l.sym?.on) {
+  checkpoint();
+  l.sym = { plane: 'xz', ...(l.sym || {}), on };
+  sceneChangedAt = performance.now(); renderLayers();
+  toast(on ? `${l.name}: simetría ${SYM_NAMES[l.sym.plane]}` : `${l.name}: simetría apagada`);
+}
+function symMenu(l, anchor) {
+  document.querySelectorAll('.sym-menu').forEach((m) => m.remove());
+  const m = document.createElement('div');
+  m.className = 'sym-menu';
+  const cur = l.sym?.plane || 'xz';
+  const item = (label, on, fn) => { const b = document.createElement('button'); b.textContent = (on ? '● ' : '○ ') + label; b.addEventListener('click', () => { m.remove(); fn(); }); m.append(b); };
+  item(l.sym?.on ? 'Simetría activada' : 'Activar simetría', !!l.sym?.on, () => toggleSym(l));
+  m.append(document.createElement('hr'));
+  for (const k of ['xz', 'xy', 'yz']) item(SYM_NAMES[k], cur === k, () => { checkpoint(); l.sym = { ...(l.sym || {}), plane: k, on: true }; sceneChangedAt = performance.now(); renderLayers(); });
+  item('Plano personalizado (vector)…', cur === 'custom', () => {
+    const v = prompt('Vector normal del plano de simetría (x, y, z) — en ejes de Forja, Y arriba', (l.sym?.n || [1, 0, 0]).join(', '));
+    const n = v && v.split(/[ ,;]+/).map(Number).filter((x) => Number.isFinite(x));
+    if (n && n.length === 3 && Math.hypot(...n) > 1e-6) { checkpoint(); l.sym = { ...(l.sym || {}), plane: 'custom', n, on: true }; sceneChangedAt = performance.now(); renderLayers(); }
+    else if (v) toast('Hacen falta tres números distintos de cero, p. ej. 1, 0, 0');
+  });
+  const r = anchor.getBoundingClientRect();
+  m.style.left = Math.min(r.left, innerWidth - 220) + 'px'; m.style.top = r.bottom + 2 + 'px';
+  document.body.append(m);
+  const off = (e) => { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('pointerdown', off, true); } };
+  setTimeout(() => document.addEventListener('pointerdown', off, true), 0);
+}
+
 
 // ---------- Deshacer / rehacer ----------
 // Antes de cada cambio se guarda una copia de la escena (como mucho una por tarea del navegador, así un
@@ -3378,9 +3501,10 @@ function cloneData(o) {
   if (d.cos) c.cos = { ...d.cos, uv: d.cos.uv.map((q) => q.slice()) };
   return c;
 }
+const cloneLayer = (l) => ({ ...l, sym: l.sym ? { ...l.sym, n: l.sym.n ? [...l.sym.n] : undefined } : undefined });
 function snapshot() {
   return {
-    layers: layers.map((l) => ({ ...l })), activeLayer, nextLayerId, groups: groups.map((g) => ({ ...g })), nextGroupId,
+    layers: layers.map(cloneLayer), activeLayer, nextLayerId, groups: groups.map((g) => ({ ...g })), nextGroupId,
     relations: relations.map((r) => ({ ...r })), nextRelId,
     objects: objects.map((o) => ({ id: o.id, kind: o.kind, name: o.name, mat: o.mat, own: o.ownVisible, layer: o.layer, group: o.group, pivot: o.pivot.clone(), data: cloneData(o) })),
   };
@@ -3397,7 +3521,7 @@ function restore(st) {
   restoring = true;
   selObjs.length = 0; selCVs.clear();
   objects.slice().forEach(removeObject);
-  layers.splice(0, layers.length, ...st.layers.map((l) => ({ ...l })));
+  layers.splice(0, layers.length, ...st.layers.map(cloneLayer));
   groups.splice(0, groups.length, ...st.groups.map((g) => ({ ...g })));
   nextLayerId = st.nextLayerId; nextGroupId = st.nextGroupId;
   relations.splice(0, relations.length, ...(st.relations || []).map((r) => ({ ...r }))); nextRelId = st.nextRelId || nextRelId;
@@ -5121,6 +5245,7 @@ function renderPane(p) {
     if (o.parts.mesh.castShadow === wire) { o.parts.mesh.castShadow = !wire; renderer.shadowMap.needsUpdate = true; }   // el wireframe no da sombra
     if (o.kind === 'mesh') meshFeatures(o, wire);
   });
+  syncGhosts();
   scene.background = !diag && envBg ? scene.environment : null;
   renderer.toneMapping = diag ? THREE.ACESFilmicToneMapping : TONES[toneKey];
   scene.environment = diag ? envTexture('studio') : envTexture(envKey);
@@ -5524,6 +5649,7 @@ function renderForgePane(p) {
     if (o.kind !== 'curve') o.parts.mesh.material = materials[o.mat];
     if (forgeHidesSource() && (forgeSource.ids.includes(o.id) || o.id === forgeSource.resultId)) for (const part of Object.values(o.parts)) if (part.visible) { part.visible = false; hid.push(part); }
   });
+  syncGhosts();
   forgeRoot.visible = forgePiece();
   // en Forge no se mueve nada de Forja: sin manipulador ni marcas de pivote
   for (const x of [gizmo, objPivotMarkers, pivotMarker]) if (x.visible) { x.visible = false; hid.push(x); }
@@ -5707,7 +5833,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

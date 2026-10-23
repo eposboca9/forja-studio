@@ -579,6 +579,16 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (2) readSTEP orienta cada cara con same_sense: la normal STEP (hacia fuera) = Su×Sv, y Forja la quiere hacia dentro -> se traspone la malla de CVs (U<->V) y los lazos de recorte.
   Verificado contra las normales de OpenCascade (46/46 coinciden) y con Cebra continua entre caras; curvatura: exterior convexa (rojo), cavidad cóncava (azul). Pruebas: forja/tnorm.mjs, tnm2.mjs.
 
+- (v0.26) Capas como Alias + funciones propias (main.js "Capas: color heredado, estado y simetría" + acciones en renderLayers): cada capa tiene
+  mode 'pick' (E, elegible) | 'ref' (R, visible, no se elige ni se edita) | 'inactive' (I, líneas atenuadas); color (color picker en su fila: pasa a las
+  isoparamétricas, bordes, curvas y polígono de control de TODO lo que contiene; layerMats(L) cachea LineMaterials por color y copia isoMat.resolution
+  — sin eso un cuadro dibuja líneas gigantes y se cuelga); sym {on, plane xz|xy|yz|custom, n} con botón ⇋ (clic enciende/apaga; clic derecho o ▾ = menú
+  de plano). La simetría es una instancia espejo en vivo: fantasmas (ghostOf) que comparten geometría y material del original dentro de un Group con
+  matriz de reflexión (syncGhosts, se llama en renderPane/renderForgePane); no se pueden elegir (raycast vacío). Los nombres de plano son de CAD con Z arriba
+  (XZ = plano central; en Forja = z = 0); 'custom' usa un vector en ejes de Forja. pickable() respeta el estado de la capa. snapshot/restore clonan sym (cloneLayer).
+  Pruebas: forja/tlay.mjs (color, simetría, referencia), tlayui.mjs (captura de la ventana). PENDIENTE: Stages (etapas), atenuar también las mallas de capas inactivas,
+  incluir el espejo en la exportación.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
