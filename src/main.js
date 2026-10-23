@@ -447,9 +447,7 @@ const zebraMat = new THREE.ShaderMaterial({
   fragmentShader: `
     uniform float uFreq; varying vec3 vN; varying vec3 vV;
     void main() {
-      vec3 n = vN;
-      if (!(dot(n, n) > 0.25)) n = cross(dFdx(vV), dFdy(vV));   // normal de reserva en los polos (la del vértice sale indefinida)
-      n = normalize(n);
+      vec3 n = normalize(vN);
       if (!gl_FrontFacing) n = -n;
       vec3 r = reflect(normalize(vV), n);
       float s = (r.y * 0.5 + 0.5) * uFreq;
@@ -489,10 +487,9 @@ const envDiagMat = new THREE.ShaderMaterial({
       float y = d.y;
       float hz = -0.32;                                                              // horizonte bajo: las paredes claras ocupan la vista de frente
       vec3 up = mix(vec3(0.66, 0.67, 0.69), vec3(0.97, 0.97, 0.98), smoothstep(hz, 0.85, y));
-      vec3 down = mix(vec3(0.12, 0.11, 0.1), vec3(0.03, 0.028, 0.026), (1.0 - smoothstep(-0.9, hz, y)));
+      vec3 down = mix(vec3(0.12, 0.11, 0.1), vec3(0.03, 0.028, 0.026), smoothstep(hz, -0.9, y));
       vec3 col = mix(down, up, smoothstep(hz - 0.03, hz + 0.03, y));               // horizonte nítido
-      float hb = (y - hz - 0.07) * 12.0;
-      col += vec3(0.3) * exp(-hb * hb);                   // franja luminosa sobre el horizonte
+      col += vec3(0.3) * exp(-pow((y - hz - 0.07) * 12.0, 2.0));                   // franja luminosa sobre el horizonte
       if (y > 0.12) {                                                                // dos softbox largos en el techo
         vec2 p = vec2(d.x, d.z) / y;
         float l = box(p, vec2(-0.6, 0.0), vec2(0.16, 2.6), 0.18) + box(p, vec2(0.6, 0.0), vec2(0.16, 2.6), 0.18);
@@ -515,7 +512,7 @@ const envDiagMat = new THREE.ShaderMaterial({
       float dif = max(dot(ne, L), 0.0), dif2 = max(dot(ne, L2), 0.0);
       float spec = pow(max(dot(ne, normalize(L + ve)), 0.0), 90.0);
       float hemi = smoothstep(-0.9, 0.9, ne.y);                                        // oscurece lo que mira al suelo
-      float fres = 0.04 + 0.96 * pow(clamp(1.0 - dot(ve, ne), 0.0, 1.0), 5.0);   // base acotada: pow con base negativa es indefinido en GLSL
+      float fres = 0.04 + 0.96 * pow(1.0 - max(dot(ve, ne), 0.0), 5.0);
       vec3 col;
       if (uMode == 1) {
         vec3 base = vec3(0.70) * (0.12 + 0.48 * dif + 0.12 * dif2 + 0.28 * hemi);
@@ -526,10 +523,10 @@ const envDiagMat = new THREE.ShaderMaterial({
         // frío a un lado y azul Forja (#2f7bff) al otro, con el estudio reflejado nítido sobre bordes y biseles.
         // uBase = claridad de la base · uRim = fuerza del brillo rasante · uSharp = nitidez (más alto = más estrecho) ·
         // uBlue = cuánto azul de marca · uSpec = brillo puntual
-        float graze = pow(clamp(1.0 - dot(ve, ne), 0.0, 1.0), uSharp);
+        float graze = pow(1.0 - max(dot(ve, ne), 0.0), uSharp);
         float wrap = clamp(dot(ne, L) * 0.5 + 0.5, 0.0, 1.0);
         vec3 base = vec3(0.12, 0.125, 0.145) * (0.25 + 2.4 * wrap * wrap * wrap + 0.3 * dif2) * uBase + vec3(0.03, 0.034, 0.045) * hemi;
-        float below = (1.0 - smoothstep(-0.7, 0.1, ne.y));
+        float below = smoothstep(0.1, -0.7, ne.y);
         base *= 1.0 - 0.55 * below;
         float side = smoothstep(-0.35, 0.55, ne.x);                                   // lado de la pantalla hacia el que mira
         vec3 rim = mix(vec3(0.92, 0.94, 0.98), vec3(0.18, 0.48, 1.0), smoothstep(0.25, 0.75, side) * uBlue);
@@ -553,8 +550,8 @@ const envDiagMat = new THREE.ShaderMaterial({
         float t = 0.75 * ne.y + 0.25 * r.y;
         vec3 sky = vec3(0.36, 0.5, 0.92), horizon = vec3(0.97, 0.96, 0.9), ground = vec3(0.86, 0.8, 0.62), deep = vec3(0.32, 0.27, 0.2);
         col = mix(horizon, sky, smoothstep(0.3, 0.92, t));
-        col = mix(col, ground, (1.0 - smoothstep(-0.2, 0.12, t)));
-        col = mix(col, deep, (1.0 - smoothstep(-0.9, -0.25, t)));
+        col = mix(col, ground, smoothstep(0.12, -0.2, t));
+        col = mix(col, deep, smoothstep(-0.25, -0.9, t));
         col *= 0.55 + 0.45 * dif + 0.15 * dif2;
         col += vec3(0.7) * spec + vec3(0.25) * fres * smoothstep(0.0, 0.6, r.y);
       }

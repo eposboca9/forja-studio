@@ -50,8 +50,8 @@ fn horizon(d: vec3f) -> vec3f {
   let y = d.y;
   var c: vec3f;
   if (y > 0.0) { c = mix(vec3f(1.5, 1.5, 1.56), vec3f(0.5, 0.52, 0.58), smoothstep(0.0, 0.9, y)); }
-  else { c = mix(vec3f(0.11, 0.1, 0.09), vec3f(0.018, 0.017, 0.016), (1.0 - smoothstep(-0.8, 0.0, y))); }
-  c += vec3f(0.6) * exp(-((y - 0.03) * 12.0) * ((y - 0.03) * 12.0));
+  else { c = mix(vec3f(0.11, 0.1, 0.09), vec3f(0.018, 0.017, 0.016), smoothstep(0.0, -0.8, y)); }
+  c += vec3f(0.6) * exp(-pow((y - 0.03) * 12.0, 2.0));
   c += box(d, normalize(vec3f(-0.3, 1.0, 0.2)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 0.0, 1.0), 0.8, 0.6, vec3f(1.6));
   return c;
 }
