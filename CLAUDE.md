@@ -518,6 +518,19 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Mover con botones: el CV agarrado (el más cercano al cursor, anchorOff) es el que cae en el snap, no el centro de todo lo elegido.
   OJO: forja/tslide.mjs esperaba el snap limitado al eje del botón (altura constante) y ahora falla en 2 comprobaciones; con el cambio el CV
   cae en el punto exacto de la línea (recorre una línea de parche vertical). Actualizar esa prueba si hace falta. Pruebas nuevas: talign4/5/6/7.mjs.
+- (v0.23) Align según la explicación detallada del usuario (Alias): (1) editar a mano CVs de lo que sale de un Align rompe el historial con
+  aviso (historyBlockers ya no exceptúa al esclavo); (2) "Control explícito (grado y spans)" cruzando el borde (r.explicit, xDeg, xSpans;
+  prepareSlave / prepareCurve con ex); (3) letras P / T / C en la costura (alignLetters; verde / rojo; C = '–' si no se mide); (4) flecha rosa
+  de inversión (kind 'f', handle con click) en curvas y superficies; (5) "Tipo de alineación" Natural / Normal / Vista / Vector
+  (r.atype, r.avec, r.axis): Natural = exacto por CVs; los demás usan el camino libre (proyección del punto del esclavo sobre la maestra,
+  projectParam). (6) Maestras libres: curva sobre superficie, borde de recorte (curva con data.cos) e isoparamétrica (r.mIso {dir, t};
+  las isoLines llevan .iso). masterField(r) -> FF.alignField(side, flow) da punto y derivadas cruzadas (frames de freeform.js); history.js
+  alignRows(..., ext) acepta objetivos por columna; freeTargets resuelve por interpolación en Greville (el esclavo sube a >= 12 CVs a lo
+  largo, prepareSlaveFree); freeDiagnose mide hueco y ángulo (curvatura no se mide en maestras libres). Para curvas esclavas la maestra libre
+  usa masterDerivs(..., field, puntoInterior): la orientación se toma de un punto 10 % dentro de la curva (el extremo ya coincide con la maestra).
+  Elegir maestra: en el 2.º clic 'all' = también isoparamétricas (lineCandidates kinds 'all', menú con el nombre).
+  NO hecho: esclavo = curva sobre superficie o isoparamétrica (no está claro qué se deforma; se avisa y se pide curva libre o borde).
+  Pruebas: forja/talign8.mjs (letras, flecha, explícito), talign9.mjs (CoS, iso, tipos), tfree.mjs (Node).
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso

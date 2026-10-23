@@ -97,28 +97,34 @@ export function prepareSlave(S, sEdge, M, mEdge, cont, rev, ex = null) {
 // G0 = posición, G1 = tangencia, G2 = curvatura, G3 = variación de curvatura.
 // mu = término de forma: la continuidad geométrica G2 permite S'' = λ²M'' − μM' (y para G3 S''' = −λ³M''' + 3λμM''),
 // así la segunda fila de CVs se puede mover (flecha de "forma") sin romper la curvatura.
-export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev, mu = 0, nu = 0) {
-  const mc = cross(M, mEdge), sc = cross(S, sEdge);
+export function alignRows(S, sEdge, M, mEdge, cont, lambda, rev, mu = 0, nu = 0, ext = null) {
+  const mc = M ? cross(M, mEdge) : null, sc = cross(S, sEdge);
   const mRows = [], sRows = [];
   // la maestra puede tener menos filas que las que pide la continuidad (p. ej. una extrusión tiene 2): sus derivadas
   // de orden mayor son cero
-  for (let k = 0; k <= Math.min(cont, mc.n - 1); k++) mRows.push(row(M, mEdge, k));
+  if (M) for (let k = 0; k <= Math.min(cont, mc.n - 1); k++) mRows.push(row(M, mEdge, k));
   for (let k = 0; k <= cont; k++) sRows.push(row(S, sEdge, k));
   const n = sRows[0].length;
   const lamF = typeof lambda === 'function' ? lambda : () => lambda, muF = typeof mu === 'function' ? mu : () => mu, nuF = typeof nu === 'function' ? nu : () => nu;
   for (let j = 0; j < n; j++) {
     const lambda = lamF(j, n), mu = muF(j, n, lambda);
     const jm = rev ? n - 1 - j : j;
-    const m0 = mRows[0][jm];
+    // con ext las derivadas objetivo de cada columna vienen ya calculadas (maestra libre: curva sobre superficie, isoparamétrica...)
+    const E = ext && ext[j];
+    const m0 = E ? { x: E[0].x, y: E[0].y, z: E[0].z, w: sRows[0][j].w } : mRows[0][jm];
     const s0 = sRows[0][j];
     s0.set(m0.x, m0.y, m0.z, m0.w);
     if (!cont) continue;
-    const Dm = startDerivs(mRows.map((r) => xyz(r[jm])), mc.knots, mc.deg, cont);
+    const Dm = E ? null : startDerivs(mRows.map((r) => xyz(r[jm])), mc.knots, mc.deg, cont);
     const P = sRows.map((r) => xyz(r[j]));
     for (let k = 1; k <= cont; k++) {
-      const target = Dm[k].clone().multiplyScalar((-lambda) ** k);
-      if (k === 2) target.addScaledVector(Dm[1], -mu);
-      if (k === 3) { target.addScaledVector(Dm[2], 3 * lambda * mu); target.addScaledVector(Dm[1], nuF(j, n, lambda)); }
+      let target;
+      if (E) target = E[k].clone();
+      else {
+        target = Dm[k].clone().multiplyScalar((-lambda) ** k);
+        if (k === 2) target.addScaledVector(Dm[1], -mu);
+        if (k === 3) { target.addScaledVector(Dm[2], 3 * lambda * mu); target.addScaledVector(Dm[1], nuF(j, n, lambda)); }
+      }
       P[k].set(0, 0, 0);
       const D0 = startDerivs(P.slice(0, k + 1), sc.knots, sc.deg, k)[k];
       P[k].set(1, 1, 1);
@@ -154,9 +160,11 @@ export function rangeWeights(rel, knots, deg, n) {
     return wi * wo;
   });
 }
-export function align(rel, M, S) {
-  if (rel.curve) return alignCurve(rel, M, S);
-  const d = prepareSlave(S, rel.sEdge, M, rel.mEdge, rel.cont, rel.rev, rel.explicit ? { deg: rel.xDeg, spans: rel.xSpans } : null);
+// cabecera común de un Align de superficie: estructura, copia de la forma original y pesos (rango, tensión que varía)
+export function align(rel, M, S, field = null) {
+  if (rel.curve) return alignCurve(rel, M, S, field);
+  const xex = rel.explicit ? { deg: rel.xDeg, spans: rel.xSpans } : null;
+  const d = field ? prepareSlaveFree(S, rel.sEdge, rel.cont, xex) : prepareSlave(S, rel.sEdge, M, rel.mEdge, rel.cont, rel.rev, xex);
   const sc = cross(d, rel.sEdge), sa = along(d, rel.sEdge);
   const nr = Math.min(10, sc.n), rowsAt = () => { const R = []; for (let k = 0; k < nr; k++) R.push(row(d, rel.sEdge, k).map((q) => [q.x, q.y, q.z, q.w])); return R; };
   // forma original de las filas del borde (para el rango parcial)
@@ -165,7 +173,9 @@ export function align(rel, M, S) {
   const g = N.greville(sa.knots, sa.deg, sa.n), g0 = sa.knots[sa.deg], g1 = sa.knots[sa.n];
   // tensión que cambia a lo largo del borde (de "Tensión" al inicio a "Tensión final" al final)
   const tAt = (j) => (rel.varT ? rel.tension + ((rel.tensionEnd ?? rel.tension) - rel.tension) * ((g[j] - g0) / ((g1 - g0) || 1)) : rel.tension);
-  alignRows(d, rel.sEdge, M, rel.mEdge, rel.cont, (j) => rel.lambda0 * tAt(j), rel.rev, (j, n, lam) => (rel.shape || 0) * lam, (j, n, lam) => (rel.shape3 || 0) * lam ** 2);
+  const lamAt = (j) => rel.lambda0 * tAt(j), muAt = (j, n, lam) => (rel.shape || 0) * lam, nuAt = (j, n, lam) => (rel.shape3 || 0) * lam ** 2;
+  if (field) alignRows(d, rel.sEdge, null, null, rel.cont, lamAt, rel.rev, muAt, nuAt, freeTargets(rel, d, sa, g, g0, g1, field, lamAt, muAt, nuAt));
+  else alignRows(d, rel.sEdge, M, rel.mEdge, rel.cont, lamAt, rel.rev, muAt, nuAt);
   if (w.some((x) => x < 1)) {
     for (let k = 0; k < nr; k++) {
       const r = row(d, rel.sEdge, k);
@@ -190,6 +200,73 @@ export function align(rel, M, S) {
   }
   rel.extraPrev = ex;
   return d;
+}
+
+// Estructura de una esclava cuando la maestra es libre: se queda con la suya a lo largo del borde y solo se cuida el grado y las filas al cruzar
+export function prepareSlaveFree(S, sEdge, cont, ex = null) {
+  let d = S;
+  const sc = cross(d, sEdge);
+  let deg = sc.deg, n = sc.n;
+  if (ex) { deg = Math.min(7, Math.max(ex.deg || deg, cont, 1)); n = Math.max(deg + (ex.spans || (sc.n - sc.deg)), cont + 2, deg + 1); }
+  else if (sc.deg < cont || sc.n < cont + 2) { n = Math.max(sc.n, cont + 2); deg = Math.min(Math.max(sc.deg, cont, 1), n - 1); }
+  if (deg !== sc.deg || n !== sc.n) d = isU(sEdge) ? N.rebuildSurface(d, deg, n - deg, d.degV, d.cvs[0].length - d.degV) : N.rebuildSurface(d, d.degU, d.cvs.length - d.degU, deg, n - deg);
+  // a lo largo del borde hacen falta CVs de sobra para copiar una maestra curva (un círculo con 4 CVs no se sigue)
+  const al = along(d, sEdge);
+  if (al.n < 12) {
+    const ad = Math.max(al.deg, 3), an = 12;
+    d = isU(sEdge) ? N.rebuildSurface(d, d.degU, d.cvs.length - d.degU, ad, an - ad) : N.rebuildSurface(d, ad, an - ad, d.degV, d.cvs[0].length - d.degV);
+  }
+  return d;
+}
+// Objetivos por columna de CVs cuando la maestra es libre. field = { params(pts, rev, rel), frames(ts, otherPts) } (main.js).
+// En cada estación (abscisa de Greville) se piden el punto y las derivadas cruzadas de la maestra; luego se resuelve el
+// sistema de interpolación para que el campo de derivadas pase por esos valores (CVs de derivada = solución).
+function freeTargets(rel, d, sa, g, g0, g1, field, lamAt, muAt, nuAt) {
+  const n = sa.n, sig = g.map((t) => (t - g0) / ((g1 - g0) || 1));
+  const row0 = rel.orig.rows[0].map((q) => new THREE.Vector4(q[0], q[1], q[2], q[3]));
+  const crv = N.curveOf({ deg: sa.deg, knots: sa.knots, cvs: row0 });
+  const pts = sig.map((t) => crv.getPoint(Math.min(1, Math.max(0, t))));
+  const ts = field.params(pts, rel.rev, rel, sig);
+  const F = field.frames(ts, pts);
+  if (rel.lambda0 == null) {
+    let a = 0, b = 0;
+    const sc = cross(d, rel.sEdge);
+    const r0 = row(d, rel.sEdge, 0), r1 = row(d, rel.sEdge, 1);
+    for (let j = 0; j < n; j++) { a += startDerivs([xyz(r0[j]), xyz(r1[j])], sc.knots, sc.deg, 1)[1].length(); b += F[j].E[1].length(); }
+    rel.lambda0 = b > 1e-9 && a > 1e-9 ? a / b : 1;
+  }
+  const D = F.map((f, j) => {
+    const lam = lamAt(j), mu = muAt(j, n, lam), nu = nuAt(j, n, lam), E = f.E;
+    const t = [f.P.clone(), E[1].clone().multiplyScalar(lam), E[2].clone().multiplyScalar(lam * lam).addScaledVector(E[1], mu),
+      E[3].clone().multiplyScalar(lam ** 3).addScaledVector(E[2], 3 * lam * mu).addScaledVector(E[1], nu)];
+    return t;
+  });
+  const A = sig.map((u) => basisFns(sa.knots, sa.deg, n, g0 + u * (g1 - g0)));
+  const out = Array.from({ length: n }, () => []);
+  for (let k = 0; k <= Math.min(3, rel.cont); k++) {
+    const R = solve(A, D.map((x) => x[k]));
+    R.forEach((v, i) => (out[i][k] = v));
+  }
+  return out;
+}
+export function freeDiagnose(rel, d, field) {
+  const sc = N.surfaceOf(d), e = rel.sEdge, nS = 9;
+  const sig = Array.from({ length: nS }, (_, k) => (k + 1) / (nS + 1));
+  const pt = (t, h, out) => (isU(e) ? sc.getPoint(atEnd(e) ? 1 - h : h, t, out) : sc.getPoint(t, atEnd(e) ? 1 - h : h, out));
+  const P = sig.map((t) => { const q = new THREE.Vector3(); pt(t, 0, q); return q; });
+  // para orientar a la maestra se usa un punto un poco dentro de la esclava (el borde ya coincide con la maestra)
+  const inner = sig.map((t) => { const q = new THREE.Vector3(); pt(t, 0.08, q); return q; });
+  const ts = field.params(P, rel.rev, rel, sig), F = field.frames(ts, inner);
+  let gap = 0, ang = 0;
+  sig.forEach((t, j) => {
+    gap = Math.max(gap, P[j].distanceTo(F[j].P));
+    if (!F[j].n) return;
+    const hh = 1e-3, a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+    pt(t, 0, a); pt(Math.min(1, t + hh), 0, b); pt(t, hh, c);
+    const ns = b.sub(a).cross(c.sub(a)).normalize();
+    ang = Math.max(ang, THREE.MathUtils.radToDeg(Math.acos(Math.min(1, Math.abs(ns.dot(F[j].n))))));
+  });
+  return { gap, angle: ang, curv: null };
 }
 
 // ---------- Align de una curva (su extremo) a otra curva o al borde de una superficie ----------
@@ -247,7 +324,12 @@ export function curveDerivsAt(c, t, K, sign = 1) {
   }
   return out;
 }
-export function masterDerivs(rel, M, K) {
+export function masterDerivs(rel, M, K, field = null, endPt = null) {
+  if (field) {
+    // maestra libre (curva sobre superficie, isoparamétrica, borde de recorte): derivadas hacia dentro de la superficie de la maestra
+    const F = field.frames([rel.mT ?? 0], [endPt || new THREE.Vector3()])[0], E = F.E;
+    return [F.P.clone(), E[1].clone().negate(), E[2].clone(), E[3].clone().negate()].slice(0, K + 1).concat(Array(Math.max(0, K - 3)).fill(0).map(() => new THREE.Vector3()));
+  }
   if (rel.mEdge) return edgeCrossDerivs(M, rel.mEdge, rel.mT ?? 0.5, K);
   // curva maestra: el punto de unión se puede recorrer de principio a fin (mT); la curva esclava sale hacia el lado contrario al extremo elegido
   return curveDerivsAt(M, rel.mT ?? (rel.mEnd ? 1 : 0), K, rel.mEnd ? -1 : 1);
@@ -276,13 +358,13 @@ export function prepareCurve(S, cont, ex = null) {
   d.plane = 'free';
   return d;
 }
-export function curveNaturalLambda(S, sEnd, M, rel) {
-  const a = curveEndDerivs(S, sEnd, 1)[1].length(), b = masterDerivs(rel, M, 1)[1].length();
+export function curveNaturalLambda(S, sEnd, M, rel, field = null) {
+  const a = curveEndDerivs(S, sEnd, 1)[1].length(), b = masterDerivs(rel, M, 1, field, N.curveOf(S).getPoint(sEnd ? 0.9 : 0.1))[1].length();
   return a > 1e-9 && b > 1e-9 ? a / b : 1;
 }
-export function alignCurve(rel, M, S) {
+export function alignCurve(rel, M, S, field = null) {
   const d = prepareCurve(S, rel.cont, rel.explicit ? { deg: rel.xDeg, spans: rel.xSpans } : null), end = rel.sEnd || 0, K = rel.cont;
-  const Dm = masterDerivs(rel, M, K);
+  const Dm = masterDerivs(rel, M, K, field, N.curveOf(d).getPoint(end ? 0.9 : 0.1));
   const f = curveFromEnd(d, end), P = f.P.map(xyz);
   const sign = rel.rev ? 1 : -1, lam = rel.lambda0 * rel.tension, mu = (rel.shape || 0) * lam;
   P[0].copy(Dm[0]);
@@ -310,8 +392,8 @@ export function alignCurve(rel, M, S) {
   }
   return out;
 }
-export function diagnoseCurve(rel, M, S) {
-  const A = curveEndDerivs(S, rel.sEnd || 0, 3), B = masterDerivs(rel, M, 3);
+export function diagnoseCurve(rel, M, S, field = null) {
+  const A = curveEndDerivs(S, rel.sEnd || 0, 3), B = masterDerivs(rel, M, 3, field, N.curveOf(S).getPoint(rel.sEnd ? 0.9 : 0.1));
   const sg = rel.rev ? 1 : -1;
   const kap = (D) => D[1].clone().cross(D[2]).length() / Math.max(1e-12, D[1].length() ** 3);
   const ang = THREE.MathUtils.radToDeg(Math.acos(Math.min(1, Math.max(-1, A[1].clone().normalize().dot(B[1].clone().normalize().multiplyScalar(sg))))));

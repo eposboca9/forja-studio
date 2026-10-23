@@ -294,6 +294,16 @@ function setup(r, sideA, sideB) {
   return { A, B, o, mA: mapper(A, false, o.rA, o.offA), mB: mapper(B, o.rev, o.rB, o.offB) };
 }
 
+// Campo de una maestra para el Align: punto y derivadas cruzadas (E1..E3 hacia fuera) en los parámetros ts (0..1) del lado.
+export function alignField(sideDef, flowInt = 'iso') {
+  const side = prepSide(sideDef);
+  return {
+    side,
+    at: (t) => side.at(Math.min(1, Math.max(0, t))).P,
+    frames: (ts, otherP) => frames(side, ts, (x) => clamp01(x), otherP && otherP.length === ts.length ? otherP : ts.map(() => side.at(0.5).P), { flowInt, flowStart: 'default', flowEnd: 'default' }),
+  };
+}
+
 // ---------- Freeform Blend / Skin ----------
 // r: contA/contB (G0–G3), tensionA/B (forma), shapeA/B (flecha naranja), crown, explicit/degU/spansU,
 //    flowStart/flowEnd ('default' | 'edge' | 'extend'), flowInt ('free' | 'iso'), modRange rA0..rB1, modParam pA/pB.
