@@ -657,6 +657,12 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   tiene environmentRotation). Intensidad: envMapIntensity de los materiales + backend.envIntensity. envlib.js: mapas equirectangulares procedurales (estudio, exterior, atardecer, nublado),
   rollMap (giro), thumb. Las preferencias › Motor de render comparten las mismas funciones. Pruebas: forja/tenvp.mjs, tenvp2.mjs (capturas envp-*.png).
 
+- (v0.35) Capas ANCLADAS a la izquierda por defecto (layersWin.docked, prefs.layersWin {open, docked, v:2}; clase .float-win.docked: left 72px, top 96px, ancho 232 px, junto a las herramientas;
+  botón ◧/◫ en su cabecera la suelta o la ancla; anclada no se arrastra). Migración: si prefs.layersWin.v !== 2 se reabre y se ancla.
+  Análisis de shading (forja/tshade.mjs: modos 1–8 + Visu/IA/Forge sin errores de consola). Riesgos latentes corregidos SIN cambiar el aspecto: pow() con base negativa (indefinido en GLSL/WGSL:
+  franja del horizonte en showroom y en webgpu-env, fresnel con 1-dot > 1 por redondeo) -> base acotada o producto; smoothstep con bordes invertidos (indefinido) -> 1 - smoothstep(e1,e0,x);
+  Cebra sin normal de reserva en polos -> añadida; pase de normales del AO con normalize(0) -> protegido.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
