@@ -25,9 +25,19 @@ export function createAO(renderer, scene, camera) {
     this.scene.traverse((o) => {
       cache.set(o, o.visible);
       const m = o.material;
-      if (o.isPoints || o.isLine || o.isLineSegments || o.isLine2 || o.isLineSegments2 || o.isSprite || (m && (m.isLineMaterial || m.isSpriteMaterial || m.colorWrite === false || m.visible === false))) o.visible = false;
+      if (o.isPoints || o.isLine || o.isLineSegments || o.isLine2 || o.isLineSegments2 || o.isSprite || (m && (m.isLineMaterial || m.isSpriteMaterial || (m.colorWrite === false && !o.userData.gpuSurf) || m.visible === false))) o.visible = false;
     });
   };
+  // Mezcla "por encima": en el motor híbrido las superficies están en el lienzo de abajo (WebGPU), así que multiplicar el lienzo de WebGL no oscurece nada.
+  // Se dibuja negro con alfa = 1 - oclusión (C' = C·(1-a)); sobre píxeles opacos da lo mismo que multiplicar, y también oscurece lo que hay debajo.
+  const over = new THREE.ShaderMaterial({
+    uniforms: { tDiffuse: { value: null }, intensity: { value: 1 } },
+    vertexShader: pass.blendMaterial.vertexShader,
+    fragmentShader: 'uniform float intensity; uniform sampler2D tDiffuse; varying vec2 vUv; void main() { float a = 1.0 - mix(1.0, texture2D(tDiffuse, vUv).r, intensity); gl_FragColor = vec4(0.0, 0.0, 0.0, clamp(a, 0.0, 0.92)); }',
+    transparent: true, depthTest: false, depthWrite: false, blending: THREE.CustomBlending,
+    blendSrc: THREE.ZeroFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendEquation: THREE.AddEquation,
+    blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+  });
   let w = 0, h = 0, lastKey = '';
   const HALF = 0.5;   // el cálculo va a media resolución (4 veces menos píxeles); la mezcla final sí es a resolución completa
   return {
@@ -37,14 +47,15 @@ export function createAO(renderer, scene, camera) {
     invalidate() { lastKey = ''; },
     // Dibuja la oclusión sobre lo que ya hay en la vista actual. `key` identifica la vista (cámara + escena): si no cambió,
     // se reutiliza el resultado y solo se hace la mezcla (barata). Con `moving` no se calcula nada (la vista se está moviendo).
-    apply(paneW, paneH, key, moving) {
+    apply(paneW, paneH, key, moving, overMode = false) {
       if (moving) return false;
       const dpr = renderer.getPixelRatio(), W = Math.max(8, Math.round(paneW * dpr * HALF)), H = Math.max(8, Math.round(paneH * dpr * HALF));
       if (W !== w || H !== h) { pass.setSize(W, H); w = W; h = H; lastKey = ''; }
       if (key !== lastKey) { lastKey = key; compute(); }
-      pass.blendMaterial.uniforms.intensity.value = pass.blendIntensity;
-      pass.blendMaterial.uniforms.tDiffuse.value = pass.pdRenderTarget.texture;
-      pass.renderPass(renderer, pass.blendMaterial, null);
+      const bm = overMode ? over : pass.blendMaterial;
+      bm.uniforms.intensity.value = pass.blendIntensity;
+      bm.uniforms.tDiffuse.value = pass.pdRenderTarget.texture;
+      pass.renderPass(renderer, bm, null);
       return true;
     },
   };

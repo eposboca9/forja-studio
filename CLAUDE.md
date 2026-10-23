@@ -610,6 +610,15 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   160 muestras). Falta: cargar .hdr propio, editar las cajas, rotación/intensidad en la interfaz (backend.envIntensity existe), AO y sombra de contacto propias, aristas de 1 px,
   Forge/IA en WebGPU. Resultado en prueba (offscreen): azul candy con base casi negra y reflejos de las cajas, sombra del suelo de WebGL encima del muro. Prueba: forja/thy3.mjs.
 
+- (v0.29) WebGPU F4: (1) los modos FORJA y ARCILLA del módulo MODELADO también se dibujan en el motor nuevo (GPU_DIAG en main.js: forja = grafito azulado
+  0x1d2028 rugosidad .36 con barniz .5; arcilla = gris 0x4d4e53 mate); Cebra, Curvatura, Malla, Showroom, Difuso y Shade-Sky siguen en WebGL. El panel decide por
+  superficie con setSurfaceMaterial (gpuSurf); _gpuPane salta los paneles sin superficies de WebGPU (el lienzo de abajo se borra con _clear). (2) Oclusión ambiental en el
+  híbrido: ao.js tiene mezcla "por encima" (negro con alfa = 1 - AO; también oscurece el muro cerca del objeto = sombra de contacto) y overrideVisibility conserva las
+  superficies de solo profundidad (userData.gpuSurf); activa en FORJA/ARCILLA y en Visu (prefs.aoVisu). (3) Entorno: estudio retocado (cajas más suaves y menos
+  intensas para que ACES no queme los reflejos a blanco plano), giro (misc.w) e intensidad en Preferencias › Motor de render, y carga de .hdr propio (RGBELoader de three,
+  media precisión; equirectangular -> cubo con cómputo GEN_EQ, mismo filtro GGX); backend.setEnv(hdr | null). Pruebas: forja/tf4.mjs (capturas f4-*.png).
+  PENDIENTE del plan: aristas de 1 px, Forge e IA en WebGPU, cajas de luz editables, modos Cebra/Curvatura en WGSL, sombra de contacto propia.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

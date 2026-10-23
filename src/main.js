@@ -555,12 +555,15 @@ const wireMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: fal
 // Modo híbrido (WebGPU abajo + WebGL arriba): en el lienzo de WebGL las superficies solo escriben profundidad
 const depthOnlyMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2 });
 // material de la superficie de un objeto en el panel actual; en modo híbrido la deja marcada para que el lienzo de WebGPU la pinte (color plano)
-function setSurfaceMaterial(o, diag, dm, wire, hy = backend.hybrid && !diag) {
-  const mesh = o.parts.mesh, mt = materials[o.mat];
+// Modos de modelado que ya viven en el motor nuevo (PBR con estudio HDR): FORJA = grafito azulado con barniz tenue; ARCILLA = gris mate
+const GPU_DIAG = { forja: { color: 0x1d2028, pbr: [0, 0.36, 0.5, 0.16] }, clay: { color: 0x4d4e53, pbr: [0, 0.8, 0, 0.3] } };
+const gpuDiag = () => (backend.hybrid ? GPU_DIAG[diagMode] : null);
+function setSurfaceMaterial(o, diag, dm, wire, hy = backend.hybrid && (!diag || !!gpuDiag())) {
+  const mesh = o.parts.mesh, mt = materials[o.mat], gd = diag ? gpuDiag() : null;
   mesh.material = hy ? depthOnlyMat : diag ? dm : mt;
   mesh.userData.gpuSurf = hy && !wire;
-  mesh.userData.gpuColor = mt.color.getHex();
-  mesh.userData.gpuPbr = [mt.metalness ?? 0, mt.roughness ?? 0.6, mt.clearcoat ?? 0, mt.clearcoatRoughness ?? 0.1];
+  mesh.userData.gpuColor = gd ? gd.color : mt.color.getHex();
+  mesh.userData.gpuPbr = gd ? gd.pbr : [mt.metalness ?? 0, mt.roughness ?? 0.6, mt.clearcoat ?? 0, mt.clearcoatRoughness ?? 0.1];
 }
 const wireFeatMat = new THREE.LineBasicMaterial({ color: 0xe8e8e8, transparent: true, opacity: 0.8 });
 
@@ -3819,6 +3822,29 @@ function initPrefs() {
     };
     sel.addEventListener('change', () => { prefs.engine = sel.value; savePrefs(); apply(sel.value); });
     if (prefs.engine === 'webgpu') apply('webgpu');
+    // entorno del motor nuevo: intensidad, giro y archivo .hdr propio (o el estudio procedural)
+    const ei = $('pref-env-int'), er = $('pref-env-rot');
+    ei.value = prefs.envInt ?? 1; er.value = prefs.envRot ?? 0;
+    const syncEnv = () => { backend.envIntensity = +ei.value; backend.envRotation = (+er.value * Math.PI) / 180; $('pref-env-int-o').textContent = (+ei.value).toFixed(2); $('pref-env-rot-o').textContent = er.value + '°'; sceneChangedAt = performance.now(); };
+    ei.addEventListener('input', () => { prefs.envInt = +ei.value; savePrefs(); syncEnv(); });
+    er.addEventListener('input', () => { prefs.envRot = +er.value; savePrefs(); syncEnv(); });
+    syncEnv();
+    $('pref-env-hdr').addEventListener('click', () => $('pref-env-file').click());
+    $('pref-env-studio').addEventListener('click', () => { backend.setEnv(null); $('pref-env-name').textContent = 'Estudio procedural'; });
+    $('pref-env-file').addEventListener('change', async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      try {
+        const { RGBELoader } = await import('three/addons/loaders/RGBELoader.js');
+        const ld = new RGBELoader(); ld.setDataType(THREE.HalfFloatType);
+        const tex = ld.parse(await f.arrayBuffer());
+        backend.setEnv({ w: tex.width, h: tex.height, data: tex.data });
+        $('pref-env-name').textContent = f.name;
+        if (!backend.hybrid) toast('Entorno cargado: se verá al activar el motor híbrido.');
+      } catch (err) { toast('No se pudo leer el .hdr: ' + err.message); }
+      e.target.value = '';
+    });
+    $('pref-ao-visu').checked = prefs.aoVisu !== false;
+    $('pref-ao-visu').addEventListener('change', (e) => { prefs.aoVisu = e.target.checked; savePrefs(); aoLastKey = ''; });
   }
   $('pref-webgpu-test').addEventListener('click', async () => {
     const out = $('pref-webgpu-out');
@@ -5276,12 +5302,12 @@ function renderPane(p) {
   camera.layers.set(0);
   if (diag) camera.layers.enable(DIAG);
   renderer.render(scene, camera);
-  if (diag && !carousel && prefs.ao !== false && !window.__forjaNoAO && AO_MODES.has(diagMode)) {
+  if (!carousel && prefs.ao !== false && !window.__forjaNoAO && (diag ? AO_MODES.has(diagMode) : backend.hybrid && prefs.aoVisu !== false)) {
     // la oclusión se calcula cuando la vista está quieta (y se reutiliza mientras no cambie la cámara ni la escena)
     const e = camera.matrixWorld.elements, pe = camera.projectionMatrix.elements;
     const key = `${p.w}x${p.h}|${e[12].toFixed(4)},${e[13].toFixed(4)},${e[14].toFixed(4)},${e[0].toFixed(4)},${e[1].toFixed(4)},${e[2].toFixed(4)},${e[4].toFixed(4)},${e[5].toFixed(4)},${e[6].toFixed(4)}|${pe[0].toFixed(4)},${pe[5].toFixed(4)}|${sceneChangedAt}|${proj.ortho}`;
     if (key !== aoLastKey) { aoLastKey = key; aoMovedAt = performance.now(); }
-    ao.apply(p.w, p.h, key, performance.now() - aoMovedAt < 140 || !!gizmoDrag || !!navDrag);
+    ao.apply(p.w, p.h, key, performance.now() - aoMovedAt < 140 || !!gizmoDrag || !!navDrag, backend.hybrid && !!(diag ? gpuDiag() : true));
   }
 }
 // aristas vivas de una malla (ángulo > 30°) para el modo Malla; se recalculan si la malla se movió

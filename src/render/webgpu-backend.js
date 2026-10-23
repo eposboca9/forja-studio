@@ -11,7 +11,7 @@ import { buildStudioEnv } from './webgpu-env.js';
 
 const WGSL = `
 struct Draw { mvp: mat4x4f, model: mat4x4f, color: vec4f, pbr: vec4f };
-struct Frame { cam: vec4f, misc: vec4f };      // misc: exposición, intensidad del entorno, nivel máximo de mip
+struct Frame { cam: vec4f, misc: vec4f };      // misc: exposición, intensidad del entorno, nivel máximo de mip, giro del entorno (radianes)
 @group(0) @binding(0) var<uniform> d: Draw;
 @group(1) @binding(0) var<uniform> fr: Frame;
 @group(1) @binding(1) var envT: texture_cube<f32>;
@@ -40,10 +40,13 @@ fn envBRDF(noV: f32, rough: f32) -> vec2f {
   let base = d.color.rgb; let metal = d.pbr.x;
   let rough = clamp(d.pbr.y, 0.045, 1.0); let cc = d.pbr.z; let ccr = clamp(d.pbr.w, 0.045, 1.0);
   let f0 = mix(vec3f(0.04), base, metal);
-  let r = reflect(-v, n);
+  let cs = cos(fr.misc.w); let sn = sin(fr.misc.w);
+  let r0 = reflect(-v, n);
+  let r = vec3f(r0.x * cs - r0.z * sn, r0.y, r0.x * sn + r0.z * cs);        // el entorno gira alrededor del eje vertical
+  let nr = vec3f(n.x * cs - n.z * sn, n.y, n.x * sn + n.z * cs);
   let mm = fr.misc.z;
   let spec = textureSampleLevel(envT, envS, r, rough * mm).rgb;
-  let irr = textureSampleLevel(envT, envS, n, mm).rgb;
+  let irr = textureSampleLevel(envT, envS, nr, mm).rgb;
   let ab = envBRDF(noV, rough);
   var col = (base * (1.0 - metal) * irr + spec * (f0 * ab.x + ab.y)) * fr.misc.y;
   // barniz: capa transparente de F0 = 0.04 con su propia rugosidad; atenúa lo de debajo
@@ -109,10 +112,18 @@ export class HybridBackend extends WebGLBackend {
       fragment: { module, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list', cullMode: 'none' },
       depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' }, multisample: { count: 4 },
     });
-    const env = buildStudioEnv(device);
+    const env = buildStudioEnv(device, this._pendingHdr || null); this._pendingHdr = null;
     const fbuf = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const bind1 = device.createBindGroup({ layout: bgl1, entries: [{ binding: 0, resource: { buffer: fbuf } }, { binding: 1, resource: env.view }, { binding: 2, resource: env.sampler }] });
-    this.gpu = { device, canvas, context, format, pipe, bgl, bind1, fbuf, env, ubuf: null, ucap: 0, bind: null, msaa: null, depth: null, w: 0, h: 0 };
+    this.gpu = { device, canvas, context, format, pipe, bgl, bgl1, bind1, fbuf, env, ubuf: null, ucap: 0, bind: null, msaa: null, depth: null, w: 0, h: 0 };
+  }
+  // cambia el entorno: hdr = { w, h, data: Uint16Array rgba16float } o null para volver al estudio procedural
+  setEnv(hdr) {
+    const g = this.gpu; if (!g) { this._pendingHdr = hdr; return; }
+    const old = g.env, env = buildStudioEnv(g.device, hdr);
+    g.env = env;
+    g.bind1 = g.device.createBindGroup({ layout: g.bgl1, entries: [{ binding: 0, resource: { buffer: g.fbuf } }, { binding: 1, resource: env.view }, { binding: 2, resource: env.sampler }] });
+    old.textures.forEach((t) => t.destroy());
   }
   // ---- tamaño ----
   resize(w, h) {
@@ -132,7 +143,7 @@ export class HybridBackend extends WebGLBackend {
   // ---- dibujo ----
   drawPane(p) {
     super.drawPane(p);                       // el WebGL de siempre: deja la cámara lista y dibuja líneas + profundidad de las superficies
-    if (!this.hybrid || !this.gpu?.msaa || p.kind !== 'render') return;   // solo VISU se dibuja con WebGPU
+    if (!this.hybrid || !this.gpu?.msaa) return;
     try { this._gpuPane(p); } catch (e) { this.error = 'WebGPU: ' + e.message; this.hybrid = false; this._setLayout(false); }
   }
   _tex() { return this.offscreen ? this.gpu.off : this.gpu.context.getCurrentTexture(); }
@@ -157,6 +168,7 @@ export class HybridBackend extends WebGLBackend {
     const g = this.gpu, cam = this.ctx.camera, dpr = g.w / Math.max(1, this._w);
     const list = [];
     this.ctx.scene.traverseVisible((o) => { if (o.isMesh && o.userData.gpuSurf && o.layers.test(cam.layers)) list.push(o); });
+    if (!list.length) return;   // este panel no usa WebGPU (modos clásicos): el lienzo de abajo queda transparente
     // uniformes por superficie: mvp, matriz del modelo, color base (lineal) y material (metal, rugosidad, barniz, rugosidad del barniz)
     if (list.length > g.ucap) {
       g.ubuf?.destroy(); g.ucap = Math.max(64, list.length * 2);
@@ -178,7 +190,7 @@ export class HybridBackend extends WebGLBackend {
     });
     if (draws.length) g.device.queue.writeBuffer(g.ubuf, 0, data.buffer, 0, draws.length * STRIDE);
     const ce = cam.matrixWorld.elements;
-    g.device.queue.writeBuffer(g.fbuf, 0, new Float32Array([ce[12], ce[13], ce[14], 1, this.ctx.renderer.toneMappingExposure || 1, this.envIntensity ?? 1, g.env.maxMip, 0]));
+    g.device.queue.writeBuffer(g.fbuf, 0, new Float32Array([ce[12], ce[13], ce[14], 1, this.ctx.renderer.toneMappingExposure || 1, this.envIntensity ?? 1, g.env.maxMip, this.envRotation ?? 0]));
     const enc = g.device.createCommandEncoder(), first = this._first; this._first = false;
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: g.msaa.createView(), resolveTarget: this._tex().createView(), clearValue: [0, 0, 0, 0], loadOp: first ? 'clear' : 'load', storeOp: 'store' }],

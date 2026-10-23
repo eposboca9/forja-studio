@@ -24,23 +24,25 @@ fn faceDir(face: u32, uv: vec2f) -> vec3f {
 
 const GEN = `${COMMON}
 @group(0) @binding(0) var dst: texture_storage_2d_array<rgba16float, write>;
-// caja de luz: centro c (unitario), ejes ex / ey del plano, medias anchuras w, h, borde suave
+// caja de luz: centro c (unitario), ejes ex / ey del plano, medias anchuras w, h. El borde es muy suave y el centro más brillante que los
+// extremos (como un softbox real): así los reflejos largos tienen degradado y no se queman a blanco plano
 fn box(d: vec3f, c: vec3f, ex: vec3f, ey: vec3f, w: f32, h: f32, col: vec3f) -> vec3f {
   let t = dot(d, c);
   if (t <= 0.05) { return vec3f(0.0); }
   let p = d / t - c;
-  let u = dot(p, ex); let v = dot(p, ey);
-  let m = (1.0 - smoothstep(w * 0.8, w, abs(u))) * (1.0 - smoothstep(h * 0.8, h, abs(v)));
-  return col * m;
+  let u = abs(dot(p, ex)) / w; let v = abs(dot(p, ey)) / h;
+  let m = (1.0 - smoothstep(0.55, 1.0, u)) * (1.0 - smoothstep(0.55, 1.0, v));
+  let core = 0.55 + 0.45 * (1.0 - smoothstep(0.0, 1.0, max(u, v)));
+  return col * m * core;
 }
 fn studio(d: vec3f) -> vec3f {
-  var c = mix(vec3f(0.003, 0.004, 0.007), vec3f(0.03, 0.036, 0.05), smoothstep(-0.3, 1.0, d.y));
-  if (d.y < 0.0) { c = vec3f(0.004, 0.004, 0.005) * (1.0 + 2.0 * d.y); }
-  c += box(d, normalize(vec3f(0.0, 1.0, 0.12)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 0.0, 1.0), 0.95, 0.6, vec3f(13.0, 13.0, 13.5));          // caja de arriba
-  c += box(d, normalize(vec3f(-1.0, 0.25, 0.35)), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), 0.5, 0.95, vec3f(9.0, 9.2, 9.6));        // lateral izquierdo
-  c += box(d, normalize(vec3f(1.0, 0.2, -0.25)), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), 0.45, 0.9, vec3f(6.4, 7.6, 9.6));        // lateral derecho (azulado)
-  c += box(d, normalize(vec3f(0.25, 0.45, -1.0)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), 0.9, 0.22, vec3f(16.0, 15.0, 14.0));     // contraluz
-  c += box(d, normalize(vec3f(-0.1, 0.1, 1.0)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), 0.5, 0.12, vec3f(2.2, 2.2, 2.4));         // relleno de frente
+  var c = mix(vec3f(0.004, 0.005, 0.008), vec3f(0.035, 0.04, 0.055), smoothstep(-0.3, 1.0, d.y));
+  if (d.y < 0.0) { c = vec3f(0.005, 0.005, 0.006) * (1.0 + 2.0 * d.y); }
+  c += box(d, normalize(vec3f(0.0, 1.0, 0.12)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 0.0, 1.0), 1.0, 0.7, vec3f(5.0, 5.0, 5.2));            // caja de arriba
+  c += box(d, normalize(vec3f(-1.0, 0.25, 0.35)), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), 0.55, 1.0, vec3f(4.2, 4.3, 4.5));       // lateral izquierdo
+  c += box(d, normalize(vec3f(1.0, 0.2, -0.25)), vec3f(0.0, 0.0, 1.0), vec3f(0.0, 1.0, 0.0), 0.5, 0.95, vec3f(2.6, 3.2, 4.6));       // lateral derecho (azulado)
+  c += box(d, normalize(vec3f(0.25, 0.45, -1.0)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), 1.0, 0.25, vec3f(7.0, 6.6, 6.2));       // contraluz
+  c += box(d, normalize(vec3f(-0.1, 0.1, 1.0)), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), 0.6, 0.14, vec3f(1.2, 1.2, 1.3));        // relleno de frente
   return c;
 }
 @compute @workgroup_size(8, 8, 1) fn gen(@builtin(global_invocation_id) id: vec3u) {
@@ -48,6 +50,20 @@ fn studio(d: vec3f) -> vec3f {
   if (id.x >= s.x || id.y >= s.y) { return; }
   let uv = (vec2f(id.xy) + 0.5) / vec2f(s) * 2.0 - 1.0;
   textureStore(dst, id.xy, id.z, vec4f(studio(faceDir(id.z, uv)), 1.0));
+}`;
+
+const GEN_EQ = `${COMMON}
+@group(0) @binding(0) var dst: texture_storage_2d_array<rgba16float, write>;
+@group(0) @binding(1) var eq: texture_2d<f32>;
+@group(0) @binding(2) var eqS: sampler;
+@compute @workgroup_size(8, 8, 1) fn gen(@builtin(global_invocation_id) id: vec3u) {
+  let s = textureDimensions(dst).xy;
+  if (id.x >= s.x || id.y >= s.y) { return; }
+  let uv = (vec2f(id.xy) + 0.5) / vec2f(s) * 2.0 - 1.0;
+  let d = faceDir(id.z, uv);
+  let u = atan2(d.z, d.x) / (2.0 * PI) + 0.5;
+  let v = acos(clamp(d.y, -1.0, 1.0)) / PI;
+  textureStore(dst, id.xy, id.z, vec4f(min(textureSampleLevel(eq, eqS, vec2f(u, v), 0.0).rgb, vec3f(60.0)), 1.0));
 }`;
 
 const DOWN = `
@@ -101,7 +117,7 @@ fn ggxD(noh: f32, a: f32) -> f32 { let a2 = a * a; let d = noh * noh * (a2 - 1.0
 }`;
 
 // Devuelve { view (cubo con mips para muestrear), maxMip }
-export function buildStudioEnv(device) {
+export function buildStudioEnv(device, hdr = null) {   // hdr = { w, h, data: Uint16Array (rgba16float) } o null = estudio procedural
   const mk = (usage) => device.createTexture({ size: [ENV_SIZE, ENV_SIZE, 6], format: 'rgba16float', mipLevelCount: ENV_MIPS, usage });
   const base = mk(GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING);
   const pf = mk(GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING);
@@ -115,7 +131,14 @@ export function buildStudioEnv(device) {
   const gen = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: GEN }), entryPoint: 'gen' } });
   const down = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: DOWN }), entryPoint: 'down' } });
   const filt = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: FILTER }), entryPoint: 'filt' } });
-  run(gen, [{ binding: 0, resource: arr(base, 0) }], ENV_SIZE, ENV_SIZE);
+  let eqTex = null;
+  if (hdr) {
+    eqTex = device.createTexture({ size: [hdr.w, hdr.h], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    device.queue.writeTexture({ texture: eqTex }, hdr.data, { bytesPerRow: hdr.w * 8 }, [hdr.w, hdr.h]);
+    const eqS = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'repeat', addressModeV: 'clamp-to-edge' });
+    const genEq = device.createComputePipeline({ layout: 'auto', compute: { module: device.createShaderModule({ code: GEN_EQ }), entryPoint: 'gen' } });
+    run(genEq, [{ binding: 0, resource: arr(base, 0) }, { binding: 1, resource: eqTex.createView() }, { binding: 2, resource: eqS }], ENV_SIZE, ENV_SIZE);
+  } else run(gen, [{ binding: 0, resource: arr(base, 0) }], ENV_SIZE, ENV_SIZE);
   for (let m = 1; m < ENV_MIPS; m++) { const s = ENV_SIZE >> m; run(down, [{ binding: 0, resource: arr(base, m - 1) }, { binding: 1, resource: arr(base, m) }], s, s); }
   const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
   const baseCube = base.createView({ dimension: 'cube' });
@@ -125,5 +148,5 @@ export function buildStudioEnv(device) {
     run(filt, [{ binding: 0, resource: baseCube }, { binding: 1, resource: sampler }, { binding: 2, resource: arr(pf, m) }, { binding: 3, resource: { buffer: ub } }], s, s);
   }
   device.queue.submit([enc.finish()]);
-  return { view: pf.createView({ dimension: 'cube' }), sampler, maxMip: ENV_MIPS - 1, textures: [base, pf] };
+  return { view: pf.createView({ dimension: 'cube' }), sampler, maxMip: ENV_MIPS - 1, textures: [base, pf, eqTex].filter(Boolean) };
 }
