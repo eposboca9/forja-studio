@@ -663,6 +663,10 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   franja del horizonte en showroom y en webgpu-env, fresnel con 1-dot > 1 por redondeo) -> base acotada o producto; smoothstep con bordes invertidos (indefinido) -> 1 - smoothstep(e1,e0,x);
   Cebra sin normal de reserva en polos -> añadida; pase de normales del AO con normalize(0) -> protegido.
 
+- (v0.35.2) Material importado de VRED: `.osb` = OpenSG binario (cabecera 16 bytes + zlib raw, wbits -15; campos 'nombre\0\0\0\0 tipo\0 tamaño(u32 BE) datos' en big-endian). E_Carpaint_AEROLITHEMETALLIC.osb = UMetallicPaintMaterial
+  (base lineal 0.019/0.066/0.070, escamas 0.243/0.546/0.600, rugosidad 0.26, barniz rugosidad 0.08, flakeSize 7.7, densidad 0.94). Entró como `aerolite` en `materials` (Visu, clásico e híbrido) SIN escamas
+  (aproximación: metal 0.7 + barniz). Pendiente: escamas procedurales (flakes) y un lector .osb general.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

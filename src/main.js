@@ -420,6 +420,9 @@ function setPivot(pt) {
 
 // ---------- Materiales ----------
 const materials = {
+  // Aerolite Metallic (de E_Carpaint_AEROLITHEMETALLIC.osb, pintura metálica de VRED): base verde-azulada muy oscura, escamas cian y barniz de rugosidad 0,08.
+  // Valores del archivo (lineales): base (0.019, 0.066, 0.070), escamas (0.243, 0.546, 0.600), rugosidad 0,26, reflectividad de escama 0,75, barniz rugosidad 0,08.
+  aerolite: new THREE.MeshPhysicalMaterial({ color: new THREE.Color().setRGB(0.085, 0.15, 0.17, THREE.LinearSRGBColorSpace), metalness: 0.7, roughness: 0.26, clearcoat: 1, clearcoatRoughness: 0.08, side: THREE.DoubleSide }),
   // azul candy: cuerpo casi negro y reflejos azules (metal de color bajo un barniz muy brillante)
   candy: new THREE.MeshPhysicalMaterial({ color: '#0a1d6e', metalness: 1, roughness: 0.2, clearcoat: 1, clearcoatRoughness: 0.02, side: THREE.DoubleSide }),
   paint: new THREE.MeshPhysicalMaterial({ color: '#b0121c', metalness: 0.55, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.03, side: THREE.DoubleSide }),
@@ -432,7 +435,7 @@ const materials = {
   plastic: new THREE.MeshPhysicalMaterial({ color: '#1c1d20', metalness: 0, roughness: 0.55, side: THREE.DoubleSide }),
   clay: new THREE.MeshPhysicalMaterial({ color: '#b3a08c', metalness: 0, roughness: 0.85, side: THREE.DoubleSide }),
 };
-const MAT_NAMES = { candy: 'Azul candy', paint: 'Pintura roja', black: 'Negro metalizado', pearl: 'Azul perlado', alu: 'Aluminio', chrome: 'Cromo', ceram: 'Cerámica', glass: 'Vidrio', plastic: 'Plástico negro', clay: 'Arcilla' };
+const MAT_NAMES = { candy: 'Azul candy', aerolite: 'Aerolite metálico', paint: 'Pintura roja', black: 'Negro metalizado', pearl: 'Azul perlado', alu: 'Aluminio', chrome: 'Cromo', ceram: 'Cerámica', glass: 'Vidrio', plastic: 'Plástico negro', clay: 'Arcilla' };
 const zebraMat = new THREE.ShaderMaterial({
   side: THREE.DoubleSide,
   uniforms: { uFreq: { value: 14 } },
