@@ -601,6 +601,15 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   lienzo 2D). La presentación real SOLO está sin probar en la laptop del usuario. Pruebas: forja/thy2.mjs (capturas hy-gpuonly.png, hy-hybrid.png).
   Siguientes fases: F3a entorno de estudio procedural + prefiltro GGX, F3b PBR + barniz (ver docs/render-webgpu.md); PENDIENTE después: Stages.
 
+- (v0.28) WebGPU F3: el híbrido ahora SOLO toma el módulo VISU (kind 'render'; Forja/Cebra/Curvatura/IA/Forge siguen enteros en WebGL, así el lienzo de abajo
+  queda vacío y se borra con _clear()). Respuesta del usuario a la F2: en su laptop (Intel Iris) se vio el vaso en gris plano pero SIN líneas -> sospecha de
+  orden de capas: ahora z-index explícito (WebGPU 0, WebGL 1). Superficies de VISU con PBR en WGSL (webgpu-backend.js): normal de dos caras hacia el observador, GGX por
+  entorno prefiltrado (split-sum con BRDF analítica de Karis), difuso = último mip, barniz (clearcoat, F0 0.04, rugosidad propia) y ACES con la exposición del renderer;
+  material tomado de materials[o.mat] (userData.gpuColor / gpuPbr = metal, rugosidad, barniz, rugosidad del barniz; ver setSurfaceMaterial). Entorno: src/render/webgpu-env.js =
+  estudio oscuro procedural con 5 cajas de luz (arriba, laterales izq./der., contraluz, relleno), cubo rgba16float 256 px × 7 mips generado con cómputo (gen, down, filtro GGX con
+  160 muestras). Falta: cargar .hdr propio, editar las cajas, rotación/intensidad en la interfaz (backend.envIntensity existe), AO y sombra de contacto propias, aristas de 1 px,
+  Forge/IA en WebGPU. Resultado en prueba (offscreen): azul candy con base casi negra y reflejos de las cajas, sombra del suelo de WebGL encima del muro. Prueba: forja/thy3.mjs.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

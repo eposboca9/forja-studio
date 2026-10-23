@@ -1,17 +1,59 @@
-// Backend HÍBRIDO de dos lienzos (fase F2 del plan, docs/render-webgpu.md).
-//   · Lienzo de ABAJO (WebGPU): dibuja las superficies con color plano y profundidad (MSAA 4x). Sin iluminación ni shaders de material todavía.
+// Backend HÍBRIDO de dos lienzos (fases F2 + F3 del plan, docs/render-webgpu.md).
+//   · Lienzo de ABAJO (WebGPU): dibuja las superficies del módulo VISU con PBR (GGX + barniz) iluminadas por un estudio HDR procedural (webgpu-env.js),
+//     MSAA 4x, ACES. Los módulos de modelado (Forja, Cebra, Curvatura…) siguen enteros en WebGL: allí el lienzo de abajo queda vacío.
 //   · Lienzo de ARRIBA (WebGL, el de siempre, transparente): dibuja todo lo demás (líneas, CVs, gizmo, cubo, sombra del suelo) y las superficies
 //     solo en profundidad (colorWrite = false), así lo que está detrás de una superficie queda tapado igual que antes.
 // La cámara, la selección, el snap y las herramientas no cambian: el backend solo recibe lo que ya dibujaba main.js.
 // Si WebGPU no existe o falla, el backend se queda en modo clásico (hybrid = false) y se explica el motivo.
 import * as THREE from 'three';
 import { WebGLBackend } from './webgl-backend.js';
+import { buildStudioEnv } from './webgpu-env.js';
 
 const WGSL = `
-struct U { mvp: mat4x4f, color: vec4f };
-@group(0) @binding(0) var<uniform> u: U;
-@vertex fn vs(@location(0) p: vec3f) -> @builtin(position) vec4f { return u.mvp * vec4f(p, 1.0); }
-@fragment fn fs() -> @location(0) vec4f { return vec4f(u.color.rgb, 1.0); }
+struct Draw { mvp: mat4x4f, model: mat4x4f, color: vec4f, pbr: vec4f };
+struct Frame { cam: vec4f, misc: vec4f };      // misc: exposición, intensidad del entorno, nivel máximo de mip
+@group(0) @binding(0) var<uniform> d: Draw;
+@group(1) @binding(0) var<uniform> fr: Frame;
+@group(1) @binding(1) var envT: texture_cube<f32>;
+@group(1) @binding(2) var envS: sampler;
+struct VO { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(1) n: vec3f };
+@vertex fn vs(@location(0) p: vec3f, @location(1) n: vec3f) -> VO {
+  var o: VO;
+  o.pos = d.mvp * vec4f(p, 1.0);
+  o.wp = (d.model * vec4f(p, 1.0)).xyz;
+  o.n = (d.model * vec4f(n, 0.0)).xyz;
+  return o;
+}
+fn aces(x: vec3f) -> vec3f { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0.0), vec3f(1.0)); }
+// aproximación analítica de la tabla BRDF (Karis): escala y sesgo de F0
+fn envBRDF(noV: f32, rough: f32) -> vec2f {
+  let c0 = vec4f(-1.0, -0.0275, -0.572, 0.022); let c1 = vec4f(1.0, 0.0425, 1.04, -0.04);
+  let r = rough * c0 + c1;
+  let a004 = min(r.x * r.x, exp2(-9.28 * noV)) * r.x + r.y;
+  return vec2f(-1.04, 1.04) * a004 + r.zw;
+}
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  var n = normalize(i.n);
+  let v = normalize(fr.cam.xyz - i.wp);
+  if (dot(n, v) < 0.0) { n = -n; }                       // dos caras: siempre la normal que mira al observador
+  let noV = max(dot(n, v), 1e-3);
+  let base = d.color.rgb; let metal = d.pbr.x;
+  let rough = clamp(d.pbr.y, 0.045, 1.0); let cc = d.pbr.z; let ccr = clamp(d.pbr.w, 0.045, 1.0);
+  let f0 = mix(vec3f(0.04), base, metal);
+  let r = reflect(-v, n);
+  let mm = fr.misc.z;
+  let spec = textureSampleLevel(envT, envS, r, rough * mm).rgb;
+  let irr = textureSampleLevel(envT, envS, n, mm).rgb;
+  let ab = envBRDF(noV, rough);
+  var col = (base * (1.0 - metal) * irr + spec * (f0 * ab.x + ab.y)) * fr.misc.y;
+  // barniz: capa transparente de F0 = 0.04 con su propia rugosidad; atenúa lo de debajo
+  let fc = (0.04 + 0.96 * pow(1.0 - noV, 5.0)) * cc;
+  let coat = textureSampleLevel(envT, envS, r, ccr * mm).rgb * fc * fr.misc.y;
+  col = col * (1.0 - fc) + coat;
+  col = aces(col * fr.misc.x);
+  let srgb = select(col * 12.92, 1.055 * pow(col, vec3f(1.0 / 2.4)) - 0.055, col > vec3f(0.0031308));
+  return vec4f(srgb, 1.0);
+}
 `;
 const STRIDE = 256;                       // alineación de los uniformes dinámicos
 const ZFIX = new THREE.Matrix4().set(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0.5, 0.5, 0, 0, 0, 1);   // z de OpenGL [-1, 1] -> z de WebGPU [0, 1]
@@ -36,7 +78,7 @@ export class HybridBackend extends WebGLBackend {
   _setLayout(on) {
     const c = this.renderer.domElement;
     if (this.gpu) { this.gpu.canvas.style.display = on ? 'block' : 'none'; }
-    Object.assign(c.style, on ? { position: 'absolute', left: '0', top: '0' } : { position: '', left: '', top: '' });
+    Object.assign(c.style, on ? { position: 'absolute', left: '0', top: '0', zIndex: '1' } : { position: '', left: '', top: '', zIndex: '' });
   }
   async _init() {
     if (!navigator.gpu) throw new Error('Este navegador (o este marco del Artifact) no ofrece WebGPU.');
@@ -46,21 +88,31 @@ export class HybridBackend extends WebGLBackend {
     const device = await adapter.requestDevice();
     device.lost.then((i) => { this.hybrid = false; this._setLayout(false); this.error = 'Se perdió el dispositivo WebGPU: ' + i.message; });
     const canvas = document.createElement('canvas');
-    canvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;display:block';
+    canvas.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;display:block;z-index:0';
     this.renderer.domElement.parentNode.prepend(canvas);
     const format = this.offscreen ? 'rgba8unorm' : navigator.gpu.getPreferredCanvasFormat();
     const context = this.offscreen ? null : canvas.getContext('webgpu');
     context?.configure({ device, format, alphaMode: 'premultiplied', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
     if (this.offscreen) this.paint = canvas.getContext('2d');
+    device.onuncapturederror = (e) => { this.error = 'WebGPU: ' + e.error.message; console.warn(this.error); };
     const module = device.createShaderModule({ code: WGSL });
     const bgl = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform', hasDynamicOffset: true } }] });
-    const layout = device.createPipelineLayout({ bindGroupLayouts: [bgl] });
-    const mk = (fmt) => device.createRenderPipeline({
-      layout, vertex: { module, entryPoint: 'vs', buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] },
+    const bgl1 = device.createBindGroupLayout({ entries: [
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { viewDimension: 'cube', sampleType: 'float' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } }] });
+    const layout = device.createPipelineLayout({ bindGroupLayouts: [bgl, bgl1] });
+    const pipe = device.createRenderPipeline({
+      layout, vertex: { module, entryPoint: 'vs', buffers: [
+        { arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] },
+        { arrayStride: 12, attributes: [{ shaderLocation: 1, offset: 0, format: 'float32x3' }] }] },
       fragment: { module, entryPoint: 'fs', targets: [{ format }] }, primitive: { topology: 'triangle-list', cullMode: 'none' },
       depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' }, multisample: { count: 4 },
     });
-    this.gpu = { device, canvas, context, format, pipe: mk(format), bgl, ubuf: null, ucap: 0, bind: null, msaa: null, depth: null, w: 0, h: 0 };
+    const env = buildStudioEnv(device);
+    const fbuf = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const bind1 = device.createBindGroup({ layout: bgl1, entries: [{ binding: 0, resource: { buffer: fbuf } }, { binding: 1, resource: env.view }, { binding: 2, resource: env.sampler }] });
+    this.gpu = { device, canvas, context, format, pipe, bgl, bind1, fbuf, env, ubuf: null, ucap: 0, bind: null, msaa: null, depth: null, w: 0, h: 0 };
   }
   // ---- tamaño ----
   resize(w, h) {
@@ -76,11 +128,11 @@ export class HybridBackend extends WebGLBackend {
     g.w = size[0]; g.h = size[1];
     if (this.offscreen) { g.off?.destroy(); g.off = g.device.createTexture({ size, format: g.format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC }); }
   }
-  beginFrame() { this._first = true; this._frame++; }
+  beginFrame() { this._first = true; this._frame++; this._drew = false; }
   // ---- dibujo ----
   drawPane(p) {
     super.drawPane(p);                       // el WebGL de siempre: deja la cámara lista y dibuja líneas + profundidad de las superficies
-    if (!this.hybrid || !this.gpu?.msaa) return;
+    if (!this.hybrid || !this.gpu?.msaa || p.kind !== 'render') return;   // solo VISU se dibuja con WebGPU
     try { this._gpuPane(p); } catch (e) { this.error = 'WebGPU: ' + e.message; this.hybrid = false; this._setLayout(false); }
   }
   _tex() { return this.offscreen ? this.gpu.off : this.gpu.context.getCurrentTexture(); }
@@ -93,7 +145,11 @@ export class HybridBackend extends WebGLBackend {
     if (pos.isInterleavedBufferAttribute || !(arr instanceof Float32Array)) { arr = new Float32Array(pos.count * 3); for (let i = 0; i < pos.count; i++) { arr[3 * i] = pos.getX(i); arr[3 * i + 1] = pos.getY(i); arr[3 * i + 2] = pos.getZ(i); } }
     const vb = g.device.createBuffer({ size: Math.ceil(arr.byteLength / 4) * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST }); g.device.queue.writeBuffer(vb, 0, arr);
     const ia = idx ? idx.array : Uint32Array.from({ length: pos.count }, (_, i) => i), u32 = ia instanceof Uint32Array, ib = g.device.createBuffer({ size: Math.ceil(ia.byteLength / 4) * 4, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST }); g.device.queue.writeBuffer(ib, 0, ia);
-    c = { vb, ib, count: ia.length, fmt: u32 ? 'uint32' : 'uint16', used: this._frame };
+    const nat = geo.attributes.normal;
+    let narr = new Float32Array(pos.count * 3);
+    if (nat) for (let i = 0; i < pos.count; i++) { narr[3 * i] = nat.getX(i); narr[3 * i + 1] = nat.getY(i); narr[3 * i + 2] = nat.getZ(i); }
+    const nb = g.device.createBuffer({ size: Math.ceil(narr.byteLength / 4) * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST }); g.device.queue.writeBuffer(nb, 0, narr);
+    c = { vb, nb, ib, count: ia.length, fmt: u32 ? 'uint32' : 'uint16', used: this._frame };
     this._cache.set(geo, c);
     return c;
   }
@@ -101,26 +157,28 @@ export class HybridBackend extends WebGLBackend {
     const g = this.gpu, cam = this.ctx.camera, dpr = g.w / Math.max(1, this._w);
     const list = [];
     this.ctx.scene.traverseVisible((o) => { if (o.isMesh && o.userData.gpuSurf && o.layers.test(cam.layers)) list.push(o); });
-    // uniformes: mvp + color de cada superficie
+    // uniformes por superficie: mvp, matriz del modelo, color base (lineal) y material (metal, rugosidad, barniz, rugosidad del barniz)
     if (list.length > g.ucap) {
       g.ubuf?.destroy(); g.ucap = Math.max(64, list.length * 2);
       g.ubuf = g.device.createBuffer({ size: g.ucap * STRIDE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-      g.bind = g.device.createBindGroup({ layout: g.bgl, entries: [{ binding: 0, resource: { buffer: g.ubuf, size: 80 } }] });
+      g.bind = g.device.createBindGroup({ layout: g.bgl, entries: [{ binding: 0, resource: { buffer: g.ubuf, size: 160 } }] });
     }
     const VP = new THREE.Matrix4().multiplyMatrices(ZFIX, cam.projectionMatrix).multiply(cam.matrixWorldInverse), m = new THREE.Matrix4(), col = new THREE.Color();
     const data = new Float32Array(Math.max(1, list.length) * (STRIDE / 4));
     const draws = [];
     list.forEach((o) => {
       const b = this._buffers(o.geometry); if (!b) return;
-      const k = draws.length;
-      m.multiplyMatrices(VP, o.matrixWorld); data.set(m.elements, k * (STRIDE / 4));
-      col.setHex(o.userData.gpuColor ?? 0x888888);   // getHex da sRGB; el lienzo no convierte, así que se escribe tal cual
-      data.set([col.r, col.g, col.b, 1], k * (STRIDE / 4) + 16);
+      const k = draws.length, q = k * (STRIDE / 4);
+      m.multiplyMatrices(VP, o.matrixWorld); data.set(m.elements, q);
+      data.set(o.matrixWorld.elements, q + 16);
+      col.setHex(o.userData.gpuColor ?? 0x888888);   // Color pasa de sRGB a lineal al guardarse
+      data.set([col.r, col.g, col.b, 1], q + 32);
+      data.set(o.userData.gpuPbr ?? [0, 0.6, 0, 0.1], q + 36);
       draws.push({ b, k });
     });
-    // sRGB: Color guarda lineal -> se codifica
-    for (let i = 0; i < draws.length; i++) { const q = i * (STRIDE / 4) + 16; for (let c = 0; c < 3; c++) { const v = data[q + c]; data[q + c] = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; } }
     if (draws.length) g.device.queue.writeBuffer(g.ubuf, 0, data.buffer, 0, draws.length * STRIDE);
+    const ce = cam.matrixWorld.elements;
+    g.device.queue.writeBuffer(g.fbuf, 0, new Float32Array([ce[12], ce[13], ce[14], 1, this.ctx.renderer.toneMappingExposure || 1, this.envIntensity ?? 1, g.env.maxMip, 0]));
     const enc = g.device.createCommandEncoder(), first = this._first; this._first = false;
     const pass = enc.beginRenderPass({
       colorAttachments: [{ view: g.msaa.createView(), resolveTarget: this._tex().createView(), clearValue: [0, 0, 0, 0], loadOp: first ? 'clear' : 'load', storeOp: 'store' }],
@@ -128,16 +186,25 @@ export class HybridBackend extends WebGLBackend {
     });
     const vx = Math.round(p.x * dpr), vw = Math.max(1, Math.min(g.w - vx, Math.round(p.w * dpr))), vh = Math.min(g.h, Math.round(p.h * dpr));
     pass.setViewport(vx, g.h - vh, vw, vh, 0, 1); pass.setScissorRect(vx, g.h - vh, vw, vh);
-    pass.setPipeline(g.pipe);
-    for (const d of draws) { pass.setBindGroup(0, g.bind, [d.k * STRIDE]); pass.setVertexBuffer(0, d.b.vb); pass.setIndexBuffer(d.b.ib, d.b.fmt); pass.drawIndexed(d.b.count); }
+    pass.setPipeline(g.pipe); pass.setBindGroup(1, g.bind1);
+    for (const d of draws) { pass.setBindGroup(0, g.bind, [d.k * STRIDE]); pass.setVertexBuffer(0, d.b.vb); pass.setVertexBuffer(1, d.b.nb); pass.setIndexBuffer(d.b.ib, d.b.fmt); pass.drawIndexed(d.b.count); }
     pass.end();
+    g.device.queue.submit([enc.finish()]);
+    this._drew = true;
+  }
+  // si ningún panel usó WebGPU en este cuadro, se borra lo que quedó del anterior (el lienzo de abajo no puede enseñar imágenes viejas)
+  _clear() {
+    const g = this.gpu, enc = g.device.createCommandEncoder();
+    enc.beginRenderPass({ colorAttachments: [{ view: g.msaa.createView(), resolveTarget: this._tex().createView(), clearValue: [0, 0, 0, 0], loadOp: 'clear', storeOp: 'discard' }] }).end();
     g.device.queue.submit([enc.finish()]);
   }
   // se llama al terminar el cuadro: libera lo que no se usa y, si adaptInk lo pidió, lee los píxeles del lienzo de abajo
   endFrame() {
     if (!this.hybrid || !this.gpu) return;
+    if (!this._drew && this._hadDraw && this.gpu.msaa) { try { this._clear(); } catch (e) { /* sin lienzo todavía */ } }
+    this._hadDraw = this._drew;
     if (this.offscreen && !this._reading && !this._read) this._wantRead = true;
-    for (const [geo, c] of this._cache) if (this._frame - c.used > 90) { c.vb.destroy(); c.ib.destroy(); this._cache.delete(geo); }
+    for (const [geo, c] of this._cache) if (this._frame - c.used > 90) { c.vb.destroy(); c.nb.destroy(); c.ib.destroy(); this._cache.delete(geo); }
     if (this._wantRead && !this._reading) this._startRead();
   }
   _startRead() {
@@ -172,5 +239,5 @@ export class HybridBackend extends WebGLBackend {
     }
     return out;
   }
-  dispose() { this._cache.forEach((c) => { c.vb.destroy(); c.ib.destroy(); }); this._cache.clear(); this.gpu?.canvas.remove(); super.dispose(); }
+  dispose() { this._cache.forEach((c) => { c.vb.destroy(); c.nb.destroy(); c.ib.destroy(); }); this._cache.clear(); this.gpu?.canvas.remove(); super.dispose(); }
 }

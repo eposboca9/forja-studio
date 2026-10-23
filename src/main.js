@@ -554,13 +554,13 @@ for (const m of [envDiagMat, zebraMat, curvMat, ...Object.values(materials)]) { 
 const wireMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide });
 // Modo híbrido (WebGPU abajo + WebGL arriba): en el lienzo de WebGL las superficies solo escriben profundidad
 const depthOnlyMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1.5, polygonOffsetUnits: 2 });
-const GPU_NEUTRAL = 0x8a93a3;
 // material de la superficie de un objeto en el panel actual; en modo híbrido la deja marcada para que el lienzo de WebGPU la pinte (color plano)
-function setSurfaceMaterial(o, diag, dm, wire) {
-  const m = o.parts.mesh, hy = backend.hybrid;
-  m.material = hy ? depthOnlyMat : diag ? dm : materials[o.mat];
-  m.userData.gpuSurf = hy && !wire;
-  m.userData.gpuColor = diag ? GPU_NEUTRAL : materials[o.mat].color.getHex();
+function setSurfaceMaterial(o, diag, dm, wire, hy = backend.hybrid && !diag) {
+  const mesh = o.parts.mesh, mt = materials[o.mat];
+  mesh.material = hy ? depthOnlyMat : diag ? dm : mt;
+  mesh.userData.gpuSurf = hy && !wire;
+  mesh.userData.gpuColor = mt.color.getHex();
+  mesh.userData.gpuPbr = [mt.metalness ?? 0, mt.roughness ?? 0.6, mt.clearcoat ?? 0, mt.clearcoatRoughness ?? 0.1];
 }
 const wireFeatMat = new THREE.LineBasicMaterial({ color: 0xe8e8e8, transparent: true, opacity: 0.8 });
 
@@ -655,7 +655,7 @@ function syncGhosts() {
         x.g.visible = x.s.visible && o.visible;
         if (x.g.geometry !== x.s.geometry) x.g.geometry = x.s.geometry;
         if (x.g.material !== x.s.material) x.g.material = x.s.material;
-        if (x.s.userData.gpuSurf !== undefined) { x.g.userData.gpuSurf = x.s.userData.gpuSurf; x.g.userData.gpuColor = x.s.userData.gpuColor; }
+        if (x.s.userData.gpuSurf !== undefined) { Object.assign(x.g.userData, { gpuSurf: x.s.userData.gpuSurf, gpuColor: x.s.userData.gpuColor, gpuPbr: x.s.userData.gpuPbr }); }
       }
     }
   }
@@ -5276,7 +5276,7 @@ function renderPane(p) {
   camera.layers.set(0);
   if (diag) camera.layers.enable(DIAG);
   renderer.render(scene, camera);
-  if (diag && !carousel && prefs.ao !== false && !window.__forjaNoAO && !backend.hybrid && AO_MODES.has(diagMode)) {
+  if (diag && !carousel && prefs.ao !== false && !window.__forjaNoAO && AO_MODES.has(diagMode)) {
     // la oclusión se calcula cuando la vista está quieta (y se reutiliza mientras no cambie la cámara ni la escena)
     const e = camera.matrixWorld.elements, pe = camera.projectionMatrix.elements;
     const key = `${p.w}x${p.h}|${e[12].toFixed(4)},${e[13].toFixed(4)},${e[14].toFixed(4)},${e[0].toFixed(4)},${e[1].toFixed(4)},${e[2].toFixed(4)},${e[4].toFixed(4)},${e[5].toFixed(4)},${e[6].toFixed(4)}|${pe[0].toFixed(4)},${pe[5].toFixed(4)}|${sceneChangedAt}|${proj.ortho}`;
@@ -5669,7 +5669,7 @@ function renderForgePane(p) {
   if (forge) { placeForge(); forge.ground.visible = false; forge.grid.visible = false; }
   const hid = [];
   objects.forEach((o) => {
-    if (o.kind !== 'curve') setSurfaceMaterial(o, false, null, false);
+    if (o.kind !== 'curve') setSurfaceMaterial(o, false, null, false, false);
     if (forgeHidesSource() && (forgeSource.ids.includes(o.id) || o.id === forgeSource.resultId)) for (const part of Object.values(o.parts)) if (part.visible) { part.visible = false; hid.push(part); }
   });
   syncGhosts();
