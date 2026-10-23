@@ -595,6 +595,13 @@ function makeHandle(corner, sel) {
   h.renderOrder = 10;
   return h;
 }
+// unidades de mundo que miden `px` píxeles de pantalla en el punto p (perspectiva y ortogonal)
+function pxWorld(p, px) {
+  const e = camera.projectionMatrix.elements, mi = camera.matrixWorldInverse.elements;
+  const H = Math.max(200, renderer.domElement.clientHeight || 800);
+  const vz = mi[2] * p.x + mi[6] * p.y + mi[10] * p.z + mi[14], vx = mi[0] * p.x + mi[4] * p.y + mi[8] * p.z + mi[12], vy = mi[1] * p.x + mi[5] * p.y + mi[9] * p.z + mi[13];
+  return Math.max(1e-6, Math.abs(e[3] * vx + e[7] * vy + e[11] * vz + e[15])) * (2 / (e[5] * H)) * px;
+}
 function scaleHandles() {
   const groups = objects.filter((o) => o.parts.handles.visible).map((o) => o.parts.handles);
   if (draftHandles.visible) groups.push(draftHandles);
@@ -1041,7 +1048,7 @@ function selectionChanged() {
 
 // Gizmo: se coloca en el centro de lo seleccionado y mueve todos los CVs afectados a la vez
 const gizmo = new TransformControls(camera, renderer.domElement);
-gizmo.setSize(0.8);
+gizmo.setSize(0.5);
 gizmo._getPointer = (e) => { const n = paneNDC(e, dragPane || paneAt(e.clientX)); return { x: n.x, y: n.y, button: e.button }; };
 scene.add(gizmo);
 const proxy = new THREE.Object3D();
@@ -1326,7 +1333,7 @@ function syncPivotMarkers() {
   while (objPivotMarkers.children.length < list.length) objPivotMarkers.add(makeCross('#2d6aa8', 0.35, false));
   objPivotMarkers.children.forEach((m, i) => {
     m.visible = i < list.length;
-    if (m.visible) { m.position.copy(list[i].pivot); m.scale.setScalar(camera.position.distanceTo(list[i].pivot) * 0.05); }
+    if (m.visible) { m.position.copy(list[i].pivot); m.scale.setScalar(pxWorld(list[i].pivot, 20)); }
   });
 }
 
@@ -5619,7 +5626,7 @@ function renderFrame(now) {
   updateDrawGrids();
   updateXfPrompt();
   pivotMarker.position.copy(pivot);
-  pivotMarker.scale.setScalar(camera.position.distanceTo(pivot) * 0.06);
+  pivotMarker.scale.setScalar(pxWorld(pivot, 24));
   pivotMarker.visible = navHeld || !!navDrag || now < pivotShowUntil;
   snapRing.quaternion.copy(camera.quaternion);
   snapRing.scale.setScalar(camera.position.distanceTo(snapRing.position) * 0.06);

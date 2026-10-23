@@ -572,6 +572,8 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 
 - (v0.25.2) Cruces de CVs: tamaño CONSTANTE en píxeles (scaleHandles usa la matriz de proyección: sirve en perspectiva y ortogonal, con cualquier zoom; HANDLE_PX = 5,5 px por unidad, cruz ≈ 6,6 px, esfera de elegir 2,2 unidades ≈ 12 px). Prueba: forja/tcvsize.mjs.
 
+- (v0.25.3) Pivotes y manipulador más discretos y de tamaño fijo en píxeles: pxWorld(p, px) (main.js) = unidades de mundo por píxel; marcador de pivote de objeto 20 px, marcador de navegación 24 px, gizmo.setSize(0.5). Cada superficie tiene su pivote; un grupo elegido como un solo objeto tiene el suyo.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
