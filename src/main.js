@@ -365,11 +365,8 @@ addEventListener('pointerup', (e) => {
   if (!m) return;
   mxDrag = null;
   if (m.moved) { gizmo.dispatchEvent({ type: 'mouseUp', mode: xform }); hideSnap(); return; }
-  // clic sin arrastrar: elegir, como siempre
-  const hit = pickAt(e);
-  const how = howFor(e);
-  if (hit?.cvTarget) setCvTarget(hit.cvTarget, how);
-  else if (hit) applySelection([hit.cv || hit.obj], how); else if (how === 'replace' && e.button === 0) clearSelection();
+  // clic sin arrastrar: elegir, como siempre (con menú si hay líneas juntas)
+  clickPick(e, howFor(e));
 });
 renderer.domElement.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -933,7 +930,8 @@ function rebuildHandles(obj) {
 function applyVisibility(obj) {
   sceneChangedAt = performance.now();
   const p = obj.parts, vis = obj.visible, sel = selObjs.includes(obj), cvMode = pickMode === 'cv';
-  p.handles.visible = p.hull.visible = vis && cvMode && !modelClean && cvTargets.has(obj.id);
+  // los CVs se ven en el modo CV (los de los objetos encendidos) y, en cualquier modo, en los objetos elegidos: al crear, mover o alinear
+  p.handles.visible = p.hull.visible = vis && !modelClean && ((cvMode && cvTargets.has(obj.id)) || (sel && obj.kind !== 'mesh'));
   if (obj.kind === 'mesh') {
     p.mesh.visible = vis;
   } else if (obj.kind === 'surface') {
@@ -976,6 +974,8 @@ function setPickMode(m, filter = null) {
   selectionChanged(); updateHint();
 }
 
+// tocar un CV de un objeto elegido pasa a modo CV sin soltar la herramienta activa (Mover / Rotar / Escalar)
+function enterCvMode() { const mx = mouseXform; setPickMode('cv'); mouseXform = mx; updateHint(); }
 // how: 'replace' | 'toggle' | 'remove'
 function applySelection(items, how) {
   items = expandGroups(items);
@@ -1314,6 +1314,29 @@ function setRay(e) {
   ray.setFromCamera(mouse, camera);
 }
 
+// Clic de selección. Si hay 2 o más objetos con líneas a menos de 8 px del cursor (p. ej. el borde común de dos superficies, o una
+// curva sobre una superficie), sale un menú junto al puntero para elegir cuál; si no, se elige lo de siempre.
+let clickBusy = false;
+async function clickPick(e, how) {
+  if (clickBusy) return;
+  if (pickMode === 'object' && !gizmo.dragging) {
+    const near = lineCandidates(e, 'both', 8, pickable), objsC = [];
+    for (const c of near) if (!objsC.some((x) => x.obj === c.obj)) objsC.push(c);
+    if (objsC.length >= 2) {
+      clickBusy = true;
+      try { const c = await chooseCandidate(e, objsC, 'Elegir'); if (c) { applySelection([c.obj], how); if ($('click-pivot').checked) setPivot(c.q); } }
+      finally { clickBusy = false; }
+      return;
+    }
+  }
+  const hit = pickAt(e);
+  if (hit?.cvTarget) { setCvTarget(hit.cvTarget, how); return; }
+  if (hit) {
+    if (hit.enterCV && pickMode !== 'cv') enterCvMode();
+    applySelection([hit.cv || hit.obj], how);
+    if ($('click-pivot').checked) setPivot(hit.point || (() => { const c = cvRef(hit.cv); return new THREE.Vector3(c.x, c.y, c.z); })());
+  } else if (how === 'replace' && e.button === 0) clearSelection();
+}
 function pickAt(e) {
   setRay(e);
   const live = objects.filter((o) => o.visible);
@@ -1328,6 +1351,11 @@ function pickAt(e) {
     const oh = ray.intersectObjects(live.filter((o) => o.kind !== 'mesh').map((o) => pickTarget(o)), false)[0];
     return oh ? { cvTarget: oh.object.userData.obj } : null;
   }
+  // los CVs de los objetos elegidos se pueden tocar directamente (con Mover activo se arrastran sin cambiar de modo)
+  const cvHits = ray.intersectObjects(live.filter((o) => selObjs.includes(o) && o.kind !== 'mesh').flatMap((o) => o.parts.handles.children), false);
+  let bestCv = null, bdCv = Infinity;
+  for (const h of cvHits) { const d = ray.ray.distanceSqToPoint(h.object.position) / h.object.scale.x ** 2; if (d < bdCv) { bdCv = d; bestCv = h; } }
+  if (bestCv) return { cv: bestCv.object.userData, enterCV: true };
   ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
   const hit = ray.intersectObjects(live.filter(pickable).map((o) => pickTarget(o)), false)[0];
   return hit ? { obj: hit.object.userData.obj, point: hit.point } : null;
@@ -1506,6 +1534,7 @@ function finishDraft() {
   if (ax && draft.pts.some((q) => Math.abs(q[ax] - draft.pts[0][ax]) > 1e-6)) pk = 'free';
   const obj = addCurve(draftCurveData(draft.pts, pk));
   startDraft();
+  applySelection([obj], 'replace');   // la curva recién creada queda activa, con sus CVs a la vista
   toast(`${obj.name} creada`);
 }
 function cancelDraft() { draft = null; showDraft(); }
@@ -1584,6 +1613,7 @@ addEventListener('pointerup', (e) => {
     if (p) { draft.pts.push(p); draft.hover = null; showDraft(); }
     return;
   }
+  if (fil) return;   // el redondeo (Redondear) se queda con sus propios clics
   if (tool === 'edge') { edgeClick(e); return; }
   if (tool === 'circle') {
     if (e.button !== 0) return;
@@ -1603,12 +1633,7 @@ addEventListener('pointerup', (e) => {
     return;
   }
   if (gizmo.axis && e.button === 0) return; // el gizmo solo usa el botón izquierdo
-  const hit = pickAt(e);
-  if (hit?.cvTarget) { setCvTarget(hit.cvTarget, how); return; }
-  if (hit) {
-    applySelection([hit.cv || hit.obj], how);
-    if ($('click-pivot').checked) setPivot(hit.point || (() => { const c = cvRef(hit.cv); return new THREE.Vector3(c.x, c.y, c.z); })());
-  } else if (how === 'replace' && e.button === 0) clearSelection();
+  clickPick(e, how);
 });
 
 // Selección por recuadro: entra todo lo que el recuadro toque (como "crossing" en Alias)
@@ -3808,6 +3833,59 @@ function quickPick(x, y, title, opts, def) {
 }
 const G_OPTS = (from, to) => [[0, 'G0 posición'], [1, 'G1 tangente'], [2, 'G2 curvatura'], [3, 'G3']].filter(([v]) => v >= from && v <= to);
 
+// --- Líneas juntas: si bajo el cursor hay dos o más (curvas, bordes de superficies), sale un menú al lado del puntero ---
+const EDGE_NAMES = { u0: 'borde U inicial', u1: 'borde U final', v0: 'borde V inicial', v1: 'borde V final' };
+const edgeCache = new WeakMap();   // data de la superficie → puntos de sus 4 bordes
+function surfaceEdgePts(o) {
+  let c = edgeCache.get(o.data);
+  if (!c) { c = {}; for (const ed of ['u0', 'u1', 'v0', 'v1']) c[ed] = HX.edgePoints(o.data, ed, 24); edgeCache.set(o.data, c); }
+  return c;
+}
+// Candidatos bajo el cursor a menos de `tol` píxeles: [{ obj, edge?, d }] de más cerca a más lejos. kinds: 'edge' | 'curve' | 'both'.
+// Se ignoran las líneas tapadas por otra superficie.
+function lineCandidates(e, kinds = 'both', tol = 8, filter = () => true) {
+  const pn = paneAt(e.clientX);
+  useAspect(pn);
+  const r = renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3();
+  const scr = (q) => { v.copy(q).project(camera); return [r.left + pn.x + ((v.x + 1) / 2) * pn.w, r.top + ((1 - v.y) / 2) * pn.h, v.z]; };
+  const best = (pts) => {
+    let bd = Infinity, bq = null;
+    const S = pts.map(scr);
+    for (let k = 0; k < S.length - 1; k++) {
+      const [ax, ay, az] = S[k], [bx, by, bz] = S[k + 1];
+      if (az > 1 || bz > 1) continue;
+      const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1;
+      const t = Math.max(0, Math.min(1, ((e.clientX - ax) * dx + (e.clientY - ay) * dy) / L)), d = Math.hypot(e.clientX - ax - t * dx, e.clientY - ay - t * dy);
+      if (d < bd) { bd = d; bq = pts[k].clone().lerp(pts[k + 1], t); }
+    }
+    return { d: bd, q: bq };
+  };
+  const out = [];
+  for (const o of objects) {
+    if (!o.visible || !filter(o)) continue;
+    if (o.kind === 'curve' && kinds !== 'edge') { const b = best(o.samples || []); if (b.d <= tol) out.push({ obj: o, d: b.d, q: b.q }); }
+    else if (o.kind === 'surface' && kinds !== 'curve') {
+      const E = surfaceEdgePts(o);
+      for (const ed of ['u0', 'u1', 'v0', 'v1']) { const b = best(E[ed]); if (b.d <= tol) out.push({ obj: o, edge: ed, d: b.d, q: b.q }); }
+    }
+  }
+  // fuera las que tapa otra superficie (el rayo de la cámara al punto topa antes con una malla ajena)
+  const meshes = objects.filter((o) => o.visible && o.kind !== 'curve').map((o) => o.parts.mesh);
+  const vis = out.filter((c) => {
+    const dir = c.q.clone().sub(camera.position), dist = dir.length();
+    ray.set(camera.position, dir.normalize());
+    const h = ray.intersectObjects(meshes, false)[0];
+    return !h || h.distance > dist - Math.max(0.03, dist * 0.03);
+  });
+  return vis.sort((a, b) => a.d - b.d);
+}
+// una persona entiende "Cuerpo" o "Curva 3": el borde solo se nombra cuando hay que distinguir bordes de una misma superficie
+function candLabel(c, withEdge) { return (c.obj.kind === 'curve' ? '∿ ' : '◩ ') + c.obj.name + (withEdge && c.edge ? ` · ${EDGE_NAMES[c.edge]}` : ''); }
+async function chooseCandidate(e, cands, title = 'Elegir', withEdge = false) {
+  const i = await quickPick(e.clientX, e.clientY, title, cands.map((c, k) => [k, candLabel(c, withEdge)]), 0);
+  return i == null ? null : cands[i];
+}
+
 // --- Elegir bordes (Align y Blend) ---
 let edgeOp = null;
 const edgeMarks = new THREE.Group();
@@ -3861,6 +3939,7 @@ const EDGE_OPS = {
     fields: () => [
       { type: 'seg', label: 'Continuidad', opts: [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => toolDef.alignCont, set: (v) => { toolDef.alignCont = v; saveToolDef(); } },
       { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => toolDef.alignTension, set: (v) => { toolDef.alignTension = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) },
+      { type: 'range', label: 'Forma (G2 y G3)', min: -2, max: 2, step: 0.05, get: () => toolDef.alignShape ?? 0, set: (v) => { toolDef.alignShape = v; saveToolDef(); }, fmt: (v) => v.toFixed(2) },
       ...CONTROL_OPTS(),
       { type: 'html', html: () => '<span class="tw-note">Al elegir la maestra sale G0–G3 junto al cursor (o pulsa 1–4).</span>' }],
     async afterPick(i, p, e) {
@@ -3951,6 +4030,8 @@ function restartEdgeOp() { if (!edgeOp) return; edgeOp.picks = []; edgeOp.sides 
 function continueEdgeOp(r) {
   if (!edgeOp) return;
   edgeOp.picks = []; edgeOp.sides = null; edgeOp.cur = 0; [0, 1, 2].forEach((k) => markEdge(k, null)); updateHint();
+  const out = byId(outputOf(r));
+  if (out) applySelection([out], 'replace');   // lo que se acaba de alinear o unir queda activo, con sus CVs a la vista
   const sp = relSpec(r);
   sp.actions = [{ label: 'Quitar historial', run: () => removeRelation(r.id) }, { label: 'Terminar', primary: true, run: () => { setTool('select'); TW.hide(); } }];
   sp.hint = () => (r.type === 'skin' ? 'Cambia sus opciones aquí · clic en otra curva = nuevo Skin' : r.type === 'extend' ? 'Arrastra la flecha verde (distancia) · clic en otro borde = otra extensión'
@@ -3959,9 +4040,23 @@ function continueEdgeOp(r) {
 }
 function endEdgeOp() { edgeOp = null; [0, 1, 2].forEach((k) => markEdge(k, null)); if (TW.spec && !TW.spec.rel) TW.hide(); }
 let edgeBusy = false;
+// lado elegido con el ratón: la línea más cercana (≤ 9 px); si hay dos o más juntas, menú junto al puntero
+async function sideChoice(e, kinds) {
+  const near = lineCandidates(e, kinds === 'curve' ? 'curve' : kinds === 'both' ? 'both' : 'edge', 9);
+  if (near.length >= 2 && near[1].d - near[0].d < 7) {
+    const c = await chooseCandidate(e, near.slice(0, 6), 'Elegir línea', true);
+    return c === null ? 'cancel' : { obj: c.obj, edge: c.edge };
+  }
+  if (near.length) return { obj: near[0].obj, edge: near[0].edge };
+  return sideAt(e, kinds);
+}
 async function edgeClick(e) {
   if (!edgeOp || e.button !== 0 || edgeBusy) return;
-  const op = EDGE_OPS[edgeOp.type], p = sideAt(e, op.pick);
+  const op = EDGE_OPS[edgeOp.type];
+  edgeBusy = true;
+  let p;
+  try { p = await sideChoice(e, op.pick); } finally { edgeBusy = false; }
+  if (p === 'cancel') return;
   if (!p) return toast(op.pick === 'curve' ? 'Haz clic sobre una curva.' : op.pick === 'both' ? 'Haz clic cerca de un borde de superficie o sobre una curva.' : 'Haz clic sobre una superficie, cerca del borde que quieres.');
   if (op.click) { if (TW.spec?.rel) TW.show(edgeSpec()); op.click(p, e); return; }
   const p0 = edgeOp.picks[0];
@@ -3976,13 +4071,14 @@ async function edgeClick(e) {
 }
 renderer.domElement.addEventListener('pointermove', (e) => {
   if (tool !== 'edge' || e.buttons || edgeBusy) return;
-  const p = edgeOp && sideAt(e, EDGE_OPS[edgeOp.type].pick);
+  const near = edgeOp && lineCandidates(e, EDGE_OPS[edgeOp.type].pick === 'curve' ? 'curve' : EDGE_OPS[edgeOp.type].pick === 'both' ? 'both' : 'edge', 9);
+  const p = edgeOp && (near.length ? { obj: near[0].obj, edge: near[0].edge } : sideAt(e, EDGE_OPS[edgeOp.type].pick));
   if (p) markEdge(2, p.obj, p.edge); else markEdge(2, null);
 });
 
 function createAlign(s, m, cont = toolDef.alignCont) {
   checkpoint();
-  const r = { type: 'align', slave: s.obj.id, sEdge: s.edge, master: m.obj.id, mEdge: m.edge, cont, tension: toolDef.alignTension };
+  const r = { type: 'align', slave: s.obj.id, sEdge: s.edge, master: m.obj.id, mEdge: m.edge, cont, tension: toolDef.alignTension, shape: toolDef.alignShape ?? 0 };
   try {
     r.rev = HX.reversed(m.obj.data, m.edge, s.obj.data, s.edge);
     s.obj.data = HX.prepareSlave(s.obj.data, s.edge, m.obj.data, m.edge, r.cont, r.rev);
@@ -4153,7 +4249,10 @@ function relSpec(r, group = [r]) {
   if (r.type === 'align') {
     title += ` · ${nm(r.slave)} → ${nm(r.master)}`;
     fields.push({ type: 'seg', label: 'Continuidad', opts: G(0, 3), get: () => r.cont, set: (v) => set('cont', v) },
-      { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) });
+      { type: 'range', label: 'Tensión', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) },
+      // la forma (mu) cambia cómo llega la superficie al borde sin cambiar la curvatura en él: solo aplica desde G2
+      { type: 'range', label: 'Forma', min: -2, max: 2, step: 0.05, get: () => r.shape ?? 0, start: checkpoint, set: live('shape'), fmt: (v) => v.toFixed(2), show: () => r.cont >= 2 },
+      { type: 'check', label: 'Invertir la dirección del borde', get: () => !!r.rev, set: (v) => set('rev', v) });
   } else if (r.type === 'blend' || r.type === 'skin') {
     const sk = r.type === 'skin', ids = (x) => x.map(nm).join(' + ');
     title += ` · ${ids(r.aIds || [r.a])} ↔ ${ids(r.bIds || [r.b])}`;
@@ -5307,7 +5406,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
+window.__forja = { lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); } };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

@@ -481,6 +481,19 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   de la herramienta. El snap al dibujar (rejilla, punto, curva, superficie) está probado: forja/tcurve.mjs.
 - (v0.20.3) Deshacer / rehacer conservan lo activo: captureActive() / reactivate() vuelven a elegir objetos, CVs y la edición de
   pivote por id y clave de CV. Prueba: forja/tundo.mjs.
+- (v0.21) CVs siempre a la vista en lo elegido: applyVisibility muestra handles y polígono de los objetos elegidos (curvas y superficies) en
+  cualquier modo; la curva recién creada queda elegida; tras Align / Blend / Skin (continueEdgeOp) queda elegido el resultado.
+  Clic sobre un CV de un objeto elegido → pickAt devuelve {cv, enterCV}: enterCvMode() pasa a modo CV SIN soltar Mover/Rotar/Escalar
+  (setPickMode apaga mouseXform; se restaura), así con Mover activo se arrastran los CVs de curvas y superficies. Prueba: forja/tcv.mjs.
+- (v0.21) Align: la ventana (edición y creación) tiene Continuidad, Tensión, Forma (mu, solo desde G2; rel.shape / toolDef.alignShape) e
+  Invertir la dirección del borde (rel.rev). Align solo trabaja con bordes de superficies: PENDIENTE alinear curvas (extremo de curva a curva,
+  G0–G3 con derivadas en el extremo: S^(k) = (in_s·out_m·λ)^k M^(k) y reparametrización φ'' = s·λ para la forma). Prueba: forja/talign.mjs.
+- (v0.21) Líneas juntas → menú junto al puntero (como en los videos de Alias): lineCandidates(e, kinds, tol, filter) mide en pantalla la
+  distancia a curvas (o.samples) y a los 4 bordes de cada superficie (surfaceEdgePts, en caché por o.data), ignora lo tapado por otra
+  malla; chooseCandidate usa quickPick (teclas 1–9). clickPick (selección en modo Objetos): ≥ 2 objetos a ≤ 8 px → menú; sideChoice
+  (herramientas de bordes: Align, Blend, Skin, Extender): ≥ 2 líneas a ≤ 9 px y diferencia < 7 px → menú con el nombre del borde.
+  Con el redondeo activo (fil) el pointerup de selección se ignora. Prueba: forja/tmenu.mjs. El snap deslizante (Ctrl+Alt) ya recorre
+  las líneas de parche, curvas y bordes: forja/tslide.mjs.
 - PENDIENTE (en este orden): sólidos de Parasolid (STEP como B-rep para redondear y cortar sólidos importados) y AO también en Visu.
 
 ## Siguiente paso
