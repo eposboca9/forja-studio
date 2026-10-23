@@ -20,7 +20,7 @@ import * as FL from './fillet.js';
 import { getOCC } from './occ.js';
 import { createAO } from './ao.js';
 import { createBackend } from './render/backend.js';
-import { BUILTIN, builtinMap, rollMap, thumb, decodePngEnv } from './envlib.js';
+import { BUILTIN, builtinMap, rollMap, thumb } from './envlib.js';
 import { ALIAS_ENVS } from './env-alias.js';
 import { probeWebGPU, describeProbe } from './render/webgpu-probe.js';
 import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
@@ -36,10 +36,15 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const prefs = { evalUI: 'b', xform: 'mouse', theme: null };
 try { Object.assign(prefs, JSON.parse(localStorage.getItem('forja-prefs') || '{}')); } catch { /* sin almacenamiento */ }
 function savePrefs() { try { localStorage.setItem('forja-prefs', JSON.stringify(prefs)); } catch { /* sin almacenamiento */ } }
-// modos de evaluación (los usan el Puck, los menús y la interfaz lateral)
-const EVAL_MODES = [
-  { k: 'forja', label: 'Forja', key: '8' }, { k: 'showroom', label: 'Showroom', key: '4' }, { k: 'clay', label: 'Arcilla', key: '7' }, { k: 'diffuse', label: 'Difuso', key: '5' }, { k: 'sky', label: 'Shade-Sky', key: '6' },
-  { k: 'zebra', label: 'Cebra', key: '1' }, { k: 'curv', label: 'Curvatura', key: '2' }, { k: 'wire', label: 'Malla', key: '3' },
+// Dos sistemas separados, como en Alias:
+// 1) MAP TYPES = shaders de DIAGNÓSTICO para auditar la superficie mientras se modela. Sustituyen el material del objeto solo en la vista
+//    de modelado. Showroom, Sky Shade y Abstracto usan los mapas de entorno reales de Alias (src/env-alias.js); Forja, Cebra y Curvatura
+//    son shaders propios. Malla (alambre) no es un Map Type: es un interruptor aparte (tecla 3).
+// 2) ENTORNOS DE RENDER = materiales PBR + HDRI (envLib). Se ajustan en Visu; en Modelado se pueden ver con "Sombreado realista"
+//    (prefs.shadeReal, como Shade Quality de Alias) sin salir del módulo.
+const MAP_TYPES = [
+  { k: 'forja', label: 'Forja', key: '8' }, { k: 'showroom', label: 'Showroom', key: '4' }, { k: 'skyshade', label: 'Sky Shade', key: '5' },
+  { k: 'abstract', label: 'Abstracto', key: '6' }, { k: 'zebra', label: 'Cebra', key: '1' }, { k: 'curv', label: 'Curvatura', key: '2' },
 ];
 // historial de construcción: relaciones entre objetos que se recalculan solas (ver "Historial de construcción")
 const relations = [];
@@ -563,11 +568,48 @@ const envDiagMat = new THREE.ShaderMaterial({
     }`,
 });
 const ENV_MODES = { showroom: 1, diffuse: 2, sky: 3, clay: 4, forja: 5 };
-const DIAG_NAMES = { forja: 'FORJA', showroom: 'SHOWROOM', clay: 'ARCILLA', diffuse: 'DIFUSO', sky: 'SHADE-SKY', zebra: 'CEBRA', curv: 'CURVATURA', wire: 'MALLA' };
+// Map Types con los mapas de entorno de Alias: el reflejo del mapa multiplicado por luz ambiente + difusa (Ambient Light / Diffuse Light
+// de Alias, 0,5 y 0,5 por defecto) y opción de "Luz ligada a la cámara" (Link Light to Camera). El mapa es equirectangular (fila 0 = arriba).
+const ALIAS_MAP_OF = { showroom: 'alias-showroom', skyshade: 'alias-diffuse', abstract: 'alias-abstract' };
+const aliasTex = {};
+const aliasTexReady = Promise.all(Object.entries(ALIAS_MAP_OF).map(([k, id]) => new Promise((done) => {
+  const e = ALIAS_ENVS.find((x) => x.id === id);
+  if (!e) return done();
+  new THREE.TextureLoader().load('data:image/png;base64,' + e.png, (t) => {
+    t.minFilter = t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
+    aliasTex[k] = t; sceneChangedAt = performance.now(); done();
+  }, undefined, () => done());
+})));
+const mapTypeMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  uniforms: { uMap: { value: null }, uAmb: { value: prefs.mtAmb ?? 0.5 }, uDif: { value: prefs.mtDif ?? 0.5 }, uLink: { value: prefs.mtLink ? 1 : 0 } },
+  vertexShader: envDiagMat.vertexShader,
+  fragmentShader: `
+    uniform sampler2D uMap; uniform float uAmb, uDif; uniform int uLink;
+    varying vec3 vWN; varying vec3 vWP;
+    vec3 toEnv(vec3 d) { return uLink == 1 ? normalize((viewMatrix * vec4(d, 0.0)).xyz) : d; }
+    vec3 envAt(vec3 d) {
+      float u = atan(d.z, d.x) * 0.15915494 + 0.5;
+      float t = 1.0 - acos(clamp(d.y, -1.0, 1.0)) * 0.31830989;
+      return texture2D(uMap, vec2(u, t)).rgb;
+    }
+    void main() {
+      vec3 n = vWN;
+      if (!(dot(n, n) > 0.25)) n = cross(dFdx(vWP), dFdy(vWP));   // normal de reserva en los polos
+      n = normalize(n);
+      if (!gl_FrontFacing) n = -n;
+      vec3 v = normalize(vWP - cameraPosition);
+      vec3 r = toEnv(reflect(v, n)), ne = toEnv(n);
+      float dif = max(dot(ne, normalize(vec3(-0.45, 0.7, 0.55))), 0.0);
+      gl_FragColor = vec4(envAt(r) * (uAmb + uDif * dif), 1.0);
+    }`,
+});
+mapTypeMat.extensions = { derivatives: true };
+const DIAG_NAMES = { forja: 'FORJA', showroom: 'SHOWROOM', skyshade: 'SKY SHADE', abstract: 'ABSTRACTO', clay: 'ARCILLA', diffuse: 'DIFUSO', sky: 'SHADE-SKY', zebra: 'CEBRA', curv: 'CURVATURA', wire: 'MALLA' };
 const curvMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0, side: THREE.DoubleSide });
 // Las líneas (curvas exactas) caen justo sobre una malla de triángulos: sin ayuda, la malla las tapa a tramos y se ven cortadas a rayas.
 // Se empuja un poco hacia atrás todo lo que es superficie (como hace Plasticity) para que las líneas siempre ganen la prueba de profundidad.
-for (const m of [envDiagMat, zebraMat, curvMat, ...Object.values(materials)]) { m.polygonOffset = true; m.polygonOffsetFactor = 1.5; m.polygonOffsetUnits = 2; }
+for (const m of [envDiagMat, mapTypeMat, zebraMat, curvMat, ...Object.values(materials)]) { m.polygonOffset = true; m.polygonOffsetFactor = 1.5; m.polygonOffsetUnits = 2; }
 // Modo Malla como el wireframe de Alias: las superficies no se pintan (siguen sirviendo para elegir) y solo se ven sus
 // líneas: bordes, líneas de parche y curvas sobre superficie. Las mallas muestran solo sus aristas vivas, no los triángulos.
 const wireMat = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide });
@@ -578,7 +620,9 @@ const depthOnlyMat = new THREE.MeshBasicMaterial({ colorWrite: false, side: THRE
 const GPU_DIAG = { forja: { color: 0x1d2028, pbr: [0, 0.36, 0.5, 0.16] }, clay: { color: 0x6a6b70, pbr: [0, 0.82, 0, 0.3], env: 'horizon' } };
 // El motor híbrido SOLO toma Visu: los modos de modelado (Forja, Arcilla, Difuso, Shade-Sky...) se quedan con los shaders clásicos, que son los buenos.
 const GPU_MODELING = false;
-const gpuDiag = () => (backend.hybrid && GPU_MODELING ? GPU_DIAG[diagMode] : null);
+// Excepción pedida por el usuario (v0.37.2): el Map Type FORJA sí usa el motor híbrido cuando está activo (grafito negro brillante con los reflejos
+// suaves de las cajas de luz del estudio, como en su video); Arcilla, Difuso, Shade-Sky y los demás siguen en los shaders clásicos.
+const gpuDiag = () => (backend.hybrid && (GPU_MODELING || diagMode === 'forja') ? GPU_DIAG[diagMode] : null);
 function setSurfaceMaterial(o, diag, dm, wire, hy = backend.hybrid && (!diag || !!gpuDiag())) {
   const mesh = o.parts.mesh, mt = materials[o.mat], gd = diag ? gpuDiag() : null;
   mesh.material = hy ? depthOnlyMat : diag ? dm : mt;
@@ -2137,19 +2181,50 @@ function updateStatus() {
 }
 
 // ---------- Panel: modos, materiales, análisis ----------
+let lastMapType = 'forja';
 function setDiag(m) {
   diagMode = m;
+  if (m !== 'wire') lastMapType = m;
+  if (prefs.shadeReal) setShadeReal(false, true);   // elegir un Map Type vuelve al diagnóstico
   // en Arcilla las líneas de parche son sutiles (finas y apagadas) para no ensuciar la superficie
   const clay = m === 'clay' || m === 'forja';
   isoMat.color.setHex(m === 'forja' ? 0x2f7bff : clay ? 0x9aa3b3 : 0x4a8fe0); isoMat.linewidth = clay ? 0.9 : 1.6; isoMat.transparent = clay; isoMat.opacity = m === 'forja' ? 0.7 : clay ? 0.5 : 1; isoMat.needsUpdate = true;
-  $('vi-shader').textContent = DIAG_NAMES[m];
+  $('vi-shader').textContent = prefs.shadeReal ? 'REALISTA' : DIAG_NAMES[m];
   document.querySelectorAll('[data-diag]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.diag === m)));
   if (layout === 'render') switchLayout('diag');
   $('legend').hidden = m !== 'curv';
   objects.forEach(updateObject);
+  if ($('mt-wire')) $('mt-wire').checked = m === 'wire';
   updateEvalUI();
 }
 document.querySelectorAll('[data-diag]').forEach((b) => b.addEventListener('click', () => setDiag(b.dataset.diag)));
+// Malla (alambre): interruptor aparte de los Map Types
+function toggleWire() { setDiag(diagMode === 'wire' ? lastMapType : 'wire'); }
+{
+  const mt = (id, key, uni, fmt) => {
+    const el = $(id); if (!el) return;
+    el.value = prefs[key] ?? 0.5;
+    el.addEventListener('input', () => { prefs[key] = +el.value; mapTypeMat.uniforms[uni].value = +el.value; $(id + '-o').textContent = (+el.value).toFixed(2); savePrefs(); sceneChangedAt = performance.now(); });
+    $(id + '-o').textContent = (+el.value).toFixed(2);
+  };
+  mt('mt-amb', 'mtAmb', 'uAmb'); mt('mt-dif', 'mtDif', 'uDif');
+  $('mt-link').checked = !!prefs.mtLink;
+  $('mt-link').addEventListener('change', (e) => { prefs.mtLink = e.target.checked; mapTypeMat.uniforms.uLink.value = e.target.checked ? 1 : 0; savePrefs(); sceneChangedAt = performance.now(); });
+  $('mt-wire').addEventListener('change', () => toggleWire());
+  $('sq-real').checked = !!prefs.shadeReal;
+  $('sq-real').addEventListener('change', (e) => setShadeReal(e.target.checked));
+  $('sq-env').addEventListener('change', (e) => selectEnv(e.target.value));
+}
+// Sombreado realista en Modelado (Shade Quality de Alias): materiales PBR y el entorno de render elegido, sin salir del módulo
+function setShadeReal(on, quiet) {
+  prefs.shadeReal = !!on; savePrefs();
+  if (on && diagMode === 'wire') diagMode = lastMapType;
+  $('sq-real').checked = !!on;
+  document.querySelectorAll('[data-diag]').forEach((b) => b.setAttribute('aria-pressed', String(!on && b.dataset.diag === diagMode)));
+  $('vi-shader').textContent = on ? 'REALISTA' : DIAG_NAMES[diagMode];
+  $('legend').hidden = on || diagMode !== 'curv';
+  if (!quiet) { objects.forEach(updateObject); updateEvalUI(); }
+}
 const LAYOUTS = ['split', 'diag', 'render'];
 // Carrusel 3D: cada módulo es el propio modelo 3D (con su sombreado: evaluación, PBR o IA) puesto en un
 // anillo; el eje de giro es vertical y está a la altura del horizonte. Al cambiar, la cámara sube a una
@@ -2393,6 +2468,7 @@ function selectEnv(id) {
   backend.setEnv(it.id === 'studio' ? null : envMap(it));   // motor híbrido: estudio procedural de la tarjeta o mapa equirectangular
   $('expo').value = it.id === 'sun' || it.id === 'sunset' ? -1.4 : 0; $('expo').dispatchEvent(new Event('input'));
   document.querySelectorAll('#env-grid [data-env]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.env === it.id)));
+  if ($('sq-env')) $('sq-env').value = it.id;
   sceneChangedAt = performance.now();
 }
 function buildEnvGrid() {
@@ -2408,13 +2484,9 @@ function buildEnvGrid() {
   add.className = 'envt add'; add.textContent = '+'; add.title = 'Cargar un HDRI (.hdr) propio';
   add.addEventListener('click', () => $('env-file').click());
   g.append(add);
-}
-// Entornos de Alias (de los archivos del usuario): se decodifican al arrancar y se añaden a la biblioteca
-async function loadAliasEnvs() {
-  for (const e of ALIAS_ENVS) {
-    try { envLib.items.push({ id: e.id, name: e.name, map: await decodePngEnv(e.png) }); } catch (err) { console.warn('entorno', e.id, err); }
-  }
-  buildEnvGrid();
+  // la misma lista en Modelado (Sombreado realista): solo se elige; los ajustes viven en Visu
+  const sel = $('sq-env');
+  if (sel) { sel.innerHTML = envLib.items.map((it) => `<option value="${it.id}">${it.name}</option>`).join(''); sel.value = envKey; }
 }
 async function loadHdrFile(f) {
   try {
@@ -3087,12 +3159,11 @@ addEventListener('keydown', (e) => {
   else if (k === 'o') setPickMode('object');
   else if (k === 'p') setPickMode('cv');
   else if (k === '4') setDiag('showroom');
-  else if (k === '5') setDiag('diffuse');
-  else if (k === '6') setDiag('sky');
+  else if (k === '5') setDiag('skyshade');
+  else if (k === '6') setDiag('abstract');
   else if (k === '1') setDiag('zebra');
   else if (k === '2') setDiag('curv');
-  else if (k === '3') setDiag('wire');
-  else if (k === '7') setDiag('clay');
+  else if (k === '3') toggleWire();
   else if (k === '8') setDiag('forja');
   else if (k === 'enter' && tool === 'curve') finishDraft();
   else if (k === 'enter' && tool === 'edge' && edgeOp && EDGE_OPS[edgeOp.type].enter) EDGE_OPS[edgeOp.type].enter();
@@ -3232,7 +3303,7 @@ const PUCK_CMDS = {
     { k: 'hide', label: 'Ocultar', run: hideSelection }, { k: 'show', label: 'Mostrar todo', run: unhideAll },
     { k: 'frame', label: 'Encuadrar', run: frameSelection }, { k: 'top', label: 'Vista sup.', run: topView }] },
   del: { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
-  eval: { k: 'zebra', label: 'Evaluar', run: () => setDiag('showroom'), sub: EVAL_MODES.map((m) => ({ k: { showroom: 'studio', clay: 'studio', forja: 'studio', diffuse: 'shade', sky: 'sun', zebra: 'zebra', curv: 'curvz', wire: 'wire' }[m.k], label: m.label, run: () => setDiag(m.k) })) },
+  eval: { k: 'zebra', label: 'Map Types', run: () => setDiag('showroom'), sub: [...MAP_TYPES.map((m) => ({ k: { forja: 'studio', showroom: 'studio', skyshade: 'shade', abstract: 'sun', zebra: 'zebra', curv: 'curvz' }[m.k], label: m.label, run: () => setDiag(m.k) })), { k: 'wire', label: 'Malla', run: toggleWire }] },
   // Visu
   mats: { k: 'mat', label: 'Materiales', run: () => setMaterial(matKey), sub: matSub(['candy', 'paint', 'black', 'pearl', 'alu', 'chrome']) },
   mats2: { k: 'mat', label: 'Más materiales', run: () => setMaterial('ceram'), sub: matSub(['ceram', 'glass', 'plastic', 'clay']) },
@@ -3305,9 +3376,8 @@ const XFORM_MM = [
 ];
 const DISPLAY_MM = [
   { k: 'shade', label: 'Modelado', run: () => switchLayout('diag'), sub: [
-    { k: 'studio', label: 'Showroom', run: () => setDiag('showroom') }, { k: 'shade', label: 'Difuso', run: () => setDiag('diffuse') },
-    { k: 'sun', label: 'Shade-Sky', run: () => setDiag('sky') }, { k: 'zebra', label: 'Cebra', run: () => setDiag('zebra') },
-    { k: 'curvz', label: 'Curvatura', run: () => setDiag('curv') }, { k: 'wire', label: 'Malla', run: () => setDiag('wire') }] },
+    ...MAP_TYPES.map((m) => ({ k: { forja: 'studio', showroom: 'studio', skyshade: 'shade', abstract: 'sun', zebra: 'zebra', curv: 'curvz' }[m.k], label: m.label, run: () => setDiag(m.k) })),
+    { k: 'wire', label: 'Malla', run: toggleWire }, { k: 'visu', label: 'Realista', run: () => { if (layout !== 'diag') switchLayout('diag'); setShadeReal(!prefs.shadeReal); } }] },
   { k: 'visu', label: 'Visu', run: () => switchLayout('render'), sub: [
     { k: 'studio', label: 'Estudio', run: env('studio') }, { k: 'sun', label: 'Exterior', run: env('sun') },
     { k: 'sunset', label: 'Atardecer', run: env('sunset') }, { k: 'cloud', label: 'Nublado', run: env('overcast') }] },
@@ -3676,13 +3746,13 @@ addEventListener('keydown', (e) => {
 const evalThumbs = {};
 function buildEvalUI() {
   const ph = (m) => `<span class="ev-ph" data-thumb="${m.k}"></span>`;
-  $('eval-a').innerHTML = EVAL_MODES.map((m) => `<button class="ev-ball" data-diag="${m.k}" title="${m.label} (${m.key})">${ph(m)}</button>`).join('');
-  $('eval-b').innerHTML = EVAL_MODES.map((m) => `<button class="ev-tile" data-diag="${m.k}">${ph(m)}<b>${m.label}</b><kbd>${m.key}</kbd></button>`).join('');
-  $('eval-c-fly').innerHTML = EVAL_MODES.map((m) => `<button class="ev-row" data-diag="${m.k}">${ph(m)}<b>${m.label}</b><kbd>${m.key}</kbd></button>`).join('');
+  $('eval-a').innerHTML = MAP_TYPES.map((m) => `<button class="ev-ball" data-diag="${m.k}" title="${m.label} (${m.key})">${ph(m)}</button>`).join('');
+  $('eval-b').innerHTML = MAP_TYPES.map((m) => `<button class="ev-tile" data-diag="${m.k}">${ph(m)}<b>${m.label}</b><kbd>${m.key}</kbd></button>`).join('');
+  $('eval-c-fly').innerHTML = MAP_TYPES.map((m) => `<button class="ev-row" data-diag="${m.k}">${ph(m)}<b>${m.label}</b><kbd>${m.key}</kbd></button>`).join('');
   $('eval-c-btn').innerHTML = `<span class="ev-ph" data-thumb="current"></span>`;
   document.querySelectorAll('#eval-a [data-diag], #eval-b [data-diag], #eval-c-fly [data-diag]').forEach((b) => b.addEventListener('click', () => setDiag(b.dataset.diag)));
-  // miniaturas: una esfera con cada shader, renderizada una vez en un lienzo aparte
-  requestAnimationFrame(() => {
+  // miniaturas: una esfera con cada shader, renderizada una vez en un lienzo aparte (cuando ya cargaron los mapas de Alias)
+  aliasTexReady.then(() => requestAnimationFrame(() => {
     const tr = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha: true });
     tr.setClearColor(0x000000, 0); tr.setSize(96, 96); tr.toneMapping = THREE.ACESFilmicToneMapping;
     const ts = new THREE.Scene();
@@ -3696,19 +3766,20 @@ function buildEvalUI() {
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
     const ball = new THREE.Mesh(geo); ts.add(ball);
     const wire = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), wireMat);
-    for (const m of EVAL_MODES) {
-      const mats = { showroom: envDiagMat, clay: envDiagMat, forja: envDiagMat, diffuse: envDiagMat, sky: envDiagMat, zebra: zebraMat, curv: curvMat };
+    for (const m of MAP_TYPES) {
+      const mats = { forja: envDiagMat, zebra: zebraMat, curv: curvMat };
+      if (ALIAS_MAP_OF[m.k]) { mats[m.k] = mapTypeMat; mapTypeMat.uniforms.uMap.value = aliasTex[m.k] || null; }
       ts.remove(ball, wire);
       if (m.k === 'wire') ts.add(wire); else { ball.material = mats[m.k]; ts.add(ball); }
       const keep = envDiagMat.uniforms.uMode.value;
-      if (ENV_MODES[m.k]) envDiagMat.uniforms.uMode.value = ENV_MODES[m.k];
+      if (ENV_MODES[m.k] && !ALIAS_MAP_OF[m.k]) envDiagMat.uniforms.uMode.value = ENV_MODES[m.k];
       tr.render(ts, tc);
       envDiagMat.uniforms.uMode.value = keep;
       evalThumbs[m.k] = tr.domElement.toDataURL();
     }
     tr.dispose(); tr.forceContextLoss();
     updateEvalUI();
-  });
+  }));
 }
 function updateEvalUI() {
   const app = $('app');
@@ -3718,9 +3789,9 @@ function updateEvalUI() {
     const k = el.dataset.thumb === 'current' ? diagMode : el.dataset.thumb;
     if (evalThumbs[k]) el.style.backgroundImage = `url(${evalThumbs[k]})`;
   });
-  const cur = EVAL_MODES.find((m) => m.k === diagMode);
-  $('eval-c-btn').title = `Evaluación: ${cur?.label} (pasa el ratón para cambiar)`;
-  if ($('pane-mode')) $('pane-mode').textContent = cur ? '· ' + cur.label.toUpperCase() : '';
+  const cur = MAP_TYPES.find((m) => m.k === diagMode);
+  $('eval-c-btn').title = `Map Type: ${cur?.label || 'Malla'} (pasa el ratón para cambiar)`;
+  if ($('pane-mode')) $('pane-mode').textContent = prefs.shadeReal ? '· REALISTA' : cur ? '· ' + cur.label.toUpperCase() : diagMode === 'wire' ? '· MALLA' : '';
 }
 
 // ---------- Barra de menús (como la de Alias) ----------
@@ -3776,9 +3847,12 @@ const MENUBAR = [
     { sep: true }, { label: 'Anclar barra izquierda', run: () => layersWin.togglePin(), ...chk(() => !!prefs.leftPin) },
     { label: 'Ventana de capas', run: () => (prefs.layersWin?.open === false ? layersWin.show() : layersWin.set({ open: false })), ...chk(() => prefs.layersWin?.open !== false) }]],
   ['Visualización', [
-    ...EVAL_MODES.map((m) => ({ label: m.label, key: m.key, run: () => setDiag(m.k), ...chk(() => layout !== 'render' && diagMode === m.k) })),
+    { title: 'Map Types (diagnóstico)' },
+    ...MAP_TYPES.map((m) => ({ label: m.label, key: m.key, run: () => setDiag(m.k), ...chk(() => layout !== 'render' && !prefs.shadeReal && diagMode === m.k) })),
+    { label: 'Malla (alambre)', key: '3', run: toggleWire, ...chk(() => diagMode === 'wire') },
     { label: 'Oclusión ambiental', run: () => { prefs.ao = prefs.ao === false; savePrefs(); $('pref-ao').checked = prefs.ao !== false; }, ...chk(() => prefs.ao !== false) },
-    { sep: true }, { title: 'Entorno (Visu)' },
+    { sep: true }, { title: 'Entornos de render' },
+    { label: 'Sombreado realista en Modelado', run: () => { if (layout !== 'diag') switchLayout('diag'); setShadeReal(!prefs.shadeReal); }, ...chk(() => !!prefs.shadeReal) },
     ...[['studio', 'Estudio'], ['sun', 'Exterior'], ['sunset', 'Atardecer'], ['overcast', 'Nublado']].map(([k, l]) => ({ label: l, run: env(k), ...chk(() => envKey === k) }))]],
   ['Animación', [{ label: 'Plato giratorio', soon: true }, { label: 'Línea de tiempo', soon: true }]],
   ['Ventanas', [
@@ -5351,7 +5425,8 @@ function renderPane(p) {
   renderer.setScissor(p.x, 0, p.w, p.h);
   useAspect(p);
   if (p.kind === 'forge') return renderForgePane(p);
-  const diag = p.kind !== 'render';                 // MODELADO e IA usan los shaders de evaluación
+  const real = p.kind === 'diag' && !!prefs.shadeReal;   // Modelado con sombreado realista (materiales PBR + entorno de render)
+  const diag = p.kind !== 'render' && !real;        // MODELADO e IA usan los Map Types (shaders de diagnóstico)
   const dm = diagMaterial(), wire = diag && diagMode === 'wire';
   if (wire) { const c = theme === 'dark' ? 0xe8e8e8 : 0x1b1d21; wireLineMat.color.setHex(c); wireFeatMat.color.setHex(c); }
   faceEdgeMat.color.setHex(diag && diagMode === 'clay' ? 0x08090b : theme === 'dark' ? 0xe6eaf2 : 0x14161a);   // aristas: oscuras sobre arcilla, claras u oscuras según el tema
@@ -5368,11 +5443,11 @@ function renderPane(p) {
     if (o.kind === 'mesh') meshFeatures(o, wire);
   });
   syncGhosts();
-  scene.background = !diag && envBg && !backend.hybrid ? scene.environment : null;   // en híbrido el fondo es el muro (el lienzo de abajo no se tapa)
+  scene.background = p.kind === 'render' && envBg && !backend.hybrid ? scene.environment : null;   // en híbrido el fondo es el muro (el lienzo de abajo no se tapa)
   renderer.toneMapping = diag ? THREE.ACESFilmicToneMapping : TONES[toneKey];
   scene.environment = diag ? envTexture('studio', 0) : envTexture(envKey, envLib.rotApplied);
   camera.layers.set(0);
-  if (diag) camera.layers.enable(DIAG);
+  if (p.kind !== 'render') camera.layers.enable(DIAG);   // en Modelado las líneas de diagnóstico siguen aunque el sombreado sea realista
   renderer.render(scene, camera);
   if (!carousel && prefs.ao !== false && !window.__forjaNoAO && (diag ? AO_MODES.has(diagMode) : backend.hybrid && prefs.aoVisu !== false)) {
     // la oclusión se calcula cuando la vista está quieta (y se reutiliza mientras no cambie la cámara ni la escena)
@@ -5394,6 +5469,7 @@ function meshFeatures(o, show) {
   if (p.feat) p.feat.visible = show && o.visible;
 }
 function diagMaterial() {
+  if (ALIAS_MAP_OF[diagMode]) { mapTypeMat.uniforms.uMap.value = aliasTex[diagMode] || null; return mapTypeMat; }
   if (ENV_MODES[diagMode]) { envDiagMat.uniforms.uMode.value = ENV_MODES[diagMode]; return envDiagMat; }
   return diagMode === 'curv' ? curvMat : diagMode === 'wire' ? wireMat : zebraMat;
 }
@@ -5909,7 +5985,7 @@ function resize() {
 }
 
 // ---------- Arranque ----------
-buildEnvGrid(); setEnvOpts({ rot: prefs.envRot ?? 0, int: prefs.envInt ?? 1 }); loadAliasEnvs();
+buildEnvGrid(); setEnvOpts({ rot: prefs.envRot ?? 0, int: prefs.envInt ?? 1 });
 new ResizeObserver(resize).observe(view);
 resize();
 buildMaterialLibrary();
