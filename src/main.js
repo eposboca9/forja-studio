@@ -11,9 +11,9 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as N from './nurbs.js';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
-import { createPuck3 } from './puck3.js?v=0.39.3';
+import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.39.3';
+const FORJA_VERSION = '0.40.0';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -332,7 +332,12 @@ renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 // Transformar con los tres botones del ratón (Alias). Usa el mismo camino que el gizmo (mouseDown /
 // objectChange / mouseUp sobre el proxy), así el snap, las mallas y los pivotes funcionan igual.
 let mxDrag = null;
-const AXES = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
+// Ejes como en Alias (Z arriba): X, Y (profundidad) y Z (altura), escritos en las coordenadas internas de Forja (Y arriba).
+// Por dentro Forja sigue con Y arriba (los shaders aprobados y la escena cuentan con eso); lo que el usuario ve y usa es Z arriba,
+// con el mismo cambio que los exportadores CAD: Alias (X, Y, Z) = Forja (x, -z, y).
+const AXES = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0)];
+const toAlias = (p) => ({ x: p.x, y: -p.z, z: p.y });
+let scaleNP = false;   // Scale (proporcional: los 3 botones escalan igual) o NonProportional Scale (izq X · medio Y · der Z)
 function hasTransformable() {
   return selectedCVRefs().length > 0 || (pickMode === 'object' && selObjs.some((o) => o.kind === 'mesh' && o.visible));
 }
@@ -385,7 +390,7 @@ addEventListener('pointermove', (e) => {
   } else {
     let k = Math.exp((dx - dy) * 0.006);
     if (snapModes(mods).grid) k = Math.max(0.25, Math.round(k / 0.25) * 0.25);
-    const v = m.button === 0 ? new THREE.Vector3(k, k, k) : m.button === 1 ? new THREE.Vector3(1, k, 1) : new THREE.Vector3(k, 1, k);
+    const v = !scaleNP ? new THREE.Vector3(k, k, k) : new THREE.Vector3(1, 1, 1).addScaledVector(new THREE.Vector3(...AXES[m.button].toArray().map(Math.abs)), k - 1);
     proxy.scale.copy(m.s0).multiply(v);
   }
   gizmo.dispatchEvent({ type: 'objectChange' });
@@ -1140,8 +1145,10 @@ let pickMode = 'object';
 const cvTargets = new Set();
 // Filtro del modo Objetos (como Pick Curves / Pick Surfaces de Alias): null = todo, 'curve' o 'surface'
 let pickFilter = null;
-const pickable = (o) => o.visible && layerPickable(o) && (!pickFilter || (pickFilter === 'curve' ? o.kind === 'curve' : o.kind !== 'curve'));
-const PICK_NAMES = { curve: 'curvas', surface: 'superficies' };
+// filtros como los Pick de Alias: Curves, Surface, Mesh y Curve-on-Surface
+const PICK_FILTERS = { curve: (o) => o.kind === 'curve' && !o.data?.cos, surface: (o) => o.kind === 'surface', mesh: (o) => o.kind === 'mesh', cos: (o) => o.kind === 'curve' && !!o.data?.cos };
+const pickable = (o) => o.visible && layerPickable(o) && (!pickFilter || PICK_FILTERS[pickFilter](o));
+const PICK_NAMES = { curve: 'curvas', surface: 'superficies', mesh: 'mallas', cos: 'curvas sobre superficie' };
 const selObjs = []; // en orden de selección (importa para el loft)
 const selCVs = new Map();
 
@@ -1203,6 +1210,9 @@ function selectionChanged() {
 // Gizmo: se coloca en el centro de lo seleccionado y mueve todos los CVs afectados a la vez
 const gizmo = new TransformControls(camera, renderer.domElement);
 gizmo.setSize(0.5);
+// Z arriba como Alias: el eje vertical (Y interno) se pinta azul y el de profundidad (Z interno) verde
+{ const seen = new Set(), G = 0x00ff00, B = 0x0000ff;
+  gizmo.traverse((o) => { const m = o.material; if (!m?.color || seen.has(m)) return; seen.add(m); const h = m.color.getHex(); if (h === G) m.color.setHex(B); else if (h === B) m.color.setHex(G); }); }
 gizmo._getPointer = (e) => { const n = paneNDC(e, dragPane || paneAt(e.clientX)); return { x: n.x, y: n.y, button: e.button }; };
 scene.add(gizmo);
 const proxy = new THREE.Object3D();
@@ -1540,7 +1550,7 @@ async function clickPick(e, how) {
     if (hit.enterCV && pickMode !== 'cv') enterCvMode();
     applySelection([hit.cv || hit.obj], how);
     if ($('click-pivot').checked) setPivot(hit.point || (() => { const c = cvRef(hit.cv); return new THREE.Vector3(c.x, c.y, c.z); })());
-  } else if (how === 'replace' && e.button === 0) clearSelection();
+  } else if (how === 'replace') clearSelection();
 }
 function pickAt(e) {
   setRay(e);
@@ -1572,7 +1582,8 @@ let tool = 'select';
 // de frente = XY, de lado = YZ (por el origen); en perspectiva las curvas se dibujan en el aire, en el plano de la pantalla
 // que pasa por el pivote (o por el primer punto de la curva). También se puede fijar: suelo, frente o lado.
 let drawPlaneKind = 'auto';
-const PLANE_NAMES = { xz: 'el suelo (XZ)', xy: 'el plano frontal (XY)', yz: 'el plano lateral (YZ)', free: 'el aire (plano de la pantalla)' };
+// nombres con Z arriba (Alias): el suelo es XY, el frente XZ y el lado YZ
+const PLANE_NAMES = { xz: 'el suelo (XY)', xy: 'el plano frontal (XZ)', yz: 'el plano lateral (YZ)', free: 'el aire (plano de la pantalla)' };
 function axisView() {
   const d = viewDir(), a = [Math.abs(d.x), Math.abs(d.y), Math.abs(d.z)], i = a.indexOf(Math.max(...a));
   return a[i] > 0.9995 ? i : null;
@@ -1649,14 +1660,15 @@ function updateHint() {
   if (HINTS[tool]) { $('hint').textContent = HINTS[tool]; return; }
   if (typeof pivotEdit !== 'undefined' && pivotEdit) { $('hint').textContent = 'Editar pivote: arrastra el gizmo · Ctrl: snap a punto · Ctrl+Alt: a curva · Alt: rejilla · D o Esc: terminar'; return; }
   if (mouseXform) {
-    const verb = { translate: 'Mover', rotate: 'Rotar', scale: 'Escalar' }[xform];
-    const axes = xform === 'scale' ? 'izq = uniforme · medio = Y · der = X y Z' : 'izq = X · medio = Y · der = Z';
+    const verb = { translate: 'Mover', rotate: 'Rotar', scale: scaleNP ? 'Escalar (no proporcional)' : 'Escalar' }[xform];
+    const axes = xform === 'scale' && !scaleNP ? 'cualquier botón = proporcional' : 'izq = X · medio = Y · der = Z (arriba)';
     $('hint').textContent = `${verb}: arrastra en la vista con ${axes} · o usa el gizmo · clic sin arrastrar: elegir · Esc: salir`;
     return;
   }
   const nav = navStyle === 'alias' ? 'Shift+Alt: navegar' : 'Shift+arrastrar: recuadro';
   const what = pickMode === 'cv' ? 'CVs' : PICK_NAMES[pickFilter] || 'objetos';
-  $('hint').textContent = `Clic: seleccionar ${what} · Arrastrar: recuadro · ${nav} (clic rápido: punto de interés) · W/E/R: mover/rotar/escalar · Alt/Ctrl/Ctrl+Alt: snap · Espacio: menú`;
+  const sb = navStyle === 'alias' && $('sel-buttons')?.value === 'add' ? `Izq: añadir ${what} · medio: elegir solo eso · der: quitar` : `Clic: seleccionar ${what}`;
+  $('hint').textContent = `${sb} · Arrastrar: recuadro · ${nav} (clic rápido: punto de interés) · W/E/R: mover/rotar/escalar · Alt/Ctrl/Ctrl+Alt: snap · Z: Puck · Ctrl+Shift+botón: menús`;
 }
 function setTool(t) {
   if (tool === 'curve' && t !== 'curve') cancelDraft();
@@ -1770,16 +1782,21 @@ function deleteSelection() {
 // ---------- Ratón en el viewport ----------
 let down = null; // { x, y, marquee }
 const marquee = $('marquee');
-// Botones de selección (hoja de atajos de Alias): alternativa sugerida = izq elige, medio añade, der quita;
-// por defecto de Alias = izq alterna. Shift alterna y Ctrl quita con cualquier botón.
+// Botones de selección (hoja de atajos de Alias). Alternativa sugerida (por omisión) = izq añade (Add), medio elige (Pick: suelta
+// todo lo demás), der quita (Unpick). Por defecto de Alias = izq alterna, medio añade, der quita. Shift alterna y Ctrl quita.
 function howFor(e) {
   if (e.shiftKey) return 'toggle';
   if (e.ctrlKey || e.metaKey) return 'remove';
   if (navStyle !== 'alias') return 'replace';
-  if (e.button === 1) return 'add';
+  const v = $('sel-buttons').value;
   if (e.button === 2) return 'remove';
-  return $('sel-buttons').value === 'default' ? 'toggle' : 'replace';
+  if (v === 'add') return e.button === 1 ? 'replace' : 'add';
+  if (e.button === 1) return 'add';
+  return v === 'default' ? 'toggle' : 'replace';
 }
+try { if (prefs.selButtons) $('sel-buttons').value = prefs.selButtons; } catch { /* opción vieja */ }
+if (!$('sel-buttons').value) $('sel-buttons').value = 'add';
+$('sel-buttons').addEventListener('change', (e) => { prefs.selButtons = e.target.value; savePrefs(); updateHint(); });
 renderer.domElement.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); }); // sin autodesplazamiento
 renderer.domElement.addEventListener('pointerdown', (e) => {
   dragPane = paneAt(e.clientX);
@@ -2064,13 +2081,13 @@ function renderSelectionBody() {
   const refs = [...selCVs.values()];
   if (pickMode === 'cv' && refs.length) {
     const single = refs.length === 1;
-    const p = single ? cvRef(refs[0]) : centroid(refs);
+    const p = single ? cvRef(refs[0]) : centroid(refs), pa = toAlias(p);
     box.innerHTML = `
       <p class="muted">${single ? `CV de <b>${refs[0].obj.name}</b>` : `${refs.length} CVs seleccionados · centro del grupo`}</p>
       <div class="coords">
-        <div class="coord"><b class="x">X</b><span id="cx">${fmt(p.x)}</span></div>
-        <div class="coord"><b class="y">Y</b><span id="cy">${fmt(p.y)}</span></div>
-        <div class="coord"><b class="z">Z</b><span id="cz">${fmt(p.z)}</span></div>
+        <div class="coord"><b class="x">X</b><span id="cx">${fmt(pa.x)}</span></div>
+        <div class="coord"><b class="y">Y</b><span id="cy">${fmt(pa.y)}</span></div>
+        <div class="coord"><b class="z">Z</b><span id="cz">${fmt(pa.z)}</span></div>
       </div>
       <div class="row"><label for="weight">Peso (w)</label><input id="weight" type="range" min="0.2" max="5" step="0.05" value="${single ? p.w : 1}"><output id="weight-o">${single ? fmt(p.w) : '—'}</output></div>
       <p class="muted">Un peso mayor atrae la superficie hacia el punto.</p>`;
@@ -2161,7 +2178,7 @@ function updateCVReadout() {
   if (pickMode !== 'cv' || !$('cx')) return;
   const refs = [...selCVs.values()];
   const p = refs.length === 1 ? cvRef(refs[0]) : centroid(refs);
-  $('cx').textContent = fmt(p.x); $('cy').textContent = fmt(p.y); $('cz').textContent = fmt(p.z);
+  const pa = toAlias(p); $('cx').textContent = fmt(pa.x); $('cy').textContent = fmt(pa.y); $('cz').textContent = fmt(pa.z);
 }
 function updateStatus() {
   const n = pickMode === 'cv' ? selCVs.size : selObjs.length;
@@ -2580,7 +2597,7 @@ $('t-fillet').addEventListener('click', () => startFillet());
 $('t-chamfer').addEventListener('click', async () => { await startFillet(); if (fil) { fil.dist = -Math.abs(fil.dist); filRefresh(); showFilletWin(); } });
 $('t-move').addEventListener('click', () => { setTool('select'); setXform('translate'); });
 $('t-rotate').addEventListener('click', () => { setTool('select'); setXform('rotate'); });
-$('t-scale').addEventListener('click', () => { setTool('select'); setXform('scale'); });
+$('t-scale').addEventListener('click', () => { scaleNP = false; setTool('select'); setXform('scale'); });
 $('t-pivot').addEventListener('click', togglePivotEdit);
 document.querySelectorAll('[data-snap]').forEach((b) => b.addEventListener('click', () => { snapToggles[b.dataset.snap] = !snapToggles[b.dataset.snap]; updateSnapButtons(); }));
 document.querySelectorAll('[data-snapbtn]').forEach((b) => b.addEventListener('click', () => { snapToggles[b.dataset.snapbtn] = !snapToggles[b.dataset.snapbtn]; updateSnapButtons(); }));
@@ -3154,7 +3171,7 @@ addEventListener('keydown', (e) => {
   else if (k === 'l') pivotToSelection();
   else if (k === 'w') setXform('translate');
   else if (k === 'e') setXform('rotate');
-  else if (k === 'r') setXform('scale');
+  else if (k === 'r') { scaleNP = false; setXform('scale'); }
   else if (k === 'd' || k === 'insert') togglePivotEdit();
   else if (k === 'c') setTool('curve');
   else if (k === 'b') startFillet();
@@ -3254,7 +3271,13 @@ const IC = {
   info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7v.5', model: 'M7 4h10l2 5-2 11H7L5 9z', grid: 'M4 4h16v16H4zM4 10h16M4 15h16M10 4v16M15 4v16',
   ctrlOn: 'M4 18C8 6 16 18 20 6M3 17h2v2H3zM19 5h2v2h-2z', ctrlOff: 'M4 18C8 6 16 18 20 6M3 3l18 18', shade: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 3c-4 3-4 15 0 18',
   visu: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 9a3 2 0 0 1 4-1', full: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5M9 9l-4-4M15 9l4-4M9 15l-4 4M15 15l4 4',
-  panel: 'M4 4h16v16H4zM14 4v16', split: 'M4 4h16v16H4zM12 4v16', ai: 'M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2zM19 15l1 2 2 1-2 1-1 2-1-2-2-1 2-1z',
+  panel: 'M4 4h16v16H4zM14 4v16',
+  mesh: 'M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8M8 6l8 4M8 18V10', cos: 'M3 15l5-8h13l-5 8zM7 12c3-2 6 0 10-2',
+  blendPt: 'M3 18C9 18 9 6 15 6h6M15 3v6', construct: 'M4 20L20 4M4 4h4M4 4v4M20 20h-4M20 20v-4', locator: 'M12 3v18M3 12h18M7 7l10 10',
+  centerPivot: 'M4 4h16v16H4zM12 9v6M9 12h6', npScale: 'M4 12h10v8H4zM14 12h6M18 10l2 2-2 2M9 12V5M7 7l2-2 2 2',
+  history: 'M12 3a9 9 0 1 0 9 9M12 7v5l3 3M21 3v5h-5', delLoc: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11l4 4M14 11l-4 4',
+  shadeQ: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 3c-4 3-4 15 0 18M3 12h18', shadeF: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM13 7l-3 5h4l-3 5',
+  planeEd: 'M3 16l6-9h12l-6 9zM12 4v8', palette: 'M4 4h6v16H4zM6 7h2M6 11h2M6 15h2', shelf: 'M3 8h18M3 16h18M6 8v8M11 8v8M16 8v8', split: 'M4 4h16v16H4zM12 4v16', ai: 'M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2zM19 15l1 2 2 1-2 1-1 2-1-2-2-1 2-1z',
 };
 const icon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="${IC[k]}"/></svg>`;
 
@@ -3268,7 +3291,8 @@ Object.assign(IC, {
 });
 // Menús radiales en 3D: un anillo de esferas visto desde arriba (elipse), más grandes delante y crecen junto al
 // ratón. Cada esfera del anillo puede tener un submenú: al pasar sobre ella salen esferas más pequeñas hacia fuera.
-const mv = () => { setTool('select'); setXform('translate'); }, rot = () => { setTool('select'); setXform('rotate'); }, scl = () => { setTool('select'); setXform('scale'); };
+const mv = () => { setTool('select'); setXform('translate'); }, rot = () => { setTool('select'); setXform('rotate'); }, scl = () => { scaleNP = false; setTool('select'); setXform('scale'); };
+const sclNP = () => { scaleNP = true; setTool('select'); setXform('scale'); };
 const env = (k) => () => { document.querySelector(`[data-env="${k}"]`)?.click(); if (layout !== 'render') switchLayout('render'); };
 Object.assign(IC, {
   mat: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM7 9a5 5 0 0 1 5-3', bg: 'M3 5h18v14H3zM3 15l5-5 4 4 3-3 6 6', tone: 'M3 17c4 0 5-10 9-10s5 10 9 10M3 21h18',
@@ -3278,36 +3302,10 @@ Object.assign(IC, {
   layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5', gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2',
   modules: 'M12 4a8 3 0 1 0 0 6 8 3 0 0 0 0-6zM4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7', cube: 'M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8',
 });
-// Puck (Z): cada módulo tiene el suyo, con sus herramientas, y cada quien lo puede personalizar
-// (Preferencias > Puck). PUCK_CMDS es la biblioteca de comandos; PUCK_DEFAULT, lo que trae cada módulo de fábrica.
+// Menú de Visu (Espacio en el módulo Visu): solo visualización. El Puck por módulo de antes ya no existe: Z abre siempre el Puck nuevo.
 const setInput = (id, v, ev = 'input') => { const el = $(id); el.value = v; el.dispatchEvent(new Event(ev)); };
 const matSub = (keys) => keys.map((k) => ({ k: 'mat', label: MAT_NAMES[k], run: () => setMaterial(k) }));
-const PUCK_CMDS = {
-  // Modelado
-  curve: { k: 'curve', label: 'Curva', key: 'C', run: () => setTool('curve'), sub: [
-    { k: 'ground', label: 'En el suelo', run: () => { setDrawPlane('xz'); setTool('curve'); } },
-    { k: 'front', label: 'De frente', run: () => { setDrawPlane('xy'); setTool('curve'); } },
-    { k: 'circle', label: 'Círculo', run: () => setTool('circle') }, { k: 'project', label: 'Proyectar', run: projectSelection }] },
-  surface: { k: 'surf', label: 'Superficie', run: () => setTool('plane'), sub: [
-    { k: 'plane', label: 'Plano', run: () => setTool('plane') }, { k: 'revolve', label: 'Revolución', run: () => OPS.revolve() },
-    { k: 'loft', label: 'Loft', run: () => OPS.loft() }, { k: 'extrude', label: 'Extruir', run: () => OPS.extrude() }] },
-  edit: { k: 'edit', label: 'Editar', run: () => startEdgeOp('align'), sub: [
-    { k: 'align', label: 'Align', run: () => startEdgeOp('align') }, { k: 'blend', label: 'Blend', run: () => startEdgeOp('blend') },
-    { k: 'loft', label: 'Skin', run: () => startEdgeOp('skin') }, { k: 'extend', label: 'Extender', run: () => startEdgeOp('extend') },
-    { k: 'offset', label: 'Offset', run: offsetSelection }, { k: 'round', label: 'Redondear', run: () => startFillet() }] },
-  pick: { k: 'arrow', label: 'Elegir', key: 'O', run: () => setPickMode('object'), sub: [
-    { k: 'object', label: 'Objeto', run: () => setPickMode('object') }, { k: 'pickCurve', label: 'Curvas', run: () => setPickMode('object', 'curve') },
-    { k: 'pickSurf', label: 'Superficies', run: () => setPickMode('object', 'surface') }, { k: 'cv', label: 'CV', run: () => setPickMode('cv') },
-    { k: 'nothing', label: 'Nada', run: pickNothing }] },
-  xform: { k: 'move', label: 'Transformar', key: 'W', run: mv, sub: [
-    { k: 'move', label: 'Mover', run: mv }, { k: 'rotate', label: 'Rotar', run: rot }, { k: 'scale', label: 'Escalar', run: scl }, { k: 'pivot', label: 'Pivote', run: togglePivotEdit }] },
-  dup: { k: 'dup', label: 'Duplicar', run: duplicateSelection, sub: [{ k: 'symm', label: 'Simetría', run: mirrorSelection }, { k: 'measure', label: 'Distancia', soon: true }] },
-  show: { k: 'show', label: 'Mostrar', run: unhideAll, sub: [
-    { k: 'hide', label: 'Ocultar', run: hideSelection }, { k: 'show', label: 'Mostrar todo', run: unhideAll },
-    { k: 'frame', label: 'Encuadrar', run: frameSelection }, { k: 'top', label: 'Vista sup.', run: topView }] },
-  del: { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
-  eval: { k: 'zebra', label: 'Map Types', run: () => setDiag('showroom'), sub: [...MAP_TYPES.map((m) => ({ k: { forja: 'studio', showroom: 'studio', skyshade: 'shade', abstract: 'sun', zebra: 'zebra', curv: 'curvz' }[m.k], label: m.label, run: () => setDiag(m.k) })), { k: 'wire', label: 'Malla', run: toggleWire }] },
-  // Visu
+const VISU_CMDS = {
   mats: { k: 'mat', label: 'Materiales', run: () => setMaterial(matKey), sub: matSub(['candy', 'paint', 'black', 'pearl', 'alu', 'chrome']) },
   mats2: { k: 'mat', label: 'Más materiales', run: () => setMaterial('ceram'), sub: matSub(['ceram', 'glass', 'plastic', 'clay']) },
   env: { k: 'sun', label: 'Entorno', run: env('studio'), sub: [
@@ -3322,77 +3320,56 @@ const PUCK_CMDS = {
   expo: { k: 'expo', label: 'Exposición', run: () => setInput('expo', 0), sub: [
     { k: 'expo', label: 'Más luz', run: () => setInput('expo', Math.min(3, +$('expo').value + 0.5)) },
     { k: 'expo', label: 'Normal', run: () => setInput('expo', 0) }, { k: 'expo', label: 'Menos luz', run: () => setInput('expo', Math.max(-3, +$('expo').value - 0.5)) }] },
-  render: { k: 'render', label: 'Render', soon: true, sub: [{ k: 'render', label: 'Trazado de rayos', soon: true }, { k: 'photo', label: 'Guardar imagen', soon: true }] },
-  // IA
-  aiNew: { k: 'chat', label: 'Nuevo pedido', run: () => { setPinned(true); $('ai-prompt').focus(); } },
-  aiPhoto: { k: 'photo', label: 'Desde fotos', run: () => $('ai-photo-btn').click() },
-  aiEx: { k: 'ai', label: 'Ejemplos', run: () => runAI('una taza'), sub: [
-    { k: 'cube', label: 'Tornillo', run: () => runAI('tornillo') }, { k: 'cube', label: 'Mesa', run: () => runAI('una mesa') },
-    { k: 'cube', label: 'Silla', run: () => runAI('una silla') }, { k: 'cube', label: 'Taza', run: () => runAI('una taza') }, { k: 'cube', label: 'Botella', run: () => runAI('una botella') }] },
-  // comunes
-  undo: { k: 'undo', label: 'Deshacer', key: 'Ctrl+Z', run: undo, sub: [{ k: 'redo', label: 'Rehacer', run: redo }] },
-  forgeIn: { k: 'object', label: 'Usar selección', run: () => forgeFromForja() },
-  forgeOut: { k: 'dup', label: 'Aplicar', run: () => forgeApply() },
-  forgeExport: { k: 'object', label: 'Exportar', run: () => $('bf-exportBtn').click() },
-  forgeFrame: { k: 'frame', label: 'Encuadrar', run: () => forge?.resetCamera() },
-  forgeRender: { k: 'sun', label: 'Render', run: () => $('bf-ptTool').click() },
-  frame: { k: 'frame', label: 'Encuadrar', key: 'F', run: frameSelection, sub: [{ k: 'frame', label: 'Todo', run: () => frameObjects([]) }, { k: 'top', label: 'Vista sup.', run: topView }] },
-  layers: { k: 'layers', label: 'Capas', run: () => layersWin.show(), sub: [
-    { k: 'layers', label: 'Nueva capa', run: newLayer }, { k: 'layers', label: 'Pasar selección', run: () => assignToLayer() }] },
-  modules: { k: 'modules', label: 'Módulos', run: holdHint, sub: [
-    { k: 'shade', label: 'Modelado', run: () => switchLayout('diag') }, { k: 'visu', label: 'Visu', run: () => switchLayout('render') }, { k: 'ai', label: 'IA', run: () => switchLayout('ai') }, { k: 'object', label: 'Forge', run: () => switchLayout('forge') }] },
-  prefs: { k: 'gear', label: 'Personalizar', run: () => openPrefs('puck') },
+  frame: { k: 'frame', label: 'Encuadrar', key: 'F', run: frameSelection, sub: [{ k: 'frame', label: 'Todo', run: () => frameObjects([]) }] },
 };
-function holdHint() { toast('Mantén V para ver los módulos y elige uno con el ratón'); }
-const PUCK_DEFAULT = {
-  diag: ['curve', 'surface', 'edit', 'pick', 'xform', 'dup', 'show', 'del'],
-  render: ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'render', 'frame'],
-  ai: ['aiNew', 'aiPhoto', 'aiEx', 'frame', 'undo', 'layers'],
-  forge: ['forgeIn', 'forgeOut', 'forgeExport', 'forgeFrame', 'forgeRender'],
+// Marking menus de Alias (Ctrl+Shift + botón del ratón), cada uno con las opciones y el lugar de la hoja de Alias:
+// 8 en el anillo (empezando arriba y en el sentido del reloj) y el resto en una columna debajo (extras; null = hueco).
+// label = nombre en Forja; alias = nombre en Alias (sale en el centro al pasar por encima).
+const queryHistory = () => {
+  const o = selObjs.length === 1 && pickMode === 'object' ? selObjs[0] : null, r = o && relations.find((x) => outputOf(x) === o.id);
+  if (r) TW.show(relSpec(r)); else toast(o ? `${o.name} no tiene historial de construcción.` : 'Elige un objeto con historial (verde) y vuelve a usar Query Edit History.');
 };
-const PUCK_MODULES = { diag: 'Modelado', render: 'Visu', ai: 'IA', forge: 'Forge' };
-// qué comandos caben en el Puck de cada módulo (VISU solo visualización; nada que cambie de módulo sin querer)
-const CMD_MODS = {
-  diag: ['curve', 'surface', 'edit', 'pick', 'xform', 'dup', 'show', 'del', 'eval', 'undo', 'frame', 'layers', 'modules', 'prefs'],
-  render: ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'render', 'frame', 'prefs'],
-  ai: ['aiNew', 'aiPhoto', 'aiEx', 'undo', 'frame', 'layers', 'prefs'],
-  forge: ['forgeIn', 'forgeOut', 'forgeExport', 'forgeFrame', 'forgeRender', 'prefs'],
-};
-const puckIds = (mod) => (prefs.puck?.[mod] || PUCK_DEFAULT[mod]).filter((id) => PUCK_CMDS[id] && CMD_MODS[mod].includes(id));
-// Marking menus (Ctrl+Shift + botón del ratón), con la misma forma pero otra información
 const PICK_MM = [
-  { k: 'object', label: 'Objeto', key: 'O', run: () => setPickMode('object'), sub: [
-    { k: 'pickCurve', label: 'Curvas', run: () => setPickMode('object', 'curve') }, { k: 'pickSurf', label: 'Superficies', run: () => setPickMode('object', 'surface') }] },
-  { k: 'cv', label: 'CV', key: 'P', run: () => setPickMode('cv') },
-  { k: 'frame', label: 'Encuadrar', key: 'F', run: frameSelection, sub: [{ k: 'frame', label: 'Todo', run: () => frameObjects([]) }, { k: 'top', label: 'Vista sup.', run: topView }] },
-  { k: 'hide', label: 'Ocultar', run: hideSelection, sub: [{ k: 'show', label: 'Mostrar todo', run: unhideAll }] },
-  { k: 'pivot', label: 'Punto de interés', key: 'L', run: pivotToSelection },
-  { k: 'nothing', label: 'Nada', run: pickNothing },
+  { k: 'nothing', label: 'Nada', alias: 'Nothing', run: pickNothing },
+  { k: 'cv', label: 'CV', alias: 'CV', key: 'P', run: () => setPickMode('cv') },
+  { k: 'pickCurve', label: 'Curvas', alias: 'Curves', run: () => setPickMode('object', 'curve') },
+  { k: 'blendPt', label: 'Punto de blend', alias: 'Blend Point', soon: true },
+  { k: 'object', label: 'Objeto', alias: 'Object', key: 'O', run: () => setPickMode('object') },
+  { k: 'pickSurf', label: 'Superficie', alias: 'Surface', run: () => setPickMode('object', 'surface') },
+  { k: 'mesh', label: 'Malla', alias: 'Mesh', run: () => setPickMode('object', 'mesh') },
+  { k: 'cos', label: 'Curva s/ superficie', alias: 'Curve-on-Surface', run: () => setPickMode('object', 'cos') },
+];
+PICK_MM.extras = [
+  { k: 'construct', label: 'Construcción', alias: 'Construction', soon: true },
+  { k: 'locator', label: 'Localizador', alias: 'Locator', soon: true },
 ];
 const XFORM_MM = [
-  { k: 'move', label: 'Mover', key: 'W', run: mv },
-  { k: 'rotate', label: 'Rotar', key: 'E', run: rot },
-  { k: 'scale', label: 'Escalar', key: 'R', run: scl },
-  { k: 'pivot', label: 'Pivote', key: 'D', run: togglePivotEdit, sub: [{ k: 'pivot', label: 'Centrar pivote', run: centerPivots }, { k: 'frame', label: 'Punto de interés', run: pivotToSelection }] },
-  { k: 'dup', label: 'Duplicar', run: duplicateSelection },
-  { k: 'del', label: 'Borrar', key: 'Supr', run: deleteSelection },
+  { k: 'move', label: 'Mover', alias: 'Move', key: 'W', run: mv },
+  { k: 'pivot', label: 'Mover pivote', alias: 'Move Pivot', key: 'D', run: togglePivotEdit },
+  { k: 'scale', label: 'Escalar', alias: 'Scale', key: 'R', run: scl },
+  { k: 'centerPivot', label: 'Centrar pivote', alias: 'Center Pivot', run: centerPivots },
+  { k: 'rotate', label: 'Rotar', alias: 'Rotate', key: 'E', run: rot },
+  { k: 'npScale', label: 'Escalar no prop.', alias: 'NonProportional Scale', run: sclNP },
+  { k: 'history', label: 'Ver historial', alias: 'Query Edit History', run: queryHistory },
+  { k: 'frame', label: 'Mirar a', alias: 'Look At', key: 'F', run: frameSelection },
 ];
+XFORM_MM.extras = [{ k: 'delLoc', label: 'Borrar localizadores', alias: 'Delete Locators', soon: true }];
 const DISPLAY_MM = [
-  { k: 'shade', label: 'Modelado', run: () => switchLayout('diag'), sub: [
-    ...MAP_TYPES.map((m) => ({ k: { forja: 'studio', showroom: 'studio', skyshade: 'shade', abstract: 'sun', zebra: 'zebra', curv: 'curvz' }[m.k], label: m.label, run: () => setDiag(m.k) })),
-    { k: 'wire', label: 'Malla', run: toggleWire }, { k: 'visu', label: 'Realista', run: () => { if (layout !== 'diag') switchLayout('diag'); setShadeReal(!prefs.shadeReal); } }] },
-  { k: 'visu', label: 'Visu', run: () => switchLayout('render'), sub: [
-    { k: 'studio', label: 'Estudio', run: env('studio') }, { k: 'sun', label: 'Exterior', run: env('sun') },
-    { k: 'sunset', label: 'Atardecer', run: env('sunset') }, { k: 'cloud', label: 'Nublado', run: env('overcast') }] },
-  { k: 'ai', label: 'IA', run: () => switchLayout('ai') },
-  { k: 'object', label: 'Forge', run: () => switchLayout('forge') },
-  { k: 'model', label: 'Toggle Model', run: toggleModel },
-  { k: 'grid', label: 'Toggle Grid', run: toggleGrid },
-  { k: 'ctrlOn', label: 'Controls', run: () => setPickMode(pickMode === 'cv' ? 'object' : 'cv'), sub: [
-    { k: 'ctrlOn', label: 'Controls ON', run: () => setPickMode('cv') }, { k: 'ctrlOff', label: 'Controls OFF', run: () => setPickMode('object') }] },
-  { k: 'screen', label: 'Pantalla', run: fullscreen, sub: [
-    { k: 'full', label: 'Completa', run: fullscreen }, { k: 'panel', label: 'Panel', run: () => setPinned(!pinned) }, { k: 'split', label: 'Dividida', run: () => switchLayout('split') }] },
-  { k: 'info', label: 'Información', run: () => $('panel').classList.add('show') },
+  { k: 'info', label: 'Información', alias: 'Information Window', run: () => $('panel').classList.add('show') },
+  { k: 'shadeQ', label: 'Sombreado calidad', alias: 'Shade (Quality)', run: () => { if (layout !== 'diag') switchLayout('diag'); if (diagMode === 'wire') toggleWire(); setShadeReal(true); } },
+  { k: 'shadeF', label: 'Sombreado rápido', alias: 'Shade (Fast)', run: () => { if (layout !== 'diag') switchLayout('diag'); if (diagMode === 'wire') toggleWire(); setShadeReal(false); } },
+  { k: 'ctrlOn', label: 'Controles ON', alias: 'Controls ON', run: () => setPickMode('cv') },
+  { k: 'planeEd', label: 'Editor de plano', alias: 'Plane Editor', soon: true },
+  { k: 'ctrlOff', label: 'Controles OFF', alias: 'Controls OFF', run: () => setPickMode('object') },
+  { k: 'grid', label: 'Rejilla', alias: 'Toggle Grid', run: toggleGrid },
+  { k: 'model', label: 'Modelo', alias: 'Toggle Model', run: toggleModel },
+];
+DISPLAY_MM.extras = [
+  { k: 'palette', label: 'Paleta', alias: 'Palette', run: () => layersWin.togglePin() },
+  { k: 'shelf', label: 'Estante', alias: 'Shelf', soon: true },
+  { k: 'panel', label: 'Panel', alias: 'Panel', run: () => setPinned(!pinned) },
+  null,
+  { k: 'full', label: 'Pantalla completa', alias: 'Fullscreen Display', run: fullscreen },
 ];
 
 const RADIAL_TILT = 1;     // anillo circular (neumorfismo plano; antes 0,6 = anillo 3D visto desde arriba)
@@ -3446,7 +3423,17 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
     });
     mains.push(m); all.push(m);
   });
-  const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, active: null, sticky: false, radius: R + 40 };
+  // extras: columna de pastillas debajo del anillo (como en los marking menus de Alias); null deja un hueco
+  const extras = [];
+  let ey = r + 74;
+  (items.extras || []).forEach((it, n) => {
+    if (!it) { ey += 18; return; }
+    const m = { it, x: 0, y: ey, base: 1, subs: [], extra: true };
+    m.b = button(it, 0, ey, 1, 'extra', [0, 0], (items.length + n) * 8);
+    extras.push(m); all.push(m); ey += 44;
+  });
+  const below = extras.length ? ey - 44 + 30 : 0;
+  const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, active: null, sticky: false, radius: Math.max(R + 40, below + 50) };
   const magnify = (mx, my) => all.forEach((x) => {
     const d = mx == null ? 1e9 : Math.hypot(x.x - mx, x.y - my);
     const s = x.base * (1 + 0.14 * Math.exp(-(d * d) / (2 * 42 * 42))) * (x === st.hover ? 1.06 : 1);
@@ -3459,7 +3446,7 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
     all.forEach((x) => { x.b.classList.toggle('on', x === h); x.b.classList.toggle('parent', !!h?.sub && x === h.parent); });
     line.setAttribute('x2', h ? h.x : 0); line.setAttribute('y2', h ? h.y : 0);
     cName.textContent = h ? h.it.label : title;
-    cHint.textContent = h ? (h.it.soon ? 'próximamente' : h.it.key || (h.subs?.length ? 'más opciones afuera' : '')) : 'suelta sobre una opción';
+    cHint.textContent = h ? ([h.it.alias, h.it.soon ? 'próximamente' : h.it.key].filter(Boolean).join(' · ') || (h.subs?.length ? 'más opciones afuera' : '')) : 'suelta sobre una opción';
   };
   const nearest = (list, ang) => {
     let best = null, bd = 1e9;
@@ -3470,6 +3457,8 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
     const dx = x - st.at.x, dy = y - st.at.y, d = Math.hypot(dx, dy / K), ang = Math.atan2(dy / K, dx);
     // menos sensible: solo se marca una esfera si el cursor está realmente cerca de ella (no solo en su dirección)
     const near = (o, lim) => o && Math.hypot(o.x - dx, o.y - dy) < lim;
+    const ex = extras.find((o) => Math.abs(dx - o.x) < 105 && Math.abs(dy - o.y) < 21);
+    if (ex) { st.highlight(ex); magnify(dx, dy); return; }
     if (d < 52) { st.highlight(null); st.active = null; magnify(dx, dy); return; }
     if (d < r + 38 || !st.active?.subs.length) { const m = nearest(mains, ang)[0]; st.highlight(near(m, 66) ? m : null); }
     else {
@@ -3480,7 +3469,7 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
   };
   st.show = (x, y) => {
     const m = R * 0.92;
-    st.at = { x: Math.min(innerWidth - m, Math.max(m, x)), y: Math.min(innerHeight - m * K - 40, Math.max(m * K + 40, y)) };
+    st.at = { x: Math.min(innerWidth - m, Math.max(m, x)), y: Math.min(innerHeight - Math.max(m * K, below) - 40, Math.max(m * K + 40, y)) };
     el.style.left = st.at.x + 'px'; el.style.top = st.at.y + 'px';
     el.classList.remove('bloom', 'settled');
     const wc = wallColorAt(st.at.x, st.at.y); if (wc) el.style.setProperty('--nm', wc);   // el color exacto del muro detrás
@@ -3503,7 +3492,6 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
   });
   return st;
 }
-let puck = null, puckKey = '';
 // ---------- Puck de MODELADO (Z): Curvas · Superficies · Sólidos, cada una con hasta 3 anillos de herramientas (src/puck3.js) ----------
 // PUCK3_LIB = biblioteca de herramientas. Las 'shared' (mover, duplicar, simetría, borrar...) son instancias por contexto: al usarlas
 // desde un anillo se quedan solo con lo elegido de ese tipo (curvas / superficies / sólidos) y guardan sus opciones por contexto
@@ -3540,6 +3528,8 @@ const CTX_KIND = { curves: (o) => o.kind === 'curve', surfaces: (o) => o.kind ==
 let ctxInst = null;   // la última instancia usada: sus opciones se guardan al usar otra o al volver a abrir el Puck
 function runPuck3(id, ctx) {
   const t = PUCK3_LIB[id], P = prefs.puck3 || (prefs.puck3 = {});
+  // desde Visu, IA o Forge las herramientas de modelado llevan antes al módulo Modelado
+  if (layout !== 'diag' && layout !== 'split' && !['forge', 'prefs', 'undo', 'layers', 'showAll'].includes(id)) switchLayout('diag');
   if (ctxInst) { const [cId, cCtx] = ctxInst, ct = PUCK3_LIB[cId]; if (ct?.params) { P.inst = { ...(P.inst || {}), [cCtx + ':' + cId]: Object.fromEntries(ct.params.map((k) => [k, toolDef[k]])) }; savePrefs(); } }
   if (t.shared) {
     const keep = selObjs.filter(CTX_KIND[ctx]);
@@ -3555,29 +3545,18 @@ const puck3 = createPuck3({
   cfg: prefs.puck3 || (prefs.puck3 = {}), save: savePrefs, run: runPuck3,
   wallColor: (x, y) => wallColorAt(x, y) || getComputedStyle(document.documentElement).getPropertyValue('--bg'),
 });
-// el Puck se construye para el módulo actual (y se rehace si cambia el módulo o la personalización); en Modelado es el de 3 anillos
-function getPuck() {
-  const mod = layout === 'split' ? 'diag' : layout;
-  if (mod === 'diag') { if (puck !== puck3) { puck?.el.remove(); puck = puck3; puckKey = ''; MENUS[0] = puck3; } return puck3; }
-  const ids = puckIds(mod), key = mod + ':' + ids.join(',');
-  if (key !== puckKey) {
-    if (puck !== puck3) puck?.el.remove();
-    puck = makeRadial(ids.map((id) => PUCK_CMDS[id]), { r: 150, title: 'Puck · ' + PUCK_MODULES[mod] });
-    puckKey = key;
-    MENUS[0] = puck;
-  }
-  return puck;
-}
+// Z = el Puck (Curvas · Superficies · Sólidos) en todos los módulos
+const getPuck = () => puck3;
 const pickMenu = makeRadial(PICK_MM, { r: 128, title: 'Selección' });
 const xformMenu = makeRadial(XFORM_MM, { r: 128, title: 'Transformar' });
 const disp = makeRadial(DISPLAY_MM, { r: 140, title: 'Visualización' });
 // En VISU los menús solo llevan cosas de visualización (nada de modelado ni de IA, que cambiarían de módulo)
-const VISU_MM = ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'frame'].map((id) => PUCK_CMDS[id])
+const VISU_MM = ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'frame'].map((id) => VISU_CMDS[id])
   .concat([{ k: 'screen', label: 'Pantalla', run: fullscreen, sub: [{ k: 'full', label: 'Completa', run: fullscreen }, { k: 'panel', label: 'Panel', run: () => setPinned(!pinned) }] }]);
 const dispVisu = makeRadial(VISU_MM, { r: 140, title: 'Visu' });
-const MENUS = [null, pickMenu, xformMenu, disp, dispVisu];
-const menuFor = (button) => (layout === 'render' ? dispVisu : [pickMenu, xformMenu, disp][button] || disp);
-getPuck();
+const MENUS = [puck3, pickMenu, xformMenu, disp, dispVisu];
+// Ctrl+Shift + izq / medio / der = Selección / Transformar / Visualización (en todos los módulos, como Alias); Espacio en Visu = menú de Visu
+const menuFor = (button) => [pickMenu, xformMenu, disp][button] || disp;
 let lastPtr = { x: innerWidth / 2, y: innerHeight / 2 };
 addEventListener('pointermove', (e) => {
   lastPtr = { x: e.clientX, y: e.clientY };
@@ -3614,7 +3593,11 @@ function bindKey(code, getMenu) {
   }, true);
 }
 bindKey('KeyZ', getPuck);
-bindKey('Space', () => menuFor(2));
+bindKey('Space', () => (layout === 'render' ? dispVisu : disp));
+// Tab ya no abre nada (el Puck está en la Z); tampoco salta el foco entre botones fuera de los cuadros de texto
+addEventListener('keydown', (e) => {
+  if (e.key === 'Tab' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) && !e.target.closest?.('dialog')) e.preventDefault();
+}, true);
 addEventListener('keydown', (e) => { if (e.key === 'Escape') MENUS.forEach((m) => m.close(false)); }, true);
 let mouseMenu = null;
 addEventListener('pointerdown', (e) => {
@@ -3891,6 +3874,8 @@ const MENUBAR = [
     { label: 'Objetos', key: 'O', run: () => setPickMode('object'), ...chk(() => pickMode === 'object' && !pickFilter) },
     { label: 'Solo curvas', run: () => setPickMode('object', 'curve'), ...chk(() => pickFilter === 'curve') },
     { label: 'Solo superficies', run: () => setPickMode('object', 'surface'), ...chk(() => pickFilter === 'surface') },
+    { label: 'Solo mallas', run: () => setPickMode('object', 'mesh'), ...chk(() => pickFilter === 'mesh') },
+    { label: 'Solo curvas sobre superficie', run: () => setPickMode('object', 'cos'), ...chk(() => pickFilter === 'cos') },
     { label: 'CVs', key: 'P', run: () => setPickMode('cv'), ...chk(() => pickMode === 'cv') },
     { label: 'Nada', run: pickNothing }, { sep: true }, { title: 'Snap fijo' },
     { label: 'Rejilla', key: 'Alt', run: () => $('snap-grid').click(), ...chk(() => snapToggles.grid) },
@@ -3992,37 +3977,17 @@ function openPrefs(tab = 'ui') {
   d.querySelectorAll('[data-ppage]').forEach((p) => (p.hidden = p.dataset.ppage !== tab));
   d.querySelectorAll('[name="pref-eval"]').forEach((r) => (r.checked = r.value === prefs.evalUI));
   $('pref-xform').value = prefs.xform;
-  if (tab === 'puck') { const m = layout === 'split' ? 'diag' : layout; $('pk-mod').value = m === 'diag' ? 'p3-' + (prefs.puck3?.active || 'curves') : m; if (!$('pk-mod').value) $('pk-mod').value = 'p3-curves'; renderPuckEditor(); }
+  if (tab === 'puck') { $('pk-mod').value = 'p3-' + (prefs.puck3?.active || 'curves'); if (!$('pk-mod').value) $('pk-mod').value = 'p3-curves'; renderPuckEditor(); }
   d.querySelectorAll('[data-pref-snap]').forEach((c) => (c.checked = !!snapToggles[c.dataset.prefSnap]));
   if (!d.open) d.showModal();
 }
-// Editor del Puck: lista de esferas del módulo elegido, con subir / bajar / quitar y añadir de la biblioteca
-function renderPuckEditor() {
-  if ($('pk-mod').value.startsWith('p3-')) return renderPuck3Editor($('pk-mod').value.slice(3));
-  $('pk-add').closest('.pk-add').hidden = false;
-  const mod = $('pk-mod').value, ids = puckIds(mod).slice();
-  const save = (next) => { prefs.puck = { ...(prefs.puck || {}), [mod]: next }; savePrefs(); renderPuckEditor(); };
-  $('pk-list').innerHTML = ids.map((id, i) => {
-    const c = PUCK_CMDS[id];
-    return `<li><i>${icon(c.k)}</i><span>${esc(c.label)}${c.sub ? `<small>${c.sub.length} en submenú</small>` : ''}${c.soon ? '<small>próximamente</small>' : ''}</span>
-      <span class="pk-btns"><button data-up="${i}" title="Subir" aria-label="Subir">↑</button><button data-down="${i}" title="Bajar" aria-label="Bajar">↓</button><button data-del="${i}" title="Quitar" aria-label="Quitar">×</button></span></li>`;
-  }).join('');
-  $('pk-list').querySelectorAll('[data-up]').forEach((b) => b.addEventListener('click', () => { const i = +b.dataset.up; if (i > 0) { [ids[i - 1], ids[i]] = [ids[i], ids[i - 1]]; save(ids); } }));
-  $('pk-list').querySelectorAll('[data-down]').forEach((b) => b.addEventListener('click', () => { const i = +b.dataset.down; if (i < ids.length - 1) { [ids[i + 1], ids[i]] = [ids[i], ids[i + 1]]; save(ids); } }));
-  $('pk-list').querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => { if (ids.length > 1) { ids.splice(+b.dataset.del, 1); save(ids); } }));
-  const rest = CMD_MODS[mod].filter((id) => PUCK_CMDS[id] && !ids.includes(id));
-  $('pk-add').innerHTML = rest.map((id) => `<option value="${id}">${esc(PUCK_CMDS[id].label)}</option>`).join('');
-  $('pk-add-btn').disabled = !rest.length || ids.length >= 10;
-  $('pk-add-btn').onclick = () => { if ($('pk-add').value && ids.length < 10) save([...ids, $('pk-add').value]); };
-  $('pk-reset').onclick = () => { const p2 = { ...(prefs.puck || {}) }; delete p2[mod]; prefs.puck = p2; savePrefs(); renderPuckEditor(); };
-}
+function renderPuckEditor() { renderPuck3Editor(($('pk-mod').value || 'p3-curves').slice(3)); }
 // Editor del Puck de Modelado: los 3 anillos de una categoría (subir, bajar, quitar, pasar a otro anillo, añadir)
 function renderPuck3Editor(cat) {
   const P = prefs.puck3 || (prefs.puck3 = {}), def = PUCK3_CATS.find((c) => c.id === cat);
   const rings = (P.rings?.[cat] || def.rings).map((r) => r.slice());
   while (rings.length < 3) rings.push([]);
   const save = () => { P.rings = { ...(P.rings || {}), [cat]: rings }; savePrefs(); if (puck3.open) puck3.close(false); renderPuck3Editor(cat); };
-  $('pk-add').closest('.pk-add').hidden = true;
   $('pk-list').innerHTML = rings.map((ids, k) => `<li class="pk-ring"><b>Anillo ${k + 1}</b><small>${ids.length} herramientas</small></li>` + ids.map((id, i) => {
     const t = PUCK3_LIB[id];
     return `<li><i>${icon(t.k)}</i><span>${esc(t.label)}${t.shared ? '<small>compartida: actúa sobre ' + def.label.toLowerCase() + '</small>' : ''}${t.soon ? '<small>próximamente</small>' : ''}</span>
@@ -4823,7 +4788,7 @@ function revolveSelection() {
   if (!cs.length) return toast('Revolución: elige una curva de perfil (mejor dibujada de frente) y vuelve a pulsar Revolución.');
   checkpoint();
   const made = cs.map((c) => { const r = { type: 'revolve', src: c.id }; const o = addSurface(N.revolve(c.data), 'Revolución'); r.out = o.id; addRelation(r); return o; });
-  finishCreate(made, 'Revolución alrededor del eje Y, con historial: sigue a su curva');
+  finishCreate(made, 'Revolución alrededor del eje Z (vertical), con historial: sigue a su curva');
 }
 function loftSelection() {
   const cs = selCurves();
@@ -4904,12 +4869,12 @@ function relSpec(r, group = [r]) {
     const setType = (v) => {
       checkpoint(); r.atype = v;
       if (v === 'view') r.avec = camera.getWorldDirection(new THREE.Vector3()).toArray();
-      if (v === 'vector') r.avec = AXES[r.axis ?? 1].toArray();
+      if (v === 'vector') r.avec = AXES[r.axis ?? 2].toArray();
       if (r.curve) retargetCurve(r);
       redo(); TW.show(relSpec(r, group));
     };
     fields.push({ type: 'seg', label: 'Tipo de alineación', opts: [['natural', 'Natural'], ['normal', 'Normal'], ['view', 'Vista'], ['vector', 'Vector']], get: () => r.atype || 'natural', set: setType },
-      { type: 'seg', label: 'Eje del vector', opts: [[0, 'X'], [1, 'Y'], [2, 'Z']], show: () => r.atype === 'vector', get: () => r.axis ?? 1, set: (v) => { r.axis = v; r.avec = AXES[v].toArray(); if (r.curve) retargetCurve(r); set('axis', v); } });
+      { type: 'seg', label: 'Eje del vector', opts: [[0, 'X'], [1, 'Y'], [2, 'Z']], show: () => r.atype === 'vector', get: () => r.axis ?? 2, set: (v) => { r.axis = v; r.avec = AXES[v].toArray(); if (r.curve) retargetCurve(r); set('axis', v); } });
     if (r.curve) {
       const ms = byId(r.master);
       fields.push({ type: 'check', label: 'Extremo contrario de la curva', get: () => !!r.sEnd, set: (v) => { checkpoint(); r.sEnd = v ? 1 : 0; r.lambda0 = HX.curveNaturalLambda(byId(r.slave).data, r.sEnd, ms.data, r); redo(); } });
@@ -4959,7 +4924,7 @@ function relSpec(r, group = [r]) {
       { type: 'check', label: 'Comprobar continuidad', get: () => toolDef.contCheck !== false, set: (v) => { toolDef.contCheck = v; saveToolDef(); TW.show(relSpec(r, group)); } }] });
   } else if (r.type === 'project') {
     title += group.length > 1 ? ` · ${group.length} curvas → ${nm(r.surf)}` : ` · ${nm(r.src)} → ${nm(r.surf)}`;
-    fields.push({ type: 'seg', label: 'Dirección', opts: [['view', 'Vista'], ['y', 'Y'], ['normal', 'Normal']], get: () => r.mode,
+    fields.push({ type: 'seg', label: 'Dirección', opts: [['view', 'Vista'], ['y', 'Z'], ['normal', 'Normal']], get: () => r.mode,
       set: (v) => { toolDef.projMode = v; saveToolDef(); checkpoint(); const d = projDir(v); group.forEach((x) => { x.mode = v; x.dir = d; }); redo(); } },
     { type: 'seg', label: 'Recortar', opts: [['none', 'No'], ['inside', 'Dentro'], ['outside', 'Fuera']], get: () => r.trim || 'none',
       set: (v) => { toolDef.projTrim = v; saveToolDef(); set('trim', v); } },
@@ -4971,14 +4936,14 @@ function relSpec(r, group = [r]) {
   } else if (r.type === 'extrude') {
     title += group.length > 1 ? ` · ${group.length} curvas` : ` · ${nm(r.src)}`;
     fields.push({ type: 'range', label: 'Distancia', min: -10, max: 10, step: 0.01, get: () => r.dist, start: checkpoint, set: live('dist'), fmt: (v) => v.toFixed(2) + ' dm' },
-      { type: 'seg', label: 'Dirección', opts: [['auto', 'Normal'], ['x', 'X'], ['y', 'Y'], ['z', 'Z']], get: () => r.dir, set: (v) => { toolDef.extDir = v; saveToolDef(); set('dir', v); } },
+      { type: 'seg', label: 'Dirección', opts: [['auto', 'Normal'], ['x', 'X'], ['z', 'Y'], ['y', 'Z']], get: () => r.dir, set: (v) => { toolDef.extDir = v; saveToolDef(); set('dir', v); } },
       { type: 'check', label: 'Hacia los dos lados', get: () => r.both, set: (v) => { toolDef.extBoth = v; saveToolDef(); set('both', v); } });
   } else if (r.type === 'offset') {
     title += ` · ${nm(r.src)}`;
     fields.push({ type: 'range', label: 'Distancia', min: -2, max: 2, step: 0.01, get: () => r.dist, start: checkpoint, set: (v) => { toolDef.offsetDist = v; saveToolDef(); live('dist')(v); }, fmt: (v) => v.toFixed(2) + ' dm' });
   } else if (r.type === 'mirror') {
     title += ` · ${nm(r.src)}`;
-    fields.push({ type: 'seg', label: 'Plano', opts: [['x', 'YZ'], ['y', 'XZ'], ['z', 'XY']], get: () => r.plane || 'x', set: (v) => { toolDef.mirrorPlane = v; saveToolDef(); set('plane', v); } });
+    fields.push({ type: 'seg', label: 'Plano', opts: [['x', 'YZ'], ['z', 'XZ'], ['y', 'XY']], get: () => r.plane || 'x', set: (v) => { toolDef.mirrorPlane = v; saveToolDef(); set('plane', v); } });
   } else title += ` · ${r.type === 'loft' ? r.srcs.length + ' curvas' : nm(r.src)}`;
   if (['align', 'blend', 'skin', 'extend'].includes(r.type) && toolDef.contCheck !== false) fields.push({ type: 'html', html: () => relDiag(r), diagOf: r.id });
   fields.push({ type: 'check', label: 'Actualizar al momento', get: () => r.auto !== false, set: (v) => { group.forEach((x) => (x.auto = v)); if (v && r.pending) apply(); } });
@@ -5295,8 +5260,8 @@ function blendDemo() {
 // El paso depende de lo cerca que esté la cámara (acercarse = pasos más finos). Shift = 10 veces más.
 // Izq/der usan el eje del mundo más parecido al "derecha" de la pantalla; arriba/abajo, el más parecido al "arriba".
 function nearestAxis(v) {
-  const a = [Math.abs(v.x), Math.abs(v.y), Math.abs(v.z)], i = a.indexOf(Math.max(...a));
-  return AXES[i].clone().multiplyScalar(Math.sign([v.x, v.y, v.z][i]) || 1);
+  const d = AXES.map((a) => a.dot(v)), a = d.map(Math.abs), i = a.indexOf(Math.max(...a));
+  return AXES[i].clone().multiplyScalar(Math.sign(d[i]) || 1);
 }
 addEventListener('keydown', (e) => {
   if (!e.key.startsWith('Arrow') || e.ctrlKey || e.metaKey || e.altKey || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;

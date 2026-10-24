@@ -169,7 +169,7 @@ export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, s
     const h = st.hover; st.hover = null;
     if (go && h) (h.t.soon || !h.t.run ? soon(h.t.label) : () => run(h.id, cfg.active))();
   };
-  // mantener Tab y pasar por encima: marca la herramienta del anillo (por distancia al centro y ángulo)
+  // mantener Z y pasar por encima: marca la herramienta del anillo (por distancia al centro y ángulo)
   st.pickAt = (px, py) => {
     const c = cfg.active, n = c ? openOf(c) : 0;
     if (!n) return;

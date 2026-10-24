@@ -726,6 +726,23 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   deshaciendo; Tab ya no abre nada. Se quitaron los toasts de diagnóstico de la v0.39.2. Menú Ventanas, Preferencias › Puck y la tabla de atajos dicen Z.
   Prueba: forja/tz2.mjs (Tab no abre, Z abre puck3, Ctrl+Z no abre menú).
 
+- (v0.40) Controles como Alias (hoja "Mouse and Keyboard Reminders" del usuario):
+  (1) Puck VIEJO eliminado: Z abre puck3 en todos los módulos (getPuck = () => puck3; desde Visu/IA/Forge las herramientas de modelado pasan antes a Modelado,
+  runPuck3). Se quitaron PUCK_CMDS (queda VISU_CMDS solo para el menú de Espacio en Visu), PUCK_DEFAULT, CMD_MODS, puckIds y el editor viejo (Preferencias › Puck
+  solo edita Curvas/Superficies/Sólidos). Tab: preventDefault fuera de cuadros de texto (no abre nada ni salta el foco).
+  (2) Marking menus Ctrl+Shift + izq/medio/der (en TODOS los módulos) = PICK_MM / XFORM_MM / DISPLAY_MM con las opciones y posiciones de Alias: 8 en el anillo
+  (desde arriba en el sentido del reloj) + items.extras en columna de pastillas debajo (makeRadial: extras, null = hueco; CSS .puck-item.extra). label en español,
+  alias = nombre de Alias (sale en el centro). Sin equivalente aún (soon): Blend Point, Construction, Locator, Delete Locators, Plane Editor, Shelf. Nuevos:
+  filtros Pick mesh y cos (PICK_FILTERS), Query Edit History (queryHistory: abre la ventana de la relación del objeto), NonProportional Scale (sclNP, scaleNP),
+  Shade (Quality) = setShadeReal(true), Shade (Fast) = Map Type, Palette = anclar barra izquierda. Capturas docs/capturas/v0.40-menu-*.png.
+  (3) Z ARRIBA como Alias, SOLO en lo que el usuario ve y usa (por dentro sigue Y arriba porque los shaders aprobados, el muro, entornos y la escena cuentan con eso):
+  Alias (X, Y, Z) = Forja (x, -z, y), el mismo cambio que los exportadores CAD. AXES = ejes de Alias en coordenadas internas (botones izq X · medio Y · der Z al
+  mover/rotar/escalar no prop., nudge, vector de Align por omisión = Z); toAlias() en las coordenadas del CV; gizmo con verde/azul intercambiados (vertical = azul Z);
+  nombres de planos (suelo XY, frente XZ, lado YZ), Simetría y Extruir con nombres Z arriba. Las vistas Top/Front/Right ya coincidían (frente = cámara en -Y de Alias).
+  (4) Selección "alternativa sugerida" de Alias por omisión (sel-buttons 'add', prefs.selButtons): izq añade, medio elige solo eso (y en vacío suelta todo),
+  der quita. Navegación Shift+Alt y snap Ctrl/Alt/Ctrl+Alt ya eran así. Escalar con botones = proporcional (Scale) salvo NonProportional Scale.
+  Prueba: scratchpad t40/t.cjs y t2.cjs (servidor python en :8765 y three desde scratchpad/npm; los scripts viejos de forja/ ya no existen).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

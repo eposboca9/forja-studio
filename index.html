@@ -537,8 +537,6 @@
   .pk-list .pk-btns { display: flex; gap: 2px; }
   .pk-list .pk-btns button { width: 24px; height: 24px; border: 0; border-radius: 4px; background: none; color: var(--fg); cursor: pointer; font: inherit; }
   .pk-list .pk-btns button:hover { background: rgba(127,127,127,.18); }
-  .pk-add { display: flex; gap: 6px; align-items: center; }
-  .pk-add .sel { flex: 1; }
   /* --- Ventana de opciones de cada herramienta: no es una caja, es un desenfoque de lo que hay detrás con los
      bordes difuminados (como un filtro de foto) y los ajustes encima --- */
   .toolwin { position: fixed; left: 84px; top: 96px; z-index: 45; width: 272px; padding: 16px 20px 18px; color: var(--fg); }
@@ -759,6 +757,16 @@
   .puck-item.sub.on i { box-shadow: inset 3px 3px 7px var(--nm-lo), inset -3px -3px 7px var(--nm-hi); }
   .puck-item.sub svg { width: 15px; height: 15px; }
   .puck-item.sub span { font-size: 8.5px; }
+  /* extras (marking menus de Alias): pastillas en columna debajo del anillo, del mismo material */
+  .puck.bloom .puck-item.extra { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) translate(0px, 0px) scale(var(--s)); }
+  .puck-item.extra { flex-direction: row; justify-content: flex-start; gap: 10px; width: 196px; height: 36px; padding: 0 14px 0 6px; border-radius: 18px;
+    background: var(--nm); box-shadow: -4px -4px 10px var(--nm-hi), 5px 5px 12px var(--nm-lo); }
+  .puck-item.extra i { width: 26px; height: 26px; background: none; box-shadow: none; }
+  .puck-item.extra svg { width: 17px; height: 17px; }
+  .puck-item.extra span { font-size: 9.5px; }
+  .puck-item.extra.on { box-shadow: inset 3px 3px 8px var(--nm-lo), inset -3px -3px 8px var(--nm-hi); }
+  .puck-item.extra.on i { box-shadow: none; }
+  .puck-item.extra.soon { opacity: .6; }
   @media (prefers-reduced-motion: reduce) { .puck-item, .puck-center, .radial-veil { transition: none !important; } }
   /* desenfoque LOCAL bajo los menús radiales: un círculo de bordes suaves (el resto del visor queda nítido) */
   .radial-veil { inset: auto; border-radius: 50%;
@@ -999,7 +1007,7 @@
     </div>
     <div class="drawbar" id="drawbar" hidden>
       <span id="draw-msg"></span>
-      <span class="db-group" title="Plano donde se dibuja. Vista: depende de la vista (arriba = suelo, frente = XY, lado = YZ; en perspectiva, en el aire)"><b>Plano</b>
+      <span class="db-group" title="Plano donde se dibuja. Vista: depende de la vista (Z arriba: arriba = suelo XY, frente = XZ, lado = YZ; en perspectiva, en el aire)"><b>Plano</b>
         <button data-plane="auto" aria-pressed="true">Vista</button><button data-plane="xz" aria-pressed="false">Suelo</button><button data-plane="xy" aria-pressed="false">Frente</button><button data-plane="yz" aria-pressed="false">Lado</button></span>
       <span class="db-group"><b>Snap</b>
         <button data-snapbtn="grid" aria-pressed="false" title="Rejilla · mantener Alt">Rejilla</button><button data-snapbtn="point" aria-pressed="false" title="Puntos: CVs, extremos, esquinas · mantener Ctrl">Punto</button><button data-snapbtn="curve" aria-pressed="false" title="Curvas, aristas y líneas de parche · mantener Ctrl+Alt">Curva</button><button data-snapbtn="surface" aria-pressed="false" title="Sobre superficies · mantener Shift">Superficie</button></span>
@@ -1811,7 +1819,7 @@
         <button data-plane="yz" aria-pressed="false">Lado</button>
       </div>
       <div class="row"><label for="grid-step">Rejilla</label><select id="grid-step" class="sel"><option value="0.1">10 mm</option><option value="0.25">25 mm</option><option value="0.5">50 mm</option><option value="1" selected>100 mm (1 celda de la rejilla)</option></select><span></span></div>
-      <p class="muted">Según la vista: arriba = suelo, frente = XY, lado = YZ; en perspectiva, en el aire. Snap: Alt rejilla, Ctrl puntos, Ctrl+Alt curvas, aristas y líneas de parche, Shift superficies.</p>
+      <p class="muted">Según la vista (Z arriba, como Alias): arriba = suelo XY, frente = XZ, lado = YZ; en perspectiva, en el aire. Snap: Alt rejilla, Ctrl puntos, Ctrl+Alt curvas, aristas y líneas de parche, Shift superficies.</p>
     </section>
 
     <section class="sec" data-module="diag">
@@ -1833,7 +1841,7 @@
       <p class="muted" id="nav-help"></p>
       <div class="row"><label for="tumble-mode">Giro</label><select id="tumble-mode" class="sel"><option value="camera" selected>Basado en cámara</option><option value="object">Basado en objeto</option></select><span></span></div>
       <label class="check"><input type="checkbox" id="click-pivot"> Además, clic simple en un objeto fija el pivote</label>
-      <div class="row"><label for="sel-buttons">Botones</label><select id="sel-buttons" class="sel"><option value="alt" selected>Izq elige · medio añade · der quita</option><option value="default">Izq alterna · medio añade · der quita</option></select><span></span></div>
+      <div class="row"><label for="sel-buttons">Botones</label><select id="sel-buttons" class="sel"><option value="add" selected>Alias alternativa: izq añade · medio elige · der quita</option><option value="default">Alias por defecto: izq alterna · medio añade · der quita</option><option value="alt">Izq elige · medio añade · der quita</option></select><span></span></div>
       <p class="muted">Selección con los 3 botones del ratón, como en Alias (solo en navegación Alias). Ctrl + flechas: pasar al CV vecino. Ctrl+Shift + clic: menú radial.</p>
     </section>
     </div>
@@ -1927,9 +1935,8 @@
     </div>
     <div class="prefs-page" data-ppage="puck" hidden>
       <p class="muted">Cada módulo tiene su propio Puck (Z). En Modelado hay 3 categorías (Curvas, Superficies, Sólidos) con hasta 3 anillos de herramientas cada una (máximo 10 por anillo). Las herramientas compartidas (mover, duplicar, simetría...) actúan solo sobre el tipo de su categoría y recuerdan sus opciones por categoría.</p>
-      <div class="row"><label for="pk-mod">Módulo</label><select id="pk-mod" class="sel"><option value="p3-curves">Modelado · Curvas</option><option value="p3-surfaces">Modelado · Superficies</option><option value="p3-solids">Modelado · Sólidos</option><option value="render">Visu</option><option value="ai">IA</option></select><span></span></div>
+      <div class="row"><label for="pk-mod">Módulo</label><select id="pk-mod" class="sel"><option value="p3-curves">Modelado · Curvas</option><option value="p3-surfaces">Modelado · Superficies</option><option value="p3-solids">Modelado · Sólidos</option></select><span></span></div>
       <ol class="pk-list" id="pk-list"></ol>
-      <div class="pk-add"><select id="pk-add" class="sel"></select><button class="btn" id="pk-add-btn">Añadir</button><button class="btn" id="pk-reset">Restablecer</button></div>
     </div>
     <div class="prefs-page" data-ppage="snap" hidden>
       <p class="muted">Como en Alias: mantén Alt (rejilla), Ctrl (punto) o Ctrl+Alt (curva) antes de hacer clic o arrastrar. Con mover/rotar/escalar con los botones, el snap respeta el eje del botón.</p>
@@ -1951,10 +1958,12 @@
       <table class="keys">
         <tr><td>Shift+Alt + botones</td><td>Girar · desplazar · acercar</td></tr>
         <tr><td>Z</td><td>Puck (herramientas)</td></tr>
-        <tr><td>Ctrl+Shift + izq / medio / der</td><td>Menús de selección / transformar / visualización</td></tr>
-        <tr><td>Espacio</td><td>Menú de visualización</td></tr>
+        <tr><td>Ctrl+Shift + izq / medio / der</td><td>Marking menus de Alias: selección (Pick) / transformar / visualización</td></tr>
+        <tr><td>Clic izq · medio · der</td><td>Añadir a la selección · elegir solo eso · quitar (Preferencias › Navegación)</td></tr>
+        <tr><td>Espacio</td><td>Menú de visualización (en Visu: materiales y entorno)</td></tr>
+        <tr><td>Ejes</td><td>Z arriba como Alias: X e Y en el suelo, Z la altura</td></tr>
         <tr><td>Mantener V</td><td>Ver los módulos y elegir uno con el ratón</td></tr>
-        <tr><td>W · E · R</td><td>Mover · rotar · escalar (izq X · medio Y · der Z)</td></tr>
+        <tr><td>W · E · R</td><td>Mover · rotar · escalar (arrastrar: izq X · medio Y · der Z; escalar = proporcional)</td></tr>
         <tr><td>Flechas (Shift ×10)</td><td>Nudge: mover / girar / escalar un poco lo elegido</td></tr>
         <tr><td>Ctrl+Z · Ctrl+X</td><td>Deshacer</td></tr><tr><td>Ctrl+Y</td><td>Rehacer</td></tr>
         <tr><td>Ctrl+G · Ctrl+Shift+G</td><td>Agrupar · desagrupar</td></tr>
@@ -2000,6 +2009,6 @@
   "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
 } }
 </script>
-<script type="module" src="./src/main.js?v=0.39.3"></script>
+<script type="module" src="./src/main.js?v=0.40.0"></script>
 </body>
 </html>
