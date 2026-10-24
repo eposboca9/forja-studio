@@ -748,6 +748,9 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - (v0.40.2) Captura del usuario: con Tab sale el menú VISUALIZACIÓN (disp = DISPLAY_MM), que solo abren Espacio y Ctrl+Shift+der. Única vía por tecla = bindKey('Space'),
   que aceptaba code, key O keyCode. Ahora isKey: Tab (key/code/keyCode/which 9) nunca cuenta, solo eventos isTrusted, y Espacio exige code 'Space' Y key ' '.
   menuLog + Ayuda › "Qué abrió el último menú" (toast con tecla key/code/keyCode o botón) para cazar el caso si sigue. Prueba t40/t4.cjs: Tab y Shift+Tab 0 menús.
+- (v0.40.3) El usuario seguía viendo el menú Visualización al pulsar Tab. Se quitó la ÚNICA tecla que lo abría (Espacio, bindKey('Space')): ahora NINGUNA tecla abre
+  menús salvo la Z (Puck). Visualización solo con Ctrl+Shift+clic derecho, como en Alias. Los menús son HTML encima del visor: no dependen del motor (clásico o híbrido);
+  probado con los dos (t40/t5.cjs: Tab, Shift+Tab y Espacio = 0 menús; Z = Puck).
 
 ## Siguiente paso
 

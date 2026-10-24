@@ -13,7 +13,7 @@ import * as N from './nurbs.js';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.40.2';
+const FORJA_VERSION = '0.40.3';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -3302,7 +3302,7 @@ Object.assign(IC, {
   layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5', gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2',
   modules: 'M12 4a8 3 0 1 0 0 6 8 3 0 0 0 0-6zM4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7', cube: 'M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8',
 });
-// Menú de Visu (Espacio en el módulo Visu): solo visualización. El Puck por módulo de antes ya no existe: Z abre siempre el Puck nuevo.
+// Menú de Visu (hoy sin tecla): solo visualización. El Puck por módulo de antes ya no existe: Z abre siempre el Puck nuevo.
 const setInput = (id, v, ev = 'input') => { const el = $(id); el.value = v; el.dispatchEvent(new Event(ev)); };
 const matSub = (keys) => keys.map((k) => ({ k: 'mat', label: MAT_NAMES[k], run: () => setMaterial(k) }));
 const VISU_CMDS = {
@@ -3555,7 +3555,7 @@ const VISU_MM = ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'frame'].map((id)
   .concat([{ k: 'screen', label: 'Pantalla', run: fullscreen, sub: [{ k: 'full', label: 'Completa', run: fullscreen }, { k: 'panel', label: 'Panel', run: () => setPinned(!pinned) }] }]);
 const dispVisu = makeRadial(VISU_MM, { r: 140, title: 'Visu' });
 const MENUS = [puck3, pickMenu, xformMenu, disp, dispVisu];
-// Ctrl+Shift + izq / medio / der = Selección / Transformar / Visualización (en todos los módulos, como Alias); Espacio en Visu = menú de Visu
+// Ctrl+Shift + izq / medio / der = Selección / Transformar / Visualización (en todos los módulos, como Alias)
 const menuFor = (button) => [pickMenu, xformMenu, disp][button] || disp;
 let lastPtr = { x: innerWidth / 2, y: innerHeight / 2 };
 addEventListener('pointermove', (e) => {
@@ -3568,14 +3568,12 @@ addEventListener('pointerdown', (e) => {
 // Z = Puck. Mantener y soltar sobre la opción; una pulsación corta lo deja abierto para hacer clic.
 // la tecla se reconoce por code, key o keyCode (algunos visores entregan solo uno de los tres)
 // El Puck va en la Z (antes Tab: en el visor del usuario Tab no llegaba bien a la página). Sin Ctrl/Alt/Cmd: Ctrl+Z sigue siendo deshacer.
-const KEY_IDS = { KeyZ: ['KeyZ', 'z', 90], Space: ['Space', ' ', 32] };
+const KEY_IDS = { KeyZ: ['KeyZ', 'z', 90] };
 // Tab nunca cuenta como ninguna tecla de menú, venga como venga el evento (key, code o keyCode 9)
 const isTab = (e) => e.key === 'Tab' || e.code === 'Tab' || e.keyCode === 9 || e.which === 9;
 const isKey = (e, code) => {
   if (e.ctrlKey || e.metaKey || e.altKey || isTab(e) || !e.isTrusted) return false;
   const [c, k, n] = KEY_IDS[code];
-  // Espacio: solo la barra espaciadora de verdad (code Space Y key ' '); la Z por cualquiera de sus tres señas
-  if (code === 'Space') return e.code === c && e.key === k;
   return e.code === c || (e.key || '').toLowerCase() === k || e.keyCode === n;
 };
 // registro de qué abrió cada menú (Ayuda › Qué abrió el último menú): para encontrar fallos de teclas en el equipo del usuario
@@ -3602,7 +3600,7 @@ function bindKey(code, getMenu) {
   }, true);
 }
 bindKey('KeyZ', getPuck);
-bindKey('Space', () => (layout === 'render' ? dispVisu : disp));
+// NINGUNA tecla abre el menú de Visualización (antes Espacio): solo Ctrl+Shift+clic derecho, como en Alias. La única tecla de menú es la Z.
 // Tab NO hace nada en Forja (el Puck está en la Z). Tab movía el foco a un botón de la barra izquierda y, como esa barra se mostraba
 // con el foco dentro (:focus-within), "desplegaba" el menú. Ahora: Tab bloqueado en todas partes salvo en cuadros de texto y diálogos,
 // y si el foco llega igual a un botón (p. ej. con Tab desde fuera de la página) se le quita.
