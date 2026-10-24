@@ -440,6 +440,47 @@ export function cosCurveData(surfData, uv, ncv = 24) {
   return N.fitCurve(g.map((s) => { const [i, f] = sm.at(s); return pts[i].clone().lerp(pts[Math.min(pts.length - 1, i + 1)], f); }), 3, 'xz');
 }
 
+// ---------- Redondeo G2/G3 (macro sobre Freeform Blend) ----------
+// Carril de contacto de un redondeo sobre la superficie A, junto a su borde eA que comparte con el borde eB de B.
+// En cada estación del borde se mide el ángulo θ entre las dos superficies (θ = 0 si siguen lisas) y se calcula cuánto
+// hay que retirarse sobre A a lo largo de su isoparamétrica cruzada: 'distance' = d; 'radius' = d·tan(θ/2) (bola rodante);
+// 'chord' = d / (2·cos(θ/2)) (la cuerda entre los dos carriles mide d). Devuelve la polilínea (u, v) de borde a borde.
+export function filletRail(dA, eA, dB, eB, dist, measure = 'radius', n = 48) {
+  const SA = surfEval(dA), SB = surfEval(dB);
+  const A = prepSide({ kind: 'edge', data: dA, edge: eA }), B = prepSide({ kind: 'edge', data: dB, edge: eB });
+  const bPts = []; for (let i = 0; i <= 200; i++) bPts.push(B.at(i / 200));
+  const crossDir = (S, side, u, v) => { const f = tangents(S, u, v), w = side.isoIn; return f.Su.clone().multiplyScalar(w[0]).addScaledVector(f.Sv, w[1]).normalize(); };
+  const uv = [];
+  for (let i = 0; i <= n; i++) {
+    const s = i / n, a = A.at(s);
+    let bb = bPts[0], bd = Infinity;
+    for (const q of bPts) { const d = q.P.distanceToSquared(a.P); if (d < bd) { bd = d; bb = q; } }
+    const ca = crossDir(SA, A, a.u, a.v), cb = crossDir(SB, B, bb.u, bb.v);
+    const th = Math.PI - Math.acos(Math.max(-1, Math.min(1, ca.dot(cb))));
+    let back = measure === 'distance' ? dist : measure === 'chord' ? dist / (2 * Math.cos(th / 2)) : dist * Math.tan(th / 2);
+    back = Math.max(1e-3, Math.min(back, dist * 20));
+    // se camina por la isoparamétrica cruzada hasta recorrer `back`
+    let u = a.u, v = a.v, acc = 0, P = a.P.clone();
+    const du = A.isoIn[0] * 0.002, dv = A.isoIn[1] * 0.002;
+    for (let k = 0; k < 470; k++) {
+      const q = SA(u + du, v + dv), L = q.distanceTo(P);
+      if (acc + L >= back) { const f = (back - acc) / (L || 1); u += du * f; v += dv * f; break; }
+      acc += L; u += du; v += dv; P = q;
+    }
+    uv.push([clamp01(u), clamp01(v)]);
+  }
+  return uv;
+}
+// ¿El punto (u, v) junto al borde queda dentro del lazo? Sirve para saber qué lado del carril se recorta (la franja del borde).
+export function railTrimSide(cos, edge) {
+  const loop = trimLoop(cos);
+  if (!loop) return null;
+  // punto de prueba a medio camino entre el borde y el carril (aunque el carril quede pegadísimo al borde)
+  const U = edge[0] === 'u', end = edge[1] === '1', mid = cos.uv[cos.uv.length >> 1];
+  const t = U ? [((end ? 1 : 0) + mid[0]) / 2, mid[1]] : [mid[0], ((end ? 1 : 0) + mid[1]) / 2];
+  return pointInPoly(loop, t[0], t[1]) ? 'inside' : 'outside';
+}
+
 // ---------- Recortes ----------
 export function pointInPoly(poly, u, v) {
   let inside = false;

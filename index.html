@@ -758,7 +758,7 @@
   .puck-item.sub svg { width: 15px; height: 15px; }
   .puck-item.sub span { font-size: 8.5px; }
   /* --- HUD Transform Info: neumórfico, flotante abajo al centro --- */
-  .hud { position: fixed; left: 96px; bottom: 46px; z-index: 40; width: 400px; max-width: calc(100vw - 32px); padding: 14px 16px 12px;
+  .hud { position: fixed; right: 84px; bottom: 46px; z-index: 40; width: 400px; max-width: calc(100vw - 32px); padding: 14px 16px 12px;
     border-radius: 16px; color: var(--nm-text); background: color-mix(in srgb, var(--nm) 90%, transparent); backdrop-filter: blur(10px);
     box-shadow: -6px -6px 16px var(--nm-hi), 8px 8px 20px var(--nm-lo); font-size: 12px; user-select: none; }
   .hud[hidden] { display: none; }
@@ -864,6 +864,18 @@
      cada fila pasa a negro o blanco según lo que tenga detrás (adaptInk), como el menú de arriba */
   .toolwin::before, .quickpick::before { display: none; }
   .soft-veil { display: none !important; }
+  /* (v0.43) Ventanas flotantes de información = un mismo panel: el de la ventana de herramienta (Align...): esquinas redondeadas,
+     modo oscuro/claro según el tema, translúcido con desenfoque ligero del fondo para no pelearse con la geometría */
+  :root { --win-bg: rgba(244,243,240,.74); --win-line: rgba(0,0,0,.08); --win-shadow: 0 14px 36px rgba(40,36,30,.18); --win-field: rgba(0,0,0,.06); }
+  :root[data-theme="dark"] { --win-bg: rgba(20,22,27,.72); --win-line: rgba(255,255,255,.07); --win-shadow: 0 16px 40px rgba(0,0,0,.45); --win-field: rgba(255,255,255,.06); }
+  .toolwin, .quickpick, .hud { background: var(--win-bg) !important; border: 1px solid var(--win-line); border-radius: 14px;
+    -webkit-backdrop-filter: blur(14px) saturate(1.15); backdrop-filter: blur(14px) saturate(1.15); box-shadow: var(--win-shadow) !important; color: var(--fg); translate: none; }
+  .toolwin .tw-row label, .quickpick b, .hud .hud-sub, .hud-head span, .hud-row label, .hud-row u, .hud-list span, .hud-list em, .hud-det summary { color: var(--muted); }
+  .hud { padding: 16px 20px 14px; font-family: inherit; }
+  .hud-head b { font-size: 11px; font-weight: 600; letter-spacing: .14em; }
+  .hud-f { box-shadow: none !important; background: var(--win-field); border-radius: 6px; height: 28px; }
+  .hud-f.on { box-shadow: inset 0 0 0 1.5px #2f7bff !important; color: var(--fg); }
+  .hud-list { box-shadow: none; background: var(--win-field); border-radius: 8px; }
   .float-win { background: transparent !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 0 !important; }
   .panel .sec h2, .panel .muted, .fw-count, .ly-n { color: inherit; }
   /* ===== Módulo FORGE en el panel de Forja: los controles de BumpForge con el aspecto de Forja =====
@@ -2033,6 +2045,6 @@
   "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
 } }
 </script>
-<script type="module" src="./src/main.js?v=0.42.0"></script>
+<script type="module" src="./src/main.js?v=0.43.0"></script>
 </body>
 </html>

@@ -778,6 +778,22 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (6) HUD: la lista de varios elementos es plegable (<details>, hud.listClosed).
   NO hecho del documento: Align Edge Align / Continuous / Default (hoy Natural = copia la estructura del maestro = Edge Align) y Skew / Tangent Balance;
   máscaras de selección por herramienta (el redondeo ya elige solo aristas); trim convert. Pruebas: t40/t15.cjs (recuadro, pivote, revolución, hélice), t16.cjs (orto 2D).
+- (v0.43) Fase 2 del usuario:
+  (1) REDONDEO G2/G3 (macro, Superficies › Redondeo G2 / G3, Puck Superficies anillo 2; EDGE_OPS.gfillet, un clic en el borde común, noMenu): findMateEdge busca la
+  superficie cuyo borde coincide ENTERO (5 muestras, tol 1 %); createGFillet crea 2 relaciones 'fcurve' {src, edge, other, otherEdge, dist, measure, fg} (salida =
+  curva sobre superficie con cos.edge y trim = FF.railTrimSide: el lado del borde se recorta) + 1 'blend' (lados = esas 2 curvas, flowInt free, contA = contB,
+  tension = Form factor, fg). FF.filletRail: en cada estación θ = π − ángulo entre las isoparamétricas cruzadas de A y B; retirada = d·tan(θ/2) (radio),
+  d/(2cos(θ/2)) (cuerda) o d (distancia); se camina por la isoparamétrica cruzada de A. Un solo nodo para el usuario: relSpec(r) con r.fg → gfilletSpec (Medida,
+  Valor, G0–G3, Form factor, Quitar redondeo = borra blend y carriles y las superficies vuelven enteras); flecha verde 'valor'; clic derecho = aceptar.
+  Con superficies tangentes (vaso Base/Cuerpo) la retirada con radio es ~0 (no hay esquina). Probado con 2 planos a 90°: carriles a 0,2 y 0,4 dm exactos.
+  (2) Align de CURVA a BORDE: tipo Normal / Vector / Vista ya cambian la dirección (history.js curveEdgeDirDerivs: en el plano tangente, perpendicular al borde o el
+  vector proyectado; G2/G3 de la superficie a lo largo de esa dirección); Natural = isoparamétrica cruzada exacta. Al cambiar el tipo se recalcula lambda0.
+  Prueba (plano cizallado): Natural 63,4° (iso), Normal 90°, hueco 0 / ángulo 0.
+  (3) Deslizador amarillo (kind 'm') del punto de unión en la maestra (borde o curva) en la vista; r.mT con edgeLengthApprox / curveLen.
+  (4) Snap a curva deslizante exacto: curvePolylines da line.ev (curva NURBS o, si es curva sobre superficie, la superficie en su uv sin el levantado visual);
+  findSnap afina con sección áurea en pantalla → best.point exacto y best.param.
+  (5) Ventanas flotantes (toolwin, quickpick, HUD) = mismo panel: --win-bg translúcido por tema, blur 14 px, borde y sombra; se quitaron de INK_SEL (texto por tema).
+  HUD por omisión abajo a la DERECHA (right 84 px). Pruebas: t40/t18.cjs (redondeo G2 con planos), t19.cjs (Align de curva, flecha amarilla, captura al-1.png).
 
 ## Siguiente paso
 

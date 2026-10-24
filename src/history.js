@@ -330,9 +330,44 @@ export function masterDerivs(rel, M, K, field = null, endPt = null) {
     const F = field.frames([rel.mT ?? 0], [endPt || new THREE.Vector3()])[0], E = F.E;
     return [F.P.clone(), E[1].clone().negate(), E[2].clone(), E[3].clone().negate()].slice(0, K + 1).concat(Array(Math.max(0, K - 3)).fill(0).map(() => new THREE.Vector3()));
   }
+  if (rel.mEdge && rel.curve && ['normal', 'vector', 'view'].includes(rel.atype)) return curveEdgeDirDerivs(rel, M, K);
   if (rel.mEdge) return edgeCrossDerivs(M, rel.mEdge, rel.mT ?? 0.5, K);
   // curva maestra: el punto de unión se puede recorrer de principio a fin (mT); la curva esclava sale hacia el lado contrario al extremo elegido
   return curveDerivsAt(M, rel.mT ?? (rel.mEnd ? 1 : 0), K, rel.mEnd ? -1 : 1);
+}
+// Curva alineada a un BORDE con tipo Normal / Vector / Vista: la curva sale en otra dirección que la isoparamétrica cruzada,
+// pero siempre DENTRO del plano tangente del borde, y su curvatura (G2/G3) se toma de la superficie a lo largo de esa dirección:
+//   Normal = perpendicular al borde (en el plano tangente) · Vector / Vista = el vector rel.avec proyectado en el plano tangente.
+// Natural sigue usando las derivadas exactas de la isoparamétrica cruzada (edgeCrossDerivs).
+function curveEdgeDirDerivs(rel, M, K) {
+  const t = rel.mT ?? 0.5, e = rel.mEdge, S = N.surfaceOf(M), base = edgeCrossDerivs(M, e, t, 1)[1];
+  const uv = isU(e) ? [atEnd(e) ? 1 : 0, t] : [t, atEnd(e) ? 1 : 0];
+  const P = (u, v) => { const q = new THREE.Vector3(); S.getPoint(Math.min(1, Math.max(0, u)), Math.min(1, Math.max(0, v)), q); return q; };
+  const h = 1e-4, Su = P(uv[0] + h, uv[1]).sub(P(uv[0] - h, uv[1])).divideScalar(2 * h), Sv = P(uv[0], uv[1] + h).sub(P(uv[0], uv[1] - h)).divideScalar(2 * h);
+  const nrm = Su.clone().cross(Sv).normalize(), T = (isU(e) ? Sv : Su).clone().normalize();
+  let d = rel.atype === 'normal' ? base.clone().addScaledVector(T, -base.dot(T)) : new THREE.Vector3(...(rel.avec || [0, 1, 0]));
+  d.addScaledVector(nrm, -d.dot(nrm));
+  if (d.lengthSq() < 1e-12) return edgeCrossDerivs(M, e, t, K);
+  if (d.dot(base) < 0) d.negate();
+  d.normalize().multiplyScalar(base.length());
+  // dirección en (u, v) que da ese vector, y derivadas de S a lo largo de esa línea (hacia dentro: diferencias de un lado)
+  const a = Su.dot(Su), b = Su.dot(Sv), c = Sv.dot(Sv), p = Su.dot(d), q = Sv.dot(d), det = a * c - b * b || 1e-12;
+  const w = [(p * c - q * b) / det, (a * q - b * p) / det];
+  let hh = 4e-3;
+  const inside = (k) => { const u = uv[0] + k * hh * w[0], v = uv[1] + k * hh * w[1]; return u > -1e-9 && u < 1 + 1e-9 && v > -1e-9 && v < 1 + 1e-9; };
+  while (hh > 1e-5 && !inside(4)) hh /= 2;
+  const pts = [0, 1, 2, 3, 4].map((k) => P(uv[0] + k * hh * w[0], uv[1] + k * hh * w[1]));
+  const comb = (cf, div) => cf.reduce((acc, x, i) => acc.addScaledVector(pts[i], x), new THREE.Vector3()).divideScalar(div);
+  const out = [P(uv[0], uv[1]), d.clone(), comb([35, -104, 114, -56, 11], 12 * hh * hh), comb([-5, 18, -24, 14, -3], 2 * hh ** 3)];
+  while (out.length <= K) out.push(new THREE.Vector3());
+  return out.slice(0, K + 1);
+}
+// largo aproximado de un borde (para pasar un arrastre en la vista a fracción 0..1 del borde)
+export function edgeLengthApprox(M, mEdge, n = 64) {
+  const s = N.surfaceOf(M), q = new THREE.Vector3(), p = new THREE.Vector3();
+  let L = 0;
+  for (let k = 0; k <= n; k++) { const t = k / n; if (isU(mEdge)) s.getPoint(atEnd(mEdge) ? 1 : 0, t, q); else s.getPoint(t, atEnd(mEdge) ? 1 : 0, q); if (k) L += q.distanceTo(p); p.copy(q); }
+  return L || 1;
 }
 // punto del borde más cercano a un punto, como fracción 0..1 a lo largo del borde
 export function edgeParamNear(M, mEdge, p, n = 200) {
