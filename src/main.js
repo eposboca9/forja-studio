@@ -13,7 +13,7 @@ import * as N from './nurbs.js?v=0.42.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.43.0';
+const FORJA_VERSION = '0.43.1';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -381,8 +381,9 @@ addEventListener('pointermove', (e) => {
     const c = m.button === 0 ? { normal: viewDir() } : { dir: m.button === 1 ? right : up };
     const modes = snapModes(e), sn = gizmoDrag && moveSnap(e, modes, gizmoDrag.ex, m.p0);
     if (sn) {
-      proxy.position.copy(constrainPt(sn.point.clone().sub(m.anchorOff), m.p0, c)); showSnap(sn);
-      gizmoDrag.collapse = pickMode === 'cv' && selCVs.size > 1 ? { P: sn.point.clone(), c } : null;
+      const cc = isTopoSnap(sn) ? { free: true } : c;
+      proxy.position.copy(constrainPt(sn.point.clone().sub(m.anchorOff), m.p0, cc)); showSnap(sn);
+      gizmoDrag.collapse = pickMode === 'cv' && selCVs.size > 1 ? { P: sn.point.clone(), c: cc } : null;
     } else {
       hideSnap(); if (gizmoDrag) gizmoDrag.collapse = null;
       const mv = new THREE.Vector3();
@@ -398,8 +399,9 @@ addEventListener('pointermove', (e) => {
     const modes = snapModes(e), sn = gizmoDrag && moveSnap(e, modes, gizmoDrag.ex, m.p0);
     // snap + eje del botón (Alias): el objeto se desliza por su carril; solo se toma la componente del eje
     if (sn) {
-      proxy.position.copy(constrainPt(sn.point.clone().sub(m.anchorOff), m.p0, { dir: ax })); showSnap(sn);
-      gizmoDrag.collapse = pickMode === 'cv' && selCVs.size > 1 ? { P: sn.point.clone(), c: { dir: ax } } : null;
+      const cc = isTopoSnap(sn) ? { free: true } : { dir: ax };
+      proxy.position.copy(constrainPt(sn.point.clone().sub(m.anchorOff), m.p0, cc)); showSnap(sn);
+      gizmoDrag.collapse = pickMode === 'cv' && selCVs.size > 1 ? { P: sn.point.clone(), c: cc } : null;
     } else { hideSnap(); if (gizmoDrag) gizmoDrag.collapse = null; proxy.position.copy(m.p0).addScaledVector(ax, t); }
   } else if (xform === 'rotate') {
     let ang = (dx - dy) * 0.012;
@@ -1401,8 +1403,8 @@ function pointCandidates(ex) {
   if (draft) draft.pts.forEach((p) => out.push(p));
   for (const o of objects) {
     if (!o.visible || ex.full?.has(o)) continue;
-    if (!ex.pivots?.has(o)) out.push(o.pivot);
-    allCVRefs(o).forEach((r) => { const v = cvRef(r); if (!ex.cvs?.has(v)) out.push(new THREE.Vector3(v.x, v.y, v.z)); });
+    if (!ex.pivots?.has(o) && pickMode === 'object' && selObjs.includes(o)) out.push(o.pivot);   // solo los pivotes que se ven (los de lo elegido)
+    if (o.parts.handles?.visible) allCVRefs(o).forEach((r) => { const v = cvRef(r); if (!ex.cvs?.has(v)) out.push(new THREE.Vector3(v.x, v.y, v.z)); });
     if (!ex.partial?.has(o)) ((o.kind === 'curve' ? o.editPts : o.corners) || []).forEach((v) => out.push(v));
     // "Snap al centro" (opciones del snap de curva de Alias): centro de la caja de cada curva
     if (prefs.snapCenter && o.kind === 'curve' && o.samples?.length && !ex.partial?.has(o)) out.push(new THREE.Box3().setFromPoints(o.samples).getCenter(new THREE.Vector3()));
@@ -1499,11 +1501,11 @@ function moveSnap(pt, m, ex, p0) {
   let s = findSnap(pt.clientX, pt.clientY, m, ex);
   if (s) return s;
   setRay(pt);
-  if (m.surface || (pt.shiftKey && !pt.altKey)) {
+  if (m.surface || m.point || m.curve || (pt.shiftKey && !pt.altKey)) {
     // la superficie que se mueve (la de los CVs elegidos) no cuenta: se persigue a sí misma
     const own = new Set([...selectedCVRefs().map((r) => r.obj), ...selObjs]);
-    const hit = ray.intersectObjects(objects.filter((o) => o.visible && o.kind !== 'curve' && !own.has(o)).map((o) => o.parts.mesh), false)[0];
-    if (hit) return { point: hit.point.clone(), kind: 'superficie' };
+    const q = surfacePointAt(own);
+    if (q) return { point: q, kind: 'superficie' };
   }
   if (m.grid) {
     // rejilla del plano que se ve (cara ortogonal) o la del suelo, a la altura del punto que se mueve
@@ -1519,6 +1521,7 @@ function moveSnap(pt, m, ex, p0) {
 // (dirección de la vista) queda bloqueada: nada se va hacia el fondo por accidente.
 function orthoLocked() { return proj.ortho && axisView() != null; }
 function constrainPt(P, base, c) {
+  if (c?.free) return P.clone();   // snap topológico: el punto exacto, también en vistas ortogonales
   let q = P.clone();
   if (c?.dir) q = base.clone().addScaledVector(c.dir, P.clone().sub(base).dot(c.dir));
   else if (c?.normal) q = P.clone().addScaledVector(c.normal, -P.clone().sub(base).dot(c.normal));
@@ -1537,9 +1540,11 @@ function applySnapToProxy(ex) {
   const s = moveSnap({ clientX: lastPtr.x, clientY: lastPtr.y, shiftKey: mods.shiftKey, altKey: mods.altKey }, modes, ex, p0);
   const c = gizmoConstraint();
   if (s) {
-    proxy.position.copy(constrainPt(s.point, p0, c)); showSnap(s);
-    // varios CVs + snap = todos al mismo valor (en el eje restringido) o al mismo punto (libre)
-    if (g) g.collapse = pickMode === 'cv' && selCVs.size > 1 ? { P: s.point.clone(), c } : null;
+    // topológico (punto / curva / superficie) = el punto 3D absoluto, sin eje ni plano; rejilla = respeta la restricción
+    const cc = isTopoSnap(s) ? { free: true } : c;
+    proxy.position.copy(constrainPt(s.point, p0, cc)); showSnap(s);
+    // varios CVs + snap = todos al mismo punto (topológico) o al mismo valor en el eje restringido (rejilla)
+    if (g) g.collapse = pickMode === 'cv' && selCVs.size > 1 ? { P: s.point.clone(), c: cc } : null;
     return;
   }
   if (g) g.collapse = null;
@@ -1665,17 +1670,26 @@ function planeFor(k) {
   return new THREE.Plane().setFromNormalAndCoplanarPoint(viewDir().negate(), draft?.pts[0] || pivot);
 }
 // punto de una superficie bajo el cursor (snap a superficie)
-function surfacePointAt() {
-  const hit = ray.intersectObjects(objects.filter((o) => o.visible && o.kind !== 'curve').map((o) => o.parts.mesh), false)[0];
-  return hit ? hit.point.clone() : null;
+// punto de la superficie bajo el rayo, EXACTO: se toma el (u, v) del triángulo tocado y se evalúa la NURBS S(u, v) (no el triángulo)
+function surfacePointAt(own = null) {
+  const list = objects.filter((o) => o.visible && o.kind !== 'curve' && !own?.has(o));
+  const hit = ray.intersectObjects(list.map((o) => o.parts.mesh), false)[0];
+  if (!hit) return null;
+  const o = list.find((x) => x.parts.mesh === hit.object);
+  if (o?.kind === 'surface' && hit.uv) { const S = FF.surfEval(o.data); return S(hit.uv.x, hit.uv.y); }
+  return hit.point.clone();
 }
+// "Snap topológico" (punto, curva o superficie): el resultado es el punto 3D absoluto y NO se aplana a ningún plano ni eje;
+// solo el snap a la REJILLA (Alt) respeta la restricción del eje o del plano. Lo usan dibujar, mover CVs/objetos y el pivote.
+const isTopoSnap = (s) => !!s && s.kind !== 'rejilla';
 function placePoint(e, solid = false) {
   const modes = snapModes(e);
   const s = findSnap(e.clientX, e.clientY, modes, {});
   if (s) { showSnap(s); return s.point; }
   setRay(e);
-  // superficie: botón fijo o Shift mantenido al dibujar
-  if (modes.surface || (e.shiftKey && !e.altKey)) {
+  // superficie: botón fijo o Shift mantenido al dibujar; con Ctrl o Ctrl+Alt, si no hay punto ni curva cerca, el punto se desliza
+  // sobre la superficie que hay debajo (S(u, v) exacta en cada movimiento del ratón)
+  if (modes.surface || modes.point || modes.curve || (e.shiftKey && !e.altKey)) {
     const q = surfacePointAt();
     if (q) { showSnap({ point: q, kind: 'superficie' }); return q; }
   }
@@ -1912,6 +1926,11 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   if (tool === 'curve' && draft && !e.buttons) { draft.hover = placePoint(e); showDraft(); }
 });
 renderer.domElement.addEventListener('pointerleave', () => { if (draft) { draft.hover = null; showDraft(); } });
+['keydown', 'keyup'].forEach((t) => addEventListener(t, (e) => {
+  if (!['Control', 'Alt', 'Shift', 'Meta'].includes(e.key) || tool !== 'curve' || !draft) return;
+  draft.hover = placePoint({ clientX: lastPtr.x, clientY: lastPtr.y, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey });
+  showDraft();
+}));
 addEventListener('pointerup', (e) => {
   const d = down;
   down = null;
@@ -1972,7 +1991,7 @@ addEventListener('pointermove', (e) => {
   const d = pivotDrag;
   if (!d) return;
   const sn = moveSnap(e, snapModes(e), { pivots: new Set([d.o]) }, d.p0);
-  if (sn) { d.o.pivot.copy(constrainPt(sn.point, d.p0, null)); showSnap(sn); }
+  if (sn) { d.o.pivot.copy(isTopoSnap(sn) ? sn.point : constrainPt(sn.point, d.p0, null)); showSnap(sn); }
   else { hideSnap(); setRay(e); const h = ray.ray.intersectPlane(d.plane, new THREE.Vector3()); if (h) d.o.pivot.copy(h.add(d.off)); }
   attachGizmo(); updatePivotReadout(); if (hudOn) hudRefresh();
 });

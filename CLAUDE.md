@@ -794,6 +794,13 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   findSnap afina con sección áurea en pantalla → best.point exacto y best.param.
   (5) Ventanas flotantes (toolwin, quickpick, HUD) = mismo panel: --win-bg translúcido por tema, blur 14 px, borde y sombra; se quitaron de INK_SEL (texto por tema).
   HUD por omisión abajo a la DERECHA (right 84 px). Pruebas: t40/t18.cjs (redondeo G2 con planos), t19.cjs (Align de curva, flecha amarilla, captura al-1.png).
+- (v0.43.1) SNAP unificado (pruebas del usuario: al crear se "congelaba", al editar se "aplastaba" a 2 ejes). Regla: snap TOPOLÓGICO (punto, curva, superficie;
+  isTopoSnap = kind ≠ 'rejilla') = punto 3D absoluto, sin eje del botón, sin plano del gizmo y sin bloqueo ortogonal (constrainPt con {free:true}); solo la REJILLA (Alt)
+  respeta la restricción. Vale para dibujar (placePoint), mover con botones (3D y 2D), gizmo (applySnapToProxy, colapso de varios CVs) y pivote (pivotDrag).
+  Ctrl / Ctrl+Alt sin punto ni curva cerca = el punto se desliza sobre la superficie de debajo (como Shift). surfacePointAt(own) evalúa la NURBS EXACTA S(u, v)
+  con el uv del triángulo tocado (no el triángulo). Al pulsar/soltar Ctrl/Alt/Shift sin mover el ratón, la vista previa del dibujo se recalcula (keydown/keyup).
+  Causa del "congelado": pointCandidates metía TODOS los CVs y pivotes de todos los objetos (invisibles) y el punto se pegaba a ellos; ahora solo CVs con handles
+  visibles y pivotes de lo elegido. Prueba t40/t20.cjs: creación con Ctrl sobre el vaso a ≤ 7e-4 dm de la superficie; CV movido con botón der + Ctrl a 7e-6 dm.
 
 ## Siguiente paso
 
