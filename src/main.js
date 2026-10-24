@@ -13,7 +13,7 @@ import * as N from './nurbs.js';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.40.0';
+const FORJA_VERSION = '0.40.1';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -3594,10 +3594,13 @@ function bindKey(code, getMenu) {
 }
 bindKey('KeyZ', getPuck);
 bindKey('Space', () => (layout === 'render' ? dispVisu : disp));
-// Tab ya no abre nada (el Puck está en la Z); tampoco salta el foco entre botones fuera de los cuadros de texto
-addEventListener('keydown', (e) => {
-  if (e.key === 'Tab' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) && !e.target.closest?.('dialog')) e.preventDefault();
-}, true);
+// Tab NO hace nada en Forja (el Puck está en la Z). Tab movía el foco a un botón de la barra izquierda y, como esa barra se mostraba
+// con el foco dentro (:focus-within), "desplegaba" el menú. Ahora: Tab bloqueado en todas partes salvo en cuadros de texto y diálogos,
+// y si el foco llega igual a un botón (p. ej. con Tab desde fuera de la página) se le quita.
+const typing = (el) => ['INPUT', 'SELECT', 'TEXTAREA'].includes(el?.tagName) || !!el?.closest?.('dialog');
+addEventListener('keydown', (e) => { if (e.key === 'Tab' && !typing(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+addEventListener('keyup', (e) => { if (e.key === 'Tab' && !typing(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+addEventListener('focusin', (e) => { if (!typing(e.target) && e.target !== document.body && e.target.matches?.(':focus-visible')) e.target.blur(); }, true);
 addEventListener('keydown', (e) => { if (e.key === 'Escape') MENUS.forEach((m) => m.close(false)); }, true);
 let mouseMenu = null;
 addEventListener('pointerdown', (e) => {

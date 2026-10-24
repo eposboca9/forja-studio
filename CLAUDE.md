@@ -742,6 +742,9 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   (4) Selección "alternativa sugerida" de Alias por omisión (sel-buttons 'add', prefs.selButtons): izq añade, medio elige solo eso (y en vacío suelta todo),
   der quita. Navegación Shift+Alt y snap Ctrl/Alt/Ctrl+Alt ya eran así. Escalar con botones = proporcional (Scale) salvo NonProportional Scale.
   Prueba: scratchpad t40/t.cjs y t2.cjs (servidor python en :8765 y three desde scratchpad/npm; los scripts viejos de forja/ ya no existen).
+- (v0.40.1) El usuario insiste en que Tab sigue desplegando un menú (no se reprodujo aquí: en las pruebas Tab no abre nada ni mueve el foco). Endurecido:
+  Tab bloqueado en keydown y keyup (captura + stopImmediatePropagation) salvo en cuadros de texto y diálogos; focusin con :focus-visible (foco por teclado, p. ej. Tab
+  desde fuera del iframe del Artifact) quita el foco del botón; se quitó :focus-within de la barra izquierda (se mostraba con el foco dentro). Si sigue: pedir captura.
 
 ## Siguiente paso
 

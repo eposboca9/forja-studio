@@ -637,7 +637,7 @@
   /* barra izquierda: Capas arriba (fija, a la izquierda) y las herramientas debajo; aparece al acercar el ratón al borde o se queda si está anclada */
   .float-win.docked { left: 10px !important; top: 96px !important; width: 232px; max-height: calc(100vh - 170px); z-index: 3; opacity: 0; pointer-events: none; transform: translateX(-8px); transition: opacity .25s ease, transform .25s ease; }
   .float-win.docked .fw-head { cursor: default; }
-  .app.near-left .float-win.docked, .app.left-pinned .float-win.docked, .float-win.docked:hover, .float-win.docked:focus-within { opacity: 1; pointer-events: auto; transform: none; }
+  .app.near-left .float-win.docked, .app.left-pinned .float-win.docked, .float-win.docked:hover { opacity: 1; pointer-events: auto; transform: none; }
   #ly-dock { font-size: 11px; }
   #ly-dock[aria-pressed="true"] { color: #2f7bff; }
   .app.left-pinned .tools, .app.left-pinned .tools.show { opacity: 1; pointer-events: auto; transform: none; }
@@ -2009,6 +2009,6 @@
   "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
 } }
 </script>
-<script type="module" src="./src/main.js?v=0.40.0"></script>
+<script type="module" src="./src/main.js?v=0.40.1"></script>
 </body>
 </html>
