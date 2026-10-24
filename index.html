@@ -757,6 +757,30 @@
   .puck-item.sub.on i { box-shadow: inset 3px 3px 7px var(--nm-lo), inset -3px -3px 7px var(--nm-hi); }
   .puck-item.sub svg { width: 15px; height: 15px; }
   .puck-item.sub span { font-size: 8.5px; }
+  /* --- HUD Transform Info: neumórfico, flotante abajo al centro --- */
+  .hud { position: fixed; left: 96px; bottom: 46px; z-index: 40; width: 400px; max-width: calc(100vw - 32px); padding: 14px 16px 12px;
+    border-radius: 16px; color: var(--nm-text); background: color-mix(in srgb, var(--nm) 90%, transparent); backdrop-filter: blur(10px);
+    box-shadow: -6px -6px 16px var(--nm-hi), 8px 8px 20px var(--nm-lo); font-size: 12px; user-select: none; }
+  .hud[hidden] { display: none; }
+  .hud-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; cursor: grab; }
+  .hud-head b { font-weight: 500; letter-spacing: .12em; text-transform: uppercase; font-size: 11px; }
+  .hud-head span { color: var(--nm-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hud-sub { margin: 0 0 8px; color: var(--nm-ink); font-size: 11px; line-height: 1.35; }
+  .hud-list { list-style: none; margin: 0 0 8px; padding: 6px; max-height: 26vh; overflow: auto; border-radius: 10px;
+    box-shadow: inset 2px 2px 6px var(--nm-lo), inset -2px -2px 6px var(--nm-hi); }
+  .hud-list li { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; padding: 4px 4px; font-size: 11px; }
+  .hud-list li + li { border-top: 1px solid color-mix(in srgb, var(--nm-ink) 18%, transparent); }
+  .hud-list span { color: var(--nm-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hud-list em { grid-column: 1 / -1; font-style: normal; font-family: var(--font-mono); font-size: 10px; color: var(--nm-ink); }
+  .hud-row { display: grid; grid-template-columns: 1fr 1fr 1fr 22px; gap: 8px; align-items: center; margin-top: 6px; }
+  .hud-row label { grid-column: 1 / -1; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--nm-ink); margin-bottom: -2px; }
+  .hud-row u { text-decoration: none; color: var(--nm-ink); font-size: 10px; }
+  .hud-f { position: relative; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: flex-end; padding: 0 10px 0 16px; cursor: ew-resize;
+    box-shadow: inset 2px 2px 5px var(--nm-lo), inset -2px -2px 5px var(--nm-hi); font-family: var(--font-mono); font-size: 12px; }
+  .hud-f.on { box-shadow: inset 3px 3px 7px var(--nm-lo), inset -3px -3px 7px var(--nm-hi); color: #2f7bff; }
+  .hud-f .ax { position: absolute; left: 7px; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; }
+  .hud-f .ax0 { background: #e5484d; } .hud-f .ax1 { background: #34c759; } .hud-f .ax2 { background: #2f7bff; }
+  .hud-f input { width: 100%; border: 0; background: none; color: var(--nm-text); font: inherit; text-align: right; outline: none; cursor: text; }
   /* extras (marking menus de Alias): pastillas en columna debajo del anillo, del mismo material */
   .puck.bloom .puck-item.extra { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) translate(0px, 0px) scale(var(--s)); }
   .puck-item.extra { flex-direction: row; justify-content: flex-start; gap: 10px; width: 196px; height: 36px; padding: 0 14px 0 6px; border-radius: 18px;
@@ -2008,6 +2032,6 @@
   "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
 } }
 </script>
-<script type="module" src="./src/main.js?v=0.40.3"></script>
+<script type="module" src="./src/main.js?v=0.41.0"></script>
 </body>
 </html>

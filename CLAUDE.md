@@ -751,6 +751,16 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - (v0.40.3) El usuario seguía viendo el menú Visualización al pulsar Tab. Se quitó la ÚNICA tecla que lo abría (Espacio, bindKey('Space')): ahora NINGUNA tecla abre
   menús salvo la Z (Puck). Visualización solo con Ctrl+Shift+clic derecho, como en Alias. Los menús son HTML encima del visor: no dependen del motor (clásico o híbrido);
   probado con los dos (t40/t5.cjs: Tab, Shift+Tab y Espacio = 0 menús; Z = Puck).
+- (v0.41) HUD "Transform info" (main.js, bloque "HUD de información"; #hud, CSS .hud* neumórfico con --nm): sale al elegir algo y se va al soltar la selección
+  (clic en el vacío con izq o medio = soltar todo). hudTargets(): modos 'cv' (CVs elegidos, centro), 'pivot' (editar pivote: solo mueve el pivote), 'single' (info:
+  grado, tramos, CVs, caja en mm; pivote), 'multi' (lista de cada elemento con su info y pivote; rotar/escalar cada uno sobre su pivote) y 'group' (todos los de un
+  grupo de Ctrl+G = Objeto: una sola lectura y un pivote maestro hud.gp = centro de la caja). Filas Traslación (pivote en mm, ejes de Alias) / Rotación / Escala
+  (acumuladas en la sesión de esa selección). Arrastrar un número en horizontal (0,5 mm·°/px, escala 0,005/px; Shift ×10, Ctrl ×0,1) o doble clic para escribirlo.
+  hudApply(g, eje, de, a) mueve CVs / geometría de mallas / pivotes y usa pendingObjs + flushPending; hudBegin = historyBlockers + checkpoint. Se arrastra por la
+  cabecera (prefs.hudPos). Canvas y Shells no existen todavía en Forja (KIND_NAMES ya los nombra). hudOn (var) protege los enganches de antes de crearse.
+  Origen Z arriba: marcador de 3 ejes (ArrowHelper + letras x/y/z, tamaño fijo en px) y líneas principales AZULES #2f7bff hijas de cada rejilla (suelo: X e Y;
+  frente: X y Z; lado: Y y Z) en tramos de 5 dm hasta ±300 dm. OJO: sueltas en la escena o como una sola línea larga NO se dibujaban en perspectiva.
+  Pruebas: scratchpad t40/t6.cjs, t7.cjs (HUD), t8.cjs (ejes; capturas ax-persp.png, hud-*.png).
 
 ## Siguiente paso
 

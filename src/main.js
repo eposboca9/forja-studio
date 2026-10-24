@@ -13,7 +13,7 @@ import * as N from './nurbs.js';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.40.3';
+const FORJA_VERSION = '0.41.0';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -1300,6 +1300,7 @@ function flushPending() {
   pendingObjs.forEach(updateObject);
   pendingObjs = [];
   updateCVReadout();
+  if (hudOn) hudRefresh();
 }
 gizmo.addEventListener('mouseUp', () => { gizmoDrag = null; flushPending(); hideSnap(); attachGizmo(); renderSelectionPanel(); });
 gizmo.addEventListener('objectChange', () => {
@@ -1333,7 +1334,7 @@ gizmo.addEventListener('objectChange', () => {
       geo.computeBoundingBox(); geo.computeBoundingSphere();
     }
   }
-  if (pivotEdit) { updatePivotReadout(); return; }
+  if (pivotEdit) { updatePivotReadout(); if (hudOn) hudRefresh(); return; }
   pendingObjs = g.objs;
   if (!pendingUpdate) pendingUpdate = requestAnimationFrame(flushPending);
 });
@@ -1550,7 +1551,7 @@ async function clickPick(e, how) {
     if (hit.enterCV && pickMode !== 'cv') enterCvMode();
     applySelection([hit.cv || hit.obj], how);
     if ($('click-pivot').checked) setPivot(hit.point || (() => { const c = cvRef(hit.cv); return new THREE.Vector3(c.x, c.y, c.z); })());
-  } else if (how === 'replace') clearSelection();
+  } else if (how === 'replace' || how === 'add') clearSelection();   // clic en el vacío: se suelta todo (y el HUD se va)
 }
 function pickAt(e) {
   setRay(e);
@@ -1634,6 +1635,34 @@ gridYZ.rotation.z = Math.PI / 2;
 gridYZ.layers.set(DIAG);
 gridYZ.visible = false;
 scene.add(gridYZ);
+// Origen como Alias (Z arriba): líneas principales "infinitas" en azul nítido por el origen (las del plano de la rejilla visible)
+// y un marcador de 3 ejes (X rojo, Y verde, Z azul) de tamaño fijo en pantalla. AXES = ejes de Alias en coordenadas internas.
+const AXIS_BLUE = 0x2f7bff;
+// las líneas van DENTRO de cada rejilla (sueltas en la escena no se veían en perspectiva): salen y se ocultan con su rejilla.
+// Coordenadas locales de GridHelper (plano local XZ): suelo x→X, z→Y; frente (gridXY) x→X, z→Z; lado (gridYZ) x→Z, z→Y.
+const axisLine = (parent, dir) => {
+  // "infinita" = 300 dm a cada lado, en tramos de 5 dm (una sola línea muy larga se perdía al recortarla contra la cámara)
+  const pts = []; for (let t = -300; t < 300; t += 5) pts.push(dir.clone().multiplyScalar(t), dir.clone().multiplyScalar(t + 5));
+  const g = new THREE.BufferGeometry().setFromPoints(pts);
+  const l = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: AXIS_BLUE, toneMapped: false }));   // opaca: transparente no se veía
+  l.layers.set(DIAG); l.frustumCulled = false; parent.add(l); return l;
+};
+const LX = new THREE.Vector3(1, 0, 0), LZ = new THREE.Vector3(0, 0, 1);
+[[grid, LX], [grid, LZ], [gridXY, LX], [gridXY, LZ], [gridYZ, LX], [gridYZ, LZ]].forEach(([g, d]) => axisLine(g, d));
+const originAxes = new THREE.Group();
+originAxes.layers.set(DIAG);
+[[0xe5484d, 'x'], [0x34c759, 'y'], [AXIS_BLUE, 'z']].forEach(([col, name], i) => {
+  const a = new THREE.ArrowHelper(AXES[i], new THREE.Vector3(), 46, col, 9, 5);
+  a.traverse((o) => { o.layers.set(DIAG); o.renderOrder = 30; if (o.material) { o.material.depthTest = false; o.material.transparent = true; } });
+  originAxes.add(a);
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  const c2 = cv.getContext('2d'); c2.font = '600 44px Outfit, system-ui, sans-serif'; c2.textAlign = 'center'; c2.textBaseline = 'middle';
+  c2.fillStyle = '#' + col.toString(16).padStart(6, '0'); c2.fillText(name, 32, 34);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), depthTest: false, transparent: true }));
+  sp.position.copy(AXES[i]).multiplyScalar(60); sp.scale.setScalar(18); sp.layers.set(DIAG); sp.renderOrder = 31;
+  originAxes.add(sp);
+});
+scene.add(originAxes);
 function updateDrawGrids() {
   const drawing = tool === 'curve' || tool === 'plane' || tool === 'circle', k = drawing ? resolvePlaneKind(tool !== 'curve') : null;
   // vista ortogonal de una cara (cubo de vistas): aparece la rejilla del plano que se ve de frente
@@ -1647,6 +1676,7 @@ function updateDrawGrids() {
   grid.visible = show && face !== 'xy' && face !== 'yz';          // de canto, el suelo no aporta
   gridXY.visible = k === 'xy' || (show && face === 'xy');
   gridYZ.visible = k === 'yz' || (show && face === 'yz');
+  originAxes.visible = grid.visible || gridXY.visible || gridYZ.visible;
 }
 
 const HINTS = {
@@ -2075,7 +2105,7 @@ function degreeOptions(sel) {
   for (let d = 1; d <= N.MAX_DEGREE; d++) h += `<option value="${d}" ${d === sel ? 'selected' : ''}>${d}</option>`;
   return h;
 }
-function renderSelectionPanel() { renderSelectionBody(); pivotBlock(); }
+function renderSelectionPanel() { renderSelectionBody(); pivotBlock(); if (hudOn) hudRender(); }
 function renderSelectionBody() {
   const box = $('sel-body');
   const refs = [...selCVs.values()];
@@ -5565,7 +5595,7 @@ function updateXfPrompt() {
   const on = $('quickpick').hidden && mouseXform && prefs.xform !== 'gizmo' && tool === 'select' && !pivotEdit && !carousel && !MENUS.some((m) => m.open) && hasTransformable();
   xfPrompt.hidden = !on;
   if (!on) return;
-  const txt = xform === 'scale' ? 'ESCALAR <i>izq</i> todo · <i>medio</i> Y · <i>der</i> X Z'
+  const txt = xform === 'scale' ? (scaleNP ? 'ESCALAR NO PROP. <i>izq</i> X · <i>medio</i> Y · <i>der</i> Z' : 'ESCALAR <i>cualquier botón</i> proporcional')
     : `${xform === 'rotate' ? 'ROTAR' : 'MOVER'} <i>izq</i> X · <i>medio</i> Y · <i>der</i> Z`;
   if (xfPrompt.dataset.t !== txt) { xfPrompt.innerHTML = txt; xfPrompt.dataset.t = txt; }
   xfPrompt.style.transform = `translate(${lastPtr.x + 18}px, ${lastPtr.y + 20}px)`;
@@ -6027,6 +6057,171 @@ async function forgeApplyNow(auto) {
     console.error(e); toast(`No se pudo aplicar el patrón: ${e.message || e}`);
   } finally { forgeApplying = false; }
 }
+// ---------- HUD de información (Transform Info), neumórfico ----------
+// Sale al elegir algo y se va al soltar la selección. Lee CVs, curvas, superficies, mallas (sólidos), grupos y pivotes.
+// Un elemento: su información + posición del pivote. Varios sueltos: lista de cada uno + transformación conjunta (cada uno gira y escala
+// sobre su pivote, como Alias). Un grupo entero: una sola lectura y un solo pivote maestro. Ejes de Alias (Z arriba), en mm.
+// Arrastrar un número en horizontal = cambiarlo en vivo (Shift ×10, Ctrl ×0,1); doble clic = escribirlo.
+var hudOn = false;   // var: los enganches de arriba pueden llamarse antes de que exista el HUD
+const MM = 100;   // Forja trabaja en dm
+const hudEl = document.createElement('div');
+hudEl.id = 'hud'; hudEl.className = 'hud'; hudEl.hidden = true;
+document.body.append(hudEl);
+const hud = { key: '', rot: [0, 0, 0], scl: [1, 1, 1], gp: null, drag: null };
+const KIND_NAMES = { surface: 'Superficie', curve: 'Curva', cos: 'Curva sobre superficie', mesh: 'Sólido (malla)', canvas: 'Canvas', shell: 'Shell' };
+const kindOf = (o) => (o.kind === 'curve' && o.data?.cos ? 'cos' : o.kind);
+function objBox(o) {
+  if (o.kind === 'mesh') { const g = o.data.geometry; if (!g.boundingBox) g.computeBoundingBox(); return g.boundingBox.clone(); }
+  const b = new THREE.Box3(); (o.data.cvs || []).flat().forEach((p) => b.expandByPoint(new THREE.Vector3(p.x, p.y, p.z))); return b;
+}
+const sizeMM = (b) => { const s = b.getSize(new THREE.Vector3()); return `${(s.x * MM).toFixed(1)} × ${(s.z * MM).toFixed(1)} × ${(s.y * MM).toFixed(1)} mm`; };
+function objInfo(o) {
+  const d = o.data;
+  if (o.kind === 'surface') return `grado ${d.degU}×${d.degV} · tramos ${N.spansOf(d.cvs.length, d.degU)}×${N.spansOf(d.cvs[0].length, d.degV)} · ${d.cvs.length}×${d.cvs[0].length} CVs · caja ${sizeMM(objBox(o))}`;
+  if (o.kind === 'curve') return `grado ${d.deg} · tramos ${N.spansOf(d.cvs.length, d.deg)} · ${d.cvs.length} CVs${d.cos ? ' · sobre ' + (byId(d.cos.surf)?.name || 'superficie') : ''} · caja ${sizeMM(objBox(o))}`;
+  if (o.kind === 'mesh') { const g = d.geometry; return `${Math.round((g.index ? g.index.count : g.attributes.position.count) / 3).toLocaleString('es')} triángulos · caja ${sizeMM(objBox(o))}`; }
+  return '';
+}
+function hudTargets() {
+  if (pickMode === 'cv') {
+    const refs = [...selCVs.values()];
+    if (!refs.length) return null;
+    return { mode: 'cv', refs, center: centroid(refs), key: 'cv:' + refs.map((r) => r.key).join(',') };
+  }
+  const objs = selObjs.filter((o) => o.visible);
+  if (!objs.length) return null;
+  const key = 'obj:' + objs.map((o) => o.id).join(',') + (pivotEdit ? ':piv' : '');
+  if (pivotEdit) { const o = objs[objs.length - 1]; return { mode: 'pivot', objs: [o], center: o.pivot, key }; }
+  const g0 = objs[0].group, grp = objs.length > 1 && g0 != null && objs.every((o) => o.group === g0) && objects.filter((o) => o.group === g0 && o.visible).every((o) => objs.includes(o));
+  if (grp) {
+    if (hud.key !== key || !hud.gp) { const b = new THREE.Box3(); objs.forEach((o) => b.union(objBox(o))); hud.gp = b.getCenter(new THREE.Vector3()); }
+    return { mode: 'group', objs, center: hud.gp, group: groups.find((g) => g.id === g0), key };
+  }
+  if (objs.length === 1) return { mode: 'single', objs, center: objs[0].pivot, key };
+  const c = new THREE.Vector3(); objs.forEach((o) => c.add(o.pivot)); c.divideScalar(objs.length);
+  return { mode: 'multi', objs, center: c, key };
+}
+const fmtA = (p) => { const a = toAlias(p); return [a.x * MM, a.y * MM, a.z * MM]; };
+const HUD_ROWS = { t: ['Traslación', 'mm', 4], r: ['Rotación', '°', 2], s: ['Escala', '', 3] };
+function hudVal(T, g, a) { const v = g === 't' ? fmtA(T.center)[a] : g === 'r' ? hud.rot[a] : hud.scl[a]; return Math.abs(v) < 5e-5 ? 0 : v; }
+function hudRender() {
+  const T = carousel ? null : hudTargets();
+  hudEl.hidden = !T;
+  if (!T) { hud.key = ''; return; }
+  if (T.key !== hud.key) { hud.key = T.key; hud.rot = [0, 0, 0]; hud.scl = [1, 1, 1]; }
+  if (hud.drag) return hudRefresh();
+  const one = T.objs?.[0];
+  const title = T.mode === 'cv' ? (T.refs.length === 1 ? `CV de ${T.refs[0].obj.name}` : `${T.refs.length} CVs`)
+    : T.mode === 'pivot' ? `Pivote de ${one.name}` : T.mode === 'group' ? `${T.group?.name || 'Objeto'} · ${T.objs.length} elementos`
+    : T.mode === 'single' ? one.name : `${T.objs.length} elementos`;
+  const sub = T.mode === 'cv' ? (T.refs.length === 1 ? `peso ${fmt(cvRef(T.refs[0]).w ?? 1)}` : 'centro de los CVs elegidos')
+    : T.mode === 'single' ? `${KIND_NAMES[kindOf(one)]} · ${objInfo(one)}`
+    : T.mode === 'group' ? `Objeto (grupo) · una sola lectura · caja ${sizeMM(T.objs.reduce((b, o) => b.union(objBox(o)), new THREE.Box3()))}`
+    : T.mode === 'pivot' ? 'mueve solo el pivote' : 'cada uno gira y escala sobre su propio pivote';
+  const list = T.mode === 'multi' ? `<ol class="hud-list">${T.objs.map((o) => { const p = fmtA(o.pivot); return `<li><b>${esc(o.name)}</b><span>${KIND_NAMES[kindOf(o)]} · ${objInfo(o)}</span><em>pivote ${p.map((v) => v.toFixed(1)).join(' · ')}</em></li>`; }).join('')}</ol>` : '';
+  const rows = (T.mode === 'pivot' ? ['t'] : ['t', 'r', 's']).map((g) => {
+    const [lab, unit, dec] = HUD_ROWS[g];
+    return `<div class="hud-row"><label>${T.mode === 'pivot' && g === 't' ? 'Pivote' : T.mode === 'cv' && g === 't' ? 'Posición' : lab}</label>${[0, 1, 2].map((a) =>
+      `<div class="hud-f" data-g="${g}" data-a="${a}" title="Arrastra en horizontal (Shift ×10, Ctrl ×0,1) · doble clic para escribir"><i class="ax ax${a}"></i><span>${hudVal(T, g, a).toFixed(dec)}</span></div>`).join('')}<u>${unit}</u></div>`;
+  }).join('');
+  hudEl.innerHTML = `<div class="hud-head"><b>Transform info</b><span>${esc(title)}</span></div><p class="hud-sub">${esc(sub)}</p>${list}${rows}`;
+}
+function hudRefresh() {
+  const T = hudTargets();
+  if (!T || hudEl.hidden) return;
+  hudEl.querySelectorAll('.hud-f').forEach((f) => {
+    if (f.querySelector('input')) return;
+    const g = f.dataset.g, a = +f.dataset.a; f.querySelector('span').textContent = hudVal(T, g, a).toFixed(HUD_ROWS[g][2]);
+  });
+}
+// aplica el cambio de un campo (de `from` a `to`) a lo elegido
+function hudApply(g, a, from, to) {
+  const T = hudTargets();
+  if (!T || from === to) return;
+  const ax = AXES[a], M = new THREE.Matrix4();
+  const about = (c, L) => new THREE.Matrix4().makeTranslation(c.x, c.y, c.z).multiply(L).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+  let L;
+  if (g === 't') { const d = ax.clone().multiplyScalar((to - from) / MM); L = new THREE.Matrix4().makeTranslation(d.x, d.y, d.z); }
+  else if (g === 'r') L = new THREE.Matrix4().makeRotationAxis(ax, THREE.MathUtils.degToRad(to - from));
+  else { const k = Math.abs(from) < 1e-6 ? 1 : to / from, v = [ax.x, ax.y, ax.z].map((c) => 1 + (k - 1) * Math.abs(c)); L = new THREE.Matrix4().makeScale(...v); }
+  const v3 = new THREE.Vector3(), moveCV = (p, m) => { v3.set(p.x, p.y, p.z).applyMatrix4(m); p.x = v3.x; p.y = v3.y; p.z = v3.z; };
+  let objs = [];
+  if (T.mode === 'pivot') { T.objs[0].pivot.applyMatrix4(L); attachGizmo(); hudRefresh(); updatePivotReadout(); return; }
+  if (T.mode === 'cv') { M.copy(about(T.center, L)); T.refs.forEach((r) => moveCV(cvRef(r), M)); objs = [...new Set(T.refs.map((r) => r.obj))]; }
+  else {
+    for (const o of T.objs) {
+      const m = g === 't' ? L : about(T.mode === 'multi' ? o.pivot : T.center, L);
+      if (o.kind === 'mesh') { const geo = o.data.geometry; geo.applyMatrix4(m); geo.computeBoundingBox(); geo.computeBoundingSphere(); }
+      else allCVRefs(o).forEach((r) => moveCV(cvRef(r), m));
+      if (T.mode === 'multi' || g === 't') o.pivot.applyMatrix4(m); else o.pivot.applyMatrix4(about(T.center, L));
+    }
+    if (T.mode === 'group') hud.gp.applyMatrix4(g === 't' ? L : new THREE.Matrix4());
+    objs = T.objs;
+  }
+  if (g === 'r') hud.rot[a] = to; else if (g === 's') hud.scl[a] = to;
+  pendingObjs = objs;
+  if (!pendingUpdate) pendingUpdate = requestAnimationFrame(flushPending);
+}
+// antes de cambiar nada: historial de construcción (como al mover) y un paso de deshacer
+function hudBegin(e) {
+  const blk = historyBlockers();
+  if (blk.length) { askBreakHistory(e.clientX, e.clientY, blk); return false; }
+  checkpoint(); return true;
+}
+function hudEnd() { flushPending(); attachGizmo(); renderSelectionBody(); pivotBlock(); hudRefresh(); }
+const hudStep = (g, e) => (g === 't' ? 0.5 : g === 'r' ? 0.5 : 0.005) * (e.shiftKey ? 10 : e.ctrlKey || e.metaKey ? 0.1 : 1);
+hudEl.addEventListener('pointerdown', (e) => {
+  const f = e.target.closest('.hud-f');
+  if (!f || e.button !== 0 || f.querySelector('input')) return;
+  e.preventDefault(); e.stopPropagation();
+  const T = hudTargets(), g = f.dataset.g, a = +f.dataset.a;
+  hud.drag = { f, g, a, x: e.clientX, v0: hudVal(T, g, a), last: hudVal(T, g, a), moved: false };
+  f.setPointerCapture(e.pointerId); f.classList.add('on');
+});
+hudEl.addEventListener('pointermove', (e) => {
+  const d = hud.drag;
+  if (!d) return;
+  const dx = e.clientX - d.x;
+  if (!d.moved) { if (Math.abs(dx) < 3) return; if (!hudBegin(e)) { d.f.classList.remove('on'); hud.drag = null; return; } d.moved = true; }
+  let v = d.v0 + dx * hudStep(d.g, e);
+  if (d.g === 's' && Math.abs(v) < 0.001) v = 0.001 * Math.sign(v || 1);
+  hudApply(d.g, d.a, d.last, v); d.last = v;
+  d.f.querySelector('span').textContent = v.toFixed(HUD_ROWS[d.g][2]);
+});
+const hudUp = () => { const d = hud.drag; if (!d) return; hud.drag = null; d.f.classList.remove('on'); if (d.moved) hudEnd(); };
+hudEl.addEventListener('pointerup', hudUp); hudEl.addEventListener('pointercancel', hudUp);
+hudEl.addEventListener('dblclick', (e) => {
+  const f = e.target.closest('.hud-f');
+  if (!f || f.querySelector('input')) return;
+  const g = f.dataset.g, a = +f.dataset.a, span = f.querySelector('span'), cur = +span.textContent;
+  const inp = document.createElement('input'); inp.type = 'text'; inp.inputMode = 'decimal'; inp.value = span.textContent;
+  span.hidden = true; f.append(inp); inp.focus(); inp.select();
+  let done = false;
+  const finish = (ok) => {
+    if (done) return; done = true;
+    const v = parseFloat(inp.value.replace(',', '.'));
+    inp.remove(); span.hidden = false;
+    if (ok && Number.isFinite(v) && v !== cur && !(g === 's' && v === 0) && hudBegin(e)) { hudApply(g, a, cur, v); hudEnd(); }
+    else hudRefresh();
+  };
+  inp.addEventListener('keydown', (k) => { k.stopPropagation(); if (k.key === 'Enter') finish(true); else if (k.key === 'Escape') finish(false); });
+  inp.addEventListener('blur', () => finish(true));
+});
+hudEl.addEventListener('contextmenu', (e) => e.preventDefault());
+// se arrastra por la cabecera y recuerda su sitio (prefs.hudPos)
+const placeHud = () => { const q = prefs.hudPos; if (q) Object.assign(hudEl.style, { left: Math.min(innerWidth - 120, Math.max(0, q.x)) + 'px', top: Math.min(innerHeight - 60, Math.max(0, q.y)) + 'px', bottom: 'auto', translate: 'none' }); };
+placeHud(); addEventListener('resize', placeHud);
+hudEl.addEventListener('pointerdown', (e) => {
+  const h = e.target.closest('.hud-head');
+  if (!h || e.button !== 0) return;
+  e.preventDefault();
+  const r = hudEl.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top;
+  const mv = (m) => { prefs.hudPos = { x: m.clientX - ox, y: m.clientY - oy }; placeHud(); };
+  const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); savePrefs(); };
+  addEventListener('pointermove', mv); addEventListener('pointerup', up);
+});
+hudOn = true;
+
 function renderFrame(now) {
   if (layout === 'forge' && !carousel && forgeCtx.controls.autoRotate) tumble(1.2, 0);   // "Girar" de Forge
   stepCamAnim(now);
@@ -6041,6 +6236,7 @@ function renderFrame(now) {
   snapRing.scale.setScalar(camera.position.distanceTo(snapRing.position) * 0.06);
   syncPivotMarkers();
   scaleHandles();
+  originAxes.scale.setScalar(pxWorld(originAxes.position, 1));
   if (relArrows.children.length) scaleRelArrows();
   placeRelLabels();
   // la sombra solo cambia si cambia la escena (no al mover la cámara): se recalcula si algo cambió hace poco, si se arrastra el gizmo,
