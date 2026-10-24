@@ -714,6 +714,10 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Sólidos = mallas (kind 'mesh') para las compartidas; Booleanas está como "próximamente". Prueba: forja/tp3_dark.mjs / tp3_light.mjs (montaje p3-sheet.png). En SwiftShader usar
   keyboard.down('Tab') (una pulsación corta tarda > 400 ms y el Puck se cierra en vez de quedar fijo).
 
+- (v0.39.1) CACHÉ: el usuario seguía viendo el Puck anterior en el Artifact porque la página cargaba siempre ./src/main.js con el mismo nombre (el navegador usaba la copia
+  guardada). Ahora index.html carga ./src/main.js?v=<versión> y main.js importa concrete.js / puck3.js con ?v=; FORJA_VERSION en main.js (Ayuda › Acerca de muestra la versión).
+  REGLA: en cada publicación subir la versión en index.html (script de main.js), en FORJA_VERSION y en los imports de los .js que cambiaron. Probado en el visor real que ?v= funciona.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

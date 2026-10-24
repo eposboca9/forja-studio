@@ -10,8 +10,10 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as N from './nurbs.js';
-import { applyBackground, wallColorAt } from './concrete.js';
-import { createPuck3 } from './puck3.js';
+import { applyBackground, wallColorAt } from './concrete.js?v=0.39.1';
+import { createPuck3 } from './puck3.js?v=0.39.1';
+// versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
+const FORJA_VERSION = '0.39.1';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -3938,7 +3940,7 @@ const MENUBAR = [
   ['Utilidades', [
     { label: 'Centrar pivote', run: centerPivots }, { label: 'Punto de interés a la selección', key: 'L', run: pivotToSelection },
     { label: 'Medir distancia', soon: true }]],
-  ['Ayuda', [{ label: 'Atajos de teclado', run: () => openPrefs('help') }, { label: 'Ejemplo: Freeform Blend (manija)', run: () => blendDemo() }, { label: 'Acerca de Forja', run: () => toast('FORJA · modelador NURBS libre (Alias + Plasticity + Blender)') }]],
+  ['Ayuda', [{ label: 'Atajos de teclado', run: () => openPrefs('help') }, { label: 'Ejemplo: Freeform Blend (manija)', run: () => blendDemo() }, { label: 'Acerca de Forja', run: () => toast('FORJA v' + FORJA_VERSION + ' · ' + 'FORJA · modelador NURBS libre (Alias + Plasticity + Blender)') }]],
 ];
 function buildMenubar() {
   const bar = $('menubar');
