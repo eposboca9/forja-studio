@@ -761,6 +761,23 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   Origen Z arriba: marcador de 3 ejes (ArrowHelper + letras x/y/z, tamaño fijo en px) y líneas principales AZULES #2f7bff hijas de cada rejilla (suelo: X e Y;
   frente: X y Z; lado: Y y Z) en tramos de 5 dm hasta ±300 dm. OJO: sueltas en la escena o como una sola línea larga NO se dibujaban en perspectiva.
   Pruebas: scratchpad t40/t6.cjs, t7.cjs (HUD), t8.cjs (ejes; capturas ax-persp.png, hud-*.png).
+- (v0.42) "Documento de arquitectura" del usuario (Alias + Plasticity). Lo que ya existía (Puck 3 círculos, marking menus, HUD, Z arriba, Shift+Alt, botones
+  añadir/elegir/quitar, Align con filas extra = "Mezcla") se dejó. Nuevo:
+  (1) Revolución (nurbs.js revolve(c, o)): o.origin/o.axis, o.angle (1–360°, hasta 3600 con paso), o.pitch (hélice, dm por vuelta), o.rational=false o paso → arcos
+  NO racionales de o.deg / o.spans interpolados en Greville (fitCurve por fila; error de radio 2,5e-4 dm con g3 6 tramos en 180°). Racional: n = ceil(θ/90°) arcos,
+  pesos cos(Δ/2); sin opciones = idéntico al de antes (8e-16). main.js: revOpts(r, src) (axisMode 'world' | 'pivot' | 'vector' con r.origin/r.axis), revFrame,
+  revolveSelection crea con 1° y el ángulo sigue al ratón alrededor del eje (plano ⟂ eje; Alt de 15 en 15°); clic izq = fijar; clic DERECHO o Esc = aceptar y cerrar
+  (commitRevolve; también con la ventana abierta). Eje Vector = 2 clics con placePoint (snaps). Flechas: verde = grados (en el extremo del arco, tangente), azul = paso.
+  (2) Redondeo "Cuerda (chordal)": fillet.js filletShape o.chordal → radio = cuerda / (2 sen(ángulo entre normales / 2)) por arista; toolDef.filChordal. G2/G3 y
+  Form factor NO (OpenCascade solo hace arco circular): se avisa en la ventana. Las superficies base ya se recortaban solas.
+  (3) Snap + restricción (constrainPt, gizmoConstraint): con eje (botón del ratón o flecha del gizmo) solo cuenta la componente del eje; plano del gizmo = 2
+  componentes; varios CVs + snap = TODOS al mismo valor/punto (gizmoDrag.collapse). Vista ortogonal de cara (orthoLocked): la profundidad nunca cambia y mover con
+  botones pasa a 2D como Alias (izq libre en la vista · medio horizontal · der vertical; nearestAxis(camAxis)).
+  (4) Move Pivot (D): arrastrar el pivote desde su marca (≤ 26 px) en el plano de la pantalla, con snaps (pivotDrag); el gizmo sigue valiendo.
+  (5) Recuadro: en sombreado solo lo visible (rayos contra las superficies, sin contar la propia; seen()); en Malla (alambre) a través.
+  (6) HUD: la lista de varios elementos es plegable (<details>, hud.listClosed).
+  NO hecho del documento: Align Edge Align / Continuous / Default (hoy Natural = copia la estructura del maestro = Edge Align) y Skew / Tangent Balance;
+  máscaras de selección por herramienta (el redondeo ya elige solo aristas); trim convert. Pruebas: t40/t15.cjs (recuadro, pivote, revolución, hélice), t16.cjs (orto 2D).
 
 ## Siguiente paso
 

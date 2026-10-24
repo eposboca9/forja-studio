@@ -103,7 +103,7 @@ export function volume(oc, shape) {
   const v = g.Mass(); g.delete(); return v;
 }
 
-// Redondeo / chaflán. edges: aristas de edgeList; o = { r (dm), kind: 'fillet' | 'chamfer', vary: [[t 0..1, r dm], ...] | null }.
+// Redondeo / chaflán. edges: aristas de edgeList; o = { r (dm), kind: 'fillet' | 'chamfer', vary: [[t 0..1, r dm], ...] | null, chordal }.
 // src: caras de origen (makeShape) → origin: [{ id, faces }] con las caras del resultado que vienen de cada una.
 export function filletShape(oc, shape, edges, o, src = []) {
   const r = o.r * MM;
@@ -114,12 +114,15 @@ export function filletShape(oc, shape, edges, o, src = []) {
   } else {
     mk = new oc.BRepFilletAPI_MakeFillet(shape, oc.ChFi3d_FilletShape.ChFi3d_Rational);
     for (const e of edges) {
+      // o.chordal: la distancia es la CUERDA del redondeo (Chordal Length de Alias/Plasticity): radio = cuerda / (2·sen(ángulo/2)),
+      // con el ángulo entre las normales de las dos caras en esa arista
+      const k = o.chordal && e.angle > 1 ? 1 / (2 * Math.sin(((e.angle * Math.PI) / 180) / 2)) : 1;
       if (o.vary && o.vary.length) {
         const pts = [[0, o.r], ...o.vary.filter(([t]) => t > 1e-3 && t < 1 - 1e-3), [1, o.r]].sort((a, b) => a[0] - b[0]);
         const arr = new oc.TColgp_Array1OfPnt2d_2(1, pts.length);
-        pts.forEach(([t, rr], i) => { const p = new oc.gp_Pnt2d_3(t, rr * MM); arr.SetValue(i + 1, p); p.delete(); });
+        pts.forEach(([t, rr], i) => { const p = new oc.gp_Pnt2d_3(t, rr * k * MM); arr.SetValue(i + 1, p); p.delete(); });
         mk.Add_5(arr, e.edge);
-      } else mk.Add_2(r, e.edge);
+      } else mk.Add_2(r * k, e.edge);
     }
   }
   mk.Build(pr(oc));

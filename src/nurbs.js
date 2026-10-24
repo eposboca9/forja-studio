@@ -145,17 +145,39 @@ export function extrude(c, dir) {
   };
 }
 
-// Revolución alrededor del eje Y. El círculo es NURBS exacto: grado 2, 9 CVs con pesos √2/2 en las esquinas.
-export function revolve(c) {
-  const s = Math.SQRT1_2;
-  const cvs = [];
-  for (let k = 0; k < 9; k++) {
-    const corner = k % 2 === 1;
-    const ang = (k * Math.PI) / 4, rf = corner ? Math.SQRT2 : 1, wc = corner ? s : 1;
-    cvs.push(c.cvs.map((p) => {
-      const r = Math.hypot(p.x, p.z), a = Math.atan2(p.z, p.x) + ang;
-      return new THREE.Vector4(Math.cos(a) * r * rf, p.y, Math.sin(a) * r * rf, p.w * wc);
-    }));
+// Revolución. Sin opciones = la de siempre: 360° alrededor del eje vertical por el origen, círculo NURBS exacto.
+// o.origin / o.axis: eje de giro (punto y dirección, coordenadas internas); o.angle: grados de barrido (1–360);
+// o.pitch: paso helicoidal (avance a lo largo del eje por cada vuelta completa, dm);
+// o.rational = false (o pitch ≠ 0): arcos NO racionales de grado o.deg y o.spans tramos, interpolados en sus Greville
+// (una hélice no se puede escribir exacta con NURBS; un arco sí, con pesos cos(Δ/2)).
+export function revolve(c, o = {}) {
+  const O = o.origin ? new THREE.Vector3().copy(o.origin) : new THREE.Vector3();
+  const D = (o.axis ? new THREE.Vector3().copy(o.axis) : new THREE.Vector3(0, 1, 0)).normalize();
+  const pitch = o.pitch || 0, ang = THREE.MathUtils.degToRad(Math.max(0.5, Math.min(pitch ? 3600 : 360, o.angle ?? 360)));   // más de una vuelta solo con paso (hélice)
+  // marco de cada CV del perfil: pie sobre el eje, radio y dos direcciones (e2 = e1 × D, igual que antes: misma orientación)
+  const frames = c.cvs.map((p) => {
+    const v = new THREE.Vector3(p.x, p.y, p.z), foot = O.clone().addScaledVector(D, v.clone().sub(O).dot(D));
+    const rv = v.clone().sub(foot), r = rv.length();
+    let e1 = r > 1e-12 ? rv.divideScalar(r) : new THREE.Vector3(1, 0, 0);
+    if (r <= 1e-12) { e1 = Math.abs(D.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1); e1.addScaledVector(D, -e1.dot(D)).normalize(); }
+    return { foot, r, e1, e2: e1.clone().cross(D), w: p.w ?? 1 };
+  });
+  const at = (f, a, rr = f.r) => f.foot.clone().addScaledVector(f.e1, Math.cos(a) * rr).addScaledVector(f.e2, Math.sin(a) * rr).addScaledVector(D, (pitch * a) / (2 * Math.PI));
+  const rational = o.rational !== false && !pitch;
+  if (rational) {
+    const n = Math.max(1, Math.ceil(ang / (Math.PI / 2) - 1e-9)), dA = ang / n, cw = Math.cos(dA / 2);
+    const knotsU = [0, 0, 0]; for (let k = 1; k < n; k++) knotsU.push(k / n, k / n); knotsU.push(1, 1, 1);
+    const cvs = [];
+    for (let k = 0; k <= 2 * n; k++) {
+      const mid = k % 2 === 1, a = (k * dA) / 2;
+      cvs.push(frames.map((f) => { const q = at(f, a, mid ? f.r / cw : f.r); return new THREE.Vector4(q.x, q.y, q.z, f.w * (mid ? cw : 1)); }));
+    }
+    return { degU: 2, knotsU, degV: c.deg, knotsV: c.knots.slice(), cvs };
   }
-  return { degU: 2, knotsU: [0, 0, 0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1, 1, 1], degV: c.deg, knotsV: c.knots.slice(), cvs };
+  const deg = Math.max(1, Math.min(MAX_DEGREE, o.deg || 3)), spans = Math.max(1, Math.min(MAX_SPANS * 2, o.spans || Math.max(4, Math.ceil((ang / (Math.PI / 2)) * 2))));
+  const nU = deg + spans, knotsU = clampedKnots(nU, deg), g = greville(knotsU, deg, nU);
+  // cada fila (un CV del perfil) se interpola como curva no racional a lo largo del giro; todas comparten nudos
+  const rows = frames.map((f) => fitCurve(g.map((t) => at(f, t * ang)), deg).cvs);
+  const cvs = g.map((_, i) => frames.map((f, j) => new THREE.Vector4(rows[j][i].x, rows[j][i].y, rows[j][i].z, f.w)));
+  return { degU: deg, knotsU, degV: c.deg, knotsV: c.knots.slice(), cvs };
 }
