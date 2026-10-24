@@ -13,7 +13,7 @@ import * as N from './nurbs.js';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.40.1';
+const FORJA_VERSION = '0.40.2';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -3433,7 +3433,7 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
     extras.push(m); all.push(m); ey += 44;
   });
   const below = extras.length ? ey - 44 + 30 : 0;
-  const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, active: null, sticky: false, radius: Math.max(R + 40, below + 50) };
+  const st = { el, title, open: false, at: { x: 0, y: 0 }, hover: null, active: null, sticky: false, radius: Math.max(R + 40, below + 50) };
   const magnify = (mx, my) => all.forEach((x) => {
     const d = mx == null ? 1e9 : Math.hypot(x.x - mx, x.y - my);
     const s = x.base * (1 + 0.14 * Math.exp(-(d * d) / (2 * 42 * 42))) * (x === st.hover ? 1.06 : 1);
@@ -3569,10 +3569,18 @@ addEventListener('pointerdown', (e) => {
 // la tecla se reconoce por code, key o keyCode (algunos visores entregan solo uno de los tres)
 // El Puck va en la Z (antes Tab: en el visor del usuario Tab no llegaba bien a la página). Sin Ctrl/Alt/Cmd: Ctrl+Z sigue siendo deshacer.
 const KEY_IDS = { KeyZ: ['KeyZ', 'z', 90], Space: ['Space', ' ', 32] };
+// Tab nunca cuenta como ninguna tecla de menú, venga como venga el evento (key, code o keyCode 9)
+const isTab = (e) => e.key === 'Tab' || e.code === 'Tab' || e.keyCode === 9 || e.which === 9;
 const isKey = (e, code) => {
-  if (e.ctrlKey || e.metaKey || e.altKey) return false;
-  const [c, k, n] = KEY_IDS[code]; return e.code === c || (e.key || '').toLowerCase() === k || e.keyCode === n;
+  if (e.ctrlKey || e.metaKey || e.altKey || isTab(e) || !e.isTrusted) return false;
+  const [c, k, n] = KEY_IDS[code];
+  // Espacio: solo la barra espaciadora de verdad (code Space Y key ' '); la Z por cualquiera de sus tres señas
+  if (code === 'Space') return e.code === c && e.key === k;
+  return e.code === c || (e.key || '').toLowerCase() === k || e.keyCode === n;
 };
+// registro de qué abrió cada menú (Ayuda › Qué abrió el último menú): para encontrar fallos de teclas en el equipo del usuario
+const menuLog = [];
+const logMenu = (m, how) => { menuLog.push(`${m.title || 'Puck'} ← ${how}`); if (menuLog.length > 8) menuLog.shift(); };
 function bindKey(code, getMenu) {
   let m = null;
   addEventListener('keydown', (e) => {
@@ -3581,6 +3589,7 @@ function bindKey(code, getMenu) {
     if (e.repeat) return;
     if (m?.open && m.sticky) return m.close(false);
     m = getMenu();
+    logMenu(m, `tecla key="${e.key}" code="${e.code}" keyCode=${e.keyCode}`);
     m.show(lastPtr.x, lastPtr.y); m.t0 = performance.now();
   }, true);
   addEventListener('keyup', (e) => {
@@ -3608,6 +3617,7 @@ addEventListener('pointerdown', (e) => {
   e.stopImmediatePropagation(); e.preventDefault();
   MENUS.forEach((m) => m.close(false));
   mouseMenu = menuFor(e.button);
+  logMenu(mouseMenu, `Ctrl+Shift + botón ${e.button} (${e.pointerType})`);
   mouseMenu.show(e.clientX, e.clientY);
 }, true);
 addEventListener('pointerup', (e) => {
@@ -3935,7 +3945,7 @@ const MENUBAR = [
   ['Utilidades', [
     { label: 'Centrar pivote', run: centerPivots }, { label: 'Punto de interés a la selección', key: 'L', run: pivotToSelection },
     { label: 'Medir distancia', soon: true }]],
-  ['Ayuda', [{ label: 'Atajos de teclado', run: () => openPrefs('help') }, { label: 'Ejemplo: Freeform Blend (manija)', run: () => blendDemo() }, { label: 'Acerca de Forja', run: () => toast('FORJA v' + FORJA_VERSION + ' · ' + 'FORJA · modelador NURBS libre (Alias + Plasticity + Blender)') }]],
+  ['Ayuda', [{ label: 'Atajos de teclado', run: () => openPrefs('help') }, { label: 'Ejemplo: Freeform Blend (manija)', run: () => blendDemo() }, { label: 'Qué abrió el último menú', run: () => toast(menuLog.length ? menuLog.slice(-3).reverse().join('  ·  ') : 'Todavía no se abrió ningún menú.') }, { label: 'Acerca de Forja', run: () => toast('FORJA v' + FORJA_VERSION + ' · ' + 'FORJA · modelador NURBS libre (Alias + Plasticity + Blender)') }]],
 ];
 function buildMenubar() {
   const bar = $('menubar');

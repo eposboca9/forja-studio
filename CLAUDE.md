@@ -745,6 +745,9 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - (v0.40.1) El usuario insiste en que Tab sigue desplegando un menú (no se reprodujo aquí: en las pruebas Tab no abre nada ni mueve el foco). Endurecido:
   Tab bloqueado en keydown y keyup (captura + stopImmediatePropagation) salvo en cuadros de texto y diálogos; focusin con :focus-visible (foco por teclado, p. ej. Tab
   desde fuera del iframe del Artifact) quita el foco del botón; se quitó :focus-within de la barra izquierda (se mostraba con el foco dentro). Si sigue: pedir captura.
+- (v0.40.2) Captura del usuario: con Tab sale el menú VISUALIZACIÓN (disp = DISPLAY_MM), que solo abren Espacio y Ctrl+Shift+der. Única vía por tecla = bindKey('Space'),
+  que aceptaba code, key O keyCode. Ahora isKey: Tab (key/code/keyCode/which 9) nunca cuenta, solo eventos isTrusted, y Espacio exige code 'Space' Y key ' '.
+  menuLog + Ayuda › "Qué abrió el último menú" (toast con tecla key/code/keyCode o botón) para cazar el caso si sigue. Prueba t40/t4.cjs: Tab y Shift+Tab 0 menús.
 
 ## Siguiente paso
 
