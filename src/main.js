@@ -10,7 +10,8 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as N from './nurbs.js';
-import { applyBackground } from './concrete.js';
+import { applyBackground, wallColorAt } from './concrete.js';
+import { createPuck3 } from './puck3.js';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -3397,7 +3398,14 @@ const RADIAL_TILT = 1;     // anillo circular (neumorfismo plano; antes 0,6 = an
 const radialVeil = document.createElement('div');
 radialVeil.className = 'radial-veil';
 $('view').append(radialVeil);
-const syncRadialVeil = () => radialVeil.classList.toggle('on', MENUS.some((m) => m?.open));
+// desenfoque LOCAL: un círculo de bordes suaves alrededor del menú abierto (el resto del visor queda nítido)
+const syncRadialVeil = () => {
+  const m = MENUS.find((q) => q?.open && q !== puck3);
+  radialVeil.classList.toggle('on', !!m);
+  if (!m) return;
+  const v = $('view').getBoundingClientRect(), R = m.radius || 260;
+  Object.assign(radialVeil.style, { left: m.at.x - v.left - R + 'px', top: m.at.y - v.top - R + 'px', width: 2 * R + 'px', height: 2 * R + 'px' });
+};
 function makeRadial(items, { r = 140, title = '' } = {}) {
   const K = RADIAL_TILT, r2 = r + 78, R = r2 + 46;
   const el = document.createElement('div');
@@ -3436,7 +3444,7 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
     });
     mains.push(m); all.push(m);
   });
-  const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, active: null, sticky: false };
+  const st = { el, open: false, at: { x: 0, y: 0 }, hover: null, active: null, sticky: false, radius: R + 40 };
   const magnify = (mx, my) => all.forEach((x) => {
     const d = mx == null ? 1e9 : Math.hypot(x.x - mx, x.y - my);
     const s = x.base * (1 + 0.14 * Math.exp(-(d * d) / (2 * 42 * 42))) * (x === st.hover ? 1.06 : 1);
@@ -3473,6 +3481,7 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
     st.at = { x: Math.min(innerWidth - m, Math.max(m, x)), y: Math.min(innerHeight - m * K - 40, Math.max(m * K + 40, y)) };
     el.style.left = st.at.x + 'px'; el.style.top = st.at.y + 'px';
     el.classList.remove('bloom', 'settled');
+    const wc = wallColorAt(st.at.x, st.at.y); if (wc) el.style.setProperty('--nm', wc);   // el color exacto del muro detrás
     el.hidden = false; st.open = true; st.sticky = false; st.active = null; st.highlight(null); magnify(null); st.t0 = performance.now();
     syncRadialVeil();
     void el.offsetWidth;                       // parte del estado cerrado (todo en el centro) para que la flor se abra
@@ -3493,11 +3502,64 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
   return st;
 }
 let puck = null, puckKey = '';
-// el Puck se construye para el módulo actual (y se rehace si cambia el módulo o la personalización)
+// ---------- Puck de MODELADO (Tab): Curvas · Superficies · Sólidos, cada una con hasta 3 anillos de herramientas (src/puck3.js) ----------
+// PUCK3_LIB = biblioteca de herramientas. Las 'shared' (mover, duplicar, simetría, borrar...) son instancias por contexto: al usarlas
+// desde un anillo se quedan solo con lo elegido de ese tipo (curvas / superficies / sólidos) y guardan sus opciones por contexto
+// (params = claves de toolDef, p. ej. el plano de la simetría de Superficies no es el de Curvas).
+const PUCK3_LIB = {
+  curve: { k: 'curve', label: 'Curva', run: () => setTool('curve') }, circle: { k: 'circle', label: 'Círculo', run: () => setTool('circle') },
+  ground: { k: 'ground', label: 'Curva en el suelo', run: () => { setDrawPlane('xz'); setTool('curve'); } },
+  front: { k: 'front', label: 'Curva de frente', run: () => { setDrawPlane('xy'); setTool('curve'); } },
+  project: { k: 'project', label: 'Proyectar', run: () => projectSelection() }, cv: { k: 'cv', label: 'CV', run: () => setPickMode('cv') },
+  plane: { k: 'plane', label: 'Plano', run: () => setTool('plane') }, revolve: { k: 'revolve', label: 'Revolución', run: () => OPS.revolve() },
+  loft: { k: 'loft', label: 'Loft', run: () => OPS.loft() }, extrude: { k: 'extrude', label: 'Extruir', run: () => OPS.extrude() },
+  skin: { k: 'loft', label: 'Skin', run: () => startEdgeOp('skin') }, blend: { k: 'edit', label: 'Blend', run: () => startEdgeOp('blend') },
+  align: { k: 'align', label: 'Align', run: () => startEdgeOp('align') }, extend: { k: 'extend', label: 'Extender', run: () => startEdgeOp('extend') },
+  offset: { k: 'offset', label: 'Offset', run: () => offsetSelection() },
+  fillet: { k: 'round', label: 'Redondear', run: () => $('t-fillet').click() }, chamfer: { k: 'round', label: 'Chaflán', run: () => $('t-chamfer').click() },
+  bool: { k: 'object', label: 'Booleanas', soon: true }, forge: { k: 'cube', label: 'Forge (relieves)', run: () => switchLayout('forge') },
+  pivot: { k: 'pivot', label: 'Pivote', run: () => togglePivotEdit() }, undo: { k: 'undo', label: 'Deshacer', run: () => undo() },
+  layers: { k: 'layers', label: 'Capas', run: () => layersWin.show() }, showAll: { k: 'show', label: 'Mostrar todo', run: () => unhideAll() },
+  prefs: { k: 'gear', label: 'Personalizar el Puck', run: () => openPrefs('puck') },
+  // compartidas (se aplican al tipo del anillo)
+  pick: { k: 'arrow', label: 'Elegir', shared: true, run: (c) => setPickMode('object', c === 'curves' ? 'curve' : 'surface') },
+  move: { k: 'move', label: 'Mover', shared: true, run: () => mv() }, rotate: { k: 'rotate', label: 'Rotar', shared: true, run: () => rot() },
+  scale: { k: 'scale', label: 'Escalar', shared: true, run: () => scl() }, dup: { k: 'dup', label: 'Duplicar', shared: true, run: () => duplicateSelection() },
+  mirror: { k: 'symm', label: 'Simetría', shared: true, params: ['mirrorPlane'], run: () => mirrorSelection() },
+  hide: { k: 'hide', label: 'Ocultar', shared: true, run: () => hideSelection() }, del: { k: 'del', label: 'Borrar', shared: true, run: () => deleteSelection() },
+  frame: { k: 'frame', label: 'Encuadrar', shared: true, run: () => frameSelection() },
+};
+const PUCK3_CATS = [
+  { id: 'curves', label: 'Curvas', k: 'curve', rings: [['curve', 'circle', 'project', 'align', 'pick', 'move'], ['mirror', 'dup', 'rotate', 'scale', 'hide', 'del'], ['ground', 'front', 'cv', 'pivot', 'frame', 'undo']] },
+  { id: 'surfaces', label: 'Superficies', k: 'surf', rings: [['plane', 'revolve', 'loft', 'extrude', 'skin', 'blend'], ['align', 'extend', 'offset', 'fillet', 'mirror', 'dup'], ['move', 'rotate', 'scale', 'pick', 'hide', 'del']] },
+  { id: 'solids', label: 'Sólidos', k: 'cube', rings: [['fillet', 'chamfer', 'bool', 'forge', 'move', 'dup'], ['rotate', 'scale', 'mirror', 'hide', 'del', 'frame'], ['layers', 'showAll', 'undo', 'prefs']] },
+];
+const CTX_KIND = { curves: (o) => o.kind === 'curve', surfaces: (o) => o.kind === 'surface', solids: (o) => o.kind === 'mesh' };
+let ctxInst = null;   // la última instancia usada: sus opciones se guardan al usar otra o al volver a abrir el Puck
+function runPuck3(id, ctx) {
+  const t = PUCK3_LIB[id], P = prefs.puck3 || (prefs.puck3 = {});
+  if (ctxInst) { const [cId, cCtx] = ctxInst, ct = PUCK3_LIB[cId]; if (ct?.params) { P.inst = { ...(P.inst || {}), [cCtx + ':' + cId]: Object.fromEntries(ct.params.map((k) => [k, toolDef[k]])) }; savePrefs(); } }
+  if (t.shared) {
+    const keep = selObjs.filter(CTX_KIND[ctx]);
+    if (keep.length !== selObjs.length) { selObjs.length = 0; selObjs.push(...keep); selectionChanged(); }
+    const inst = P.inst?.[ctx + ':' + id];
+    if (t.params && inst) Object.assign(toolDef, inst);
+    ctxInst = [id, ctx];
+  }
+  t.run(ctx);
+}
+const puck3 = createPuck3({
+  cats: PUCK3_CATS, lib: PUCK3_LIB, icon, esc, soon,
+  cfg: prefs.puck3 || (prefs.puck3 = {}), save: savePrefs, run: runPuck3,
+  wallColor: (x, y) => wallColorAt(x, y) || getComputedStyle(document.documentElement).getPropertyValue('--bg'),
+});
+// el Puck se construye para el módulo actual (y se rehace si cambia el módulo o la personalización); en Modelado es el de 3 anillos
 function getPuck() {
-  const mod = layout === 'split' ? 'diag' : layout, ids = puckIds(mod), key = mod + ':' + ids.join(',');
+  const mod = layout === 'split' ? 'diag' : layout;
+  if (mod === 'diag') { if (puck !== puck3) { puck?.el.remove(); puck = puck3; puckKey = ''; MENUS[0] = puck3; } return puck3; }
+  const ids = puckIds(mod), key = mod + ':' + ids.join(',');
   if (key !== puckKey) {
-    puck?.el.remove();
+    if (puck !== puck3) puck?.el.remove();
     puck = makeRadial(ids.map((id) => PUCK_CMDS[id]), { r: 150, title: 'Puck · ' + PUCK_MODULES[mod] });
     puckKey = key;
     MENUS[0] = puck;
@@ -3921,12 +3983,14 @@ function openPrefs(tab = 'ui') {
   d.querySelectorAll('[data-ppage]').forEach((p) => (p.hidden = p.dataset.ppage !== tab));
   d.querySelectorAll('[name="pref-eval"]').forEach((r) => (r.checked = r.value === prefs.evalUI));
   $('pref-xform').value = prefs.xform;
-  if (tab === 'puck') { $('pk-mod').value = layout === 'split' ? 'diag' : layout; renderPuckEditor(); }
+  if (tab === 'puck') { const m = layout === 'split' ? 'diag' : layout; $('pk-mod').value = m === 'diag' ? 'p3-' + (prefs.puck3?.active || 'curves') : m; if (!$('pk-mod').value) $('pk-mod').value = 'p3-curves'; renderPuckEditor(); }
   d.querySelectorAll('[data-pref-snap]').forEach((c) => (c.checked = !!snapToggles[c.dataset.prefSnap]));
   if (!d.open) d.showModal();
 }
 // Editor del Puck: lista de esferas del módulo elegido, con subir / bajar / quitar y añadir de la biblioteca
 function renderPuckEditor() {
+  if ($('pk-mod').value.startsWith('p3-')) return renderPuck3Editor($('pk-mod').value.slice(3));
+  $('pk-add').closest('.pk-add').hidden = false;
   const mod = $('pk-mod').value, ids = puckIds(mod).slice();
   const save = (next) => { prefs.puck = { ...(prefs.puck || {}), [mod]: next }; savePrefs(); renderPuckEditor(); };
   $('pk-list').innerHTML = ids.map((id, i) => {
@@ -3942,6 +4006,28 @@ function renderPuckEditor() {
   $('pk-add-btn').disabled = !rest.length || ids.length >= 10;
   $('pk-add-btn').onclick = () => { if ($('pk-add').value && ids.length < 10) save([...ids, $('pk-add').value]); };
   $('pk-reset').onclick = () => { const p2 = { ...(prefs.puck || {}) }; delete p2[mod]; prefs.puck = p2; savePrefs(); renderPuckEditor(); };
+}
+// Editor del Puck de Modelado: los 3 anillos de una categoría (subir, bajar, quitar, pasar a otro anillo, añadir)
+function renderPuck3Editor(cat) {
+  const P = prefs.puck3 || (prefs.puck3 = {}), def = PUCK3_CATS.find((c) => c.id === cat);
+  const rings = (P.rings?.[cat] || def.rings).map((r) => r.slice());
+  while (rings.length < 3) rings.push([]);
+  const save = () => { P.rings = { ...(P.rings || {}), [cat]: rings }; savePrefs(); if (puck3.open) puck3.close(false); renderPuck3Editor(cat); };
+  $('pk-add').closest('.pk-add').hidden = true;
+  $('pk-list').innerHTML = rings.map((ids, k) => `<li class="pk-ring"><b>Anillo ${k + 1}</b><small>${ids.length} herramientas</small></li>` + ids.map((id, i) => {
+    const t = PUCK3_LIB[id];
+    return `<li><i>${icon(t.k)}</i><span>${esc(t.label)}${t.shared ? '<small>compartida: actúa sobre ' + def.label.toLowerCase() + '</small>' : ''}${t.soon ? '<small>próximamente</small>' : ''}</span>
+      <span class="pk-btns"><button data-r="${k}" data-up="${i}" title="Subir">↑</button><button data-r="${k}" data-down="${i}" title="Bajar">↓</button>
+      <button data-r="${k}" data-mv="${i}" title="Pasar al anillo siguiente">⇥</button><button data-r="${k}" data-del="${i}" title="Quitar">×</button></span></li>`;
+  }).join('') + `<li class="pk-addrow"><select class="sel" data-addsel="${k}">${Object.keys(PUCK3_LIB).filter((id) => !ids.includes(id)).map((id) => `<option value="${id}">${esc(PUCK3_LIB[id].label)}</option>`).join('')}</select><button class="btn" data-add="${k}" ${ids.length >= 10 ? 'disabled' : ''}>Añadir al anillo ${k + 1}</button></li>`).join('')
+    + `<li class="pk-addrow"><button class="btn" id="pk3-reset">Restablecer ${esc(def.label)}</button></li>`;
+  const L = $('pk-list'), at = (b, key) => [+b.dataset.r, +b.dataset[key]];
+  L.querySelectorAll('[data-up]').forEach((b) => b.onclick = () => { const [k, i] = at(b, 'up'); if (i > 0) { const r = rings[k]; [r[i - 1], r[i]] = [r[i], r[i - 1]]; save(); } });
+  L.querySelectorAll('[data-down]').forEach((b) => b.onclick = () => { const [k, i] = at(b, 'down'), r = rings[k]; if (i < r.length - 1) { [r[i + 1], r[i]] = [r[i], r[i + 1]]; save(); } });
+  L.querySelectorAll('[data-mv]').forEach((b) => b.onclick = () => { const [k, i] = at(b, 'mv'), to = (k + 1) % 3; if (rings[to].length < 10 && !rings[to].includes(rings[k][i])) { rings[to].push(rings[k].splice(i, 1)[0]); save(); } });
+  L.querySelectorAll('[data-del]').forEach((b) => b.onclick = () => { const [k, i] = at(b, 'del'); rings[k].splice(i, 1); save(); });
+  L.querySelectorAll('[data-add]').forEach((b) => b.onclick = () => { const k = +b.dataset.add, v = L.querySelector(`[data-addsel="${k}"]`).value; if (v && rings[k].length < 10) { rings[k].push(v); save(); } });
+  $('pk3-reset').onclick = () => { const r2 = { ...(P.rings || {}) }; delete r2[cat]; P.rings = r2; savePrefs(); renderPuck3Editor(cat); };
 }
 function initPrefs() {
   const d = $('prefs');

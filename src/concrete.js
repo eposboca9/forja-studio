@@ -11,9 +11,11 @@ const PALETTES = {
   light: { base: [206, 205, 202], light: 'rgba(255,255,255,', shade: 'rgba(40,38,34,', glow: 0.35, edge: 0.32 },
 };
 
+let lastWall = null;   // la última imagen del muro (para medir su color en un punto)
 export function brushedTexture({ w = 1600, h = 900, theme = 'dark', seed = 11 } = {}) {
   const P = PALETTES[theme], r = rand(seed);
   const c = document.createElement('canvas');
+  lastWall = c;
   c.width = w; c.height = h;
   const g = c.getContext('2d');
   g.fillStyle = `rgb(${P.base.join(',')})`;
@@ -79,4 +81,16 @@ export function applyBackground(getTheme) {
   let t = 0;
   addEventListener('resize', () => { clearTimeout(t); t = setTimeout(paint, 250); });
   return paint;
+}
+
+// Color medio del muro alrededor de un punto de la pantalla (px CSS): los menús neumórficos toman este color exacto
+export function wallColorAt(x, y, rad = 60) {
+  const c = lastWall;
+  if (!c) return null;
+  const k = c.width / innerWidth, s = Math.max(2, Math.round(rad * 2 * k));
+  const x0 = Math.max(0, Math.min(c.width - s, Math.round(x * k - s / 2))), y0 = Math.max(0, Math.min(c.height - s, Math.round(y * k - s / 2)));
+  const d = c.getContext('2d').getImageData(x0, y0, s, s).data;
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < d.length; i += 16) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+  return `rgb(${Math.round(r / n)}, ${Math.round(g / n)}, ${Math.round(b / n)})`;
 }

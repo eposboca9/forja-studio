@@ -700,6 +700,20 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   retraso n·8 ms); los del submenú brotan desde su opción (retraso j·10 ms, separación 62 px). .settled (280 ms) acorta las transiciones del aumento. El centro ya no está en INK_SEL.
   Prueba: forja/tnm2_dark.mjs / tnm2_light.mjs (montaje nm-sheet.png). En SwiftShader los cuadros tardan > 2 s: usar keyboard.down('Tab') real y esperar.
 
+- (v0.39) PUCK DE MODELADO NUEVO (Tab en Modelado; src/puck3.js, createPuck3): 3 categorías Curvas · Superficies · Sólidos (PUCK3_CATS en main.js), cada una con hasta 3 anillos
+  de herramientas (PUCK3_LIB = biblioteca; prefs.puck3.rings[cat] = anillos editados). Al abrir: las 3 en fila, cada una con tantas ONDAS comprimidas como anillos plegados.
+  Clic en el círculo = suelta la 1.ª onda (gota .p3-drop que viaja hacia fuera, 240 ms) y se levanta el anillo 1; clic en la zona de ondas X (.p3-x, placa llena del material)
+  = siguiente onda; sin ondas que soltar, X pliega la última; clic en el círculo abierto = plegar todo (vuelve la fila). Con una categoría abierta las otras dos quedan pequeñas
+  arriba a los lados (clic = cambiar). Persistencia: prefs.puck3 {active, open{cat:n}, rings, inst}. Marking menu: mantener Tab, pasar por una herramienta y soltar (pickAt por
+  radio y ángulo). Herramientas compartidas (shared: elegir, mover, rotar, escalar, duplicar, simetría, ocultar, borrar, encuadrar) = instancias por contexto (runPuck3): filtran la
+  selección al tipo de la categoría (CTX_KIND: curve / surface / mesh) y guardan sus opciones por contexto (params -> prefs.puck3.inst['ctx:id'], p. ej. mirrorPlane).
+  Color: el material (--p3 / --nm) es el color medio del muro en ese punto (concrete.js wallColorAt, lee la imagen del muro); volumen solo con sombras (--nm-hi / --nm-lo).
+  Desenfoque LOCAL (.p3-veil elipse con máscara suave; los otros menús: .radial-veil circular en syncRadialVeil), el resto del visor nítido. Nombre de la herramienta en una
+  pastilla neumórfica bajo el puck. Los demás menús radiales (Espacio, Ctrl+Shift, Puck de Visu/IA/Forge) siguen con makeRadial (un círculo central) con el mismo estilo.
+  Editor: Preferencias › Puck › "Modelado · Curvas/Superficies/Sólidos" (renderPuck3Editor: subir, bajar, ⇥ pasar al anillo siguiente, quitar, añadir; máx. 10 por anillo).
+  Sólidos = mallas (kind 'mesh') para las compartidas; Booleanas está como "próximamente". Prueba: forja/tp3_dark.mjs / tp3_light.mjs (montaje p3-sheet.png). En SwiftShader usar
+  keyboard.down('Tab') (una pulsación corta tarda > 400 ms y el Puck se cierra en vez de quedar fijo).
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
