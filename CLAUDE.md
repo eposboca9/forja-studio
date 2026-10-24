@@ -163,7 +163,7 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 
 ## Hecho (v0.8)
 
-- Puck (Tab, como el de Alias, en limpio): anillo interior crear/superficies, exterior elegir/transformar/mostrar. Mantener y soltar,
+- Puck (antes Tab, hoy Z; como el de Alias, en limpio): anillo interior crear/superficies, exterior elegir/transformar/mostrar. Mantener y soltar,
   o pulsación corta = queda abierto. Comandos "próximamente" atenuados (Align, Blend, Round, Offset, Simetría, Distancia).
   Menú de visualización (Espacio o Ctrl+Shift+clic): Información, Modelado, Visu, IA, Controls ON/OFF, Toggle Grid, Toggle Model,
   Pantalla completa, Panel, Dividida. makeRadial(rings, radii) genera ambos.
@@ -721,6 +721,10 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
 - (v0.39.2) El usuario (v0.39.1 cargada, motor WebGPU) dice que con Tab le sale el menú "Visualización" (DISPLAY_MM), que en el código solo abren Espacio y Ctrl+Shift+clic der.
   En las pruebas (clásico, híbrido y visor real) Tab abre el Puck nuevo. Cambios: bindKey reconoce la tecla por code, key o keyCode (isKey, KEY_IDS) y, de diagnóstico, un toast
   dice qué tecla llegó y qué menú se abrió (también para Ctrl+Shift+clic). QUITAR ese toast cuando se aclare el caso.
+
+- (v0.39.3) Pedido del usuario: el Puck pasa de Tab a la tecla Z (en su visor Tab no llegaba bien). isKey ignora Z con Ctrl/Alt/Cmd, así Ctrl+Z sigue
+  deshaciendo; Tab ya no abre nada. Se quitaron los toasts de diagnóstico de la v0.39.2. Menú Ventanas, Preferencias › Puck y la tabla de atajos dicen Z.
+  Prueba: forja/tz2.mjs (Tab no abre, Z abre puck3, Ctrl+Z no abre menú).
 
 ## Siguiente paso
 

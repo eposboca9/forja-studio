@@ -1,9 +1,9 @@
-// Puck de MODELADO (Tab): tres categorías (Curvas, Superficies, Sólidos) con hasta 3 anillos de herramientas cada una.
+// Puck de MODELADO (Z): tres categorías (Curvas, Superficies, Sólidos) con hasta 3 anillos de herramientas cada una.
 // Estética neumórfica de vista frontal: todo es del color del muro que hay detrás (se mide al abrir) y el volumen sale solo
 // de sombras exteriores e interiores. Cada categoría guarda sus anillos plegados como "ondas" comprimidas alrededor de su
 // círculo: clic en el círculo suelta la 1.ª onda (gota que se expande y levanta el anillo 1); clic en la zona de ondas (X)
 // suelta la siguiente. Lo desplegado se recuerda entre aperturas (cfg.open). Interfaz igual a la de los menús radiales:
-// show / close / pickAt / open / sticky / hover / t0 / el (para mantener Tab, pasar por una herramienta y soltar).
+// show / close / pickAt / open / sticky / hover / t0 / el (para mantener Z, pasar por una herramienta y soltar).
 
 const RC = 40;                 // radio del círculo de categoría
 const WAVE0 = RC + 9, WAVE_STEP = 9, WAVE_W = 7;   // ondas comprimidas

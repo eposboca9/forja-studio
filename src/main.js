@@ -10,10 +10,10 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as N from './nurbs.js';
-import { applyBackground, wallColorAt } from './concrete.js?v=0.39.2';
-import { createPuck3 } from './puck3.js?v=0.39.2';
+import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
+import { createPuck3 } from './puck3.js?v=0.39.3';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.39.2';
+const FORJA_VERSION = '0.39.3';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -3221,7 +3221,7 @@ function hideSelection() {
   checkpoint();
   selObjs.forEach((o) => (o.visible = false));
   clearSelection();
-  toast(`${n} ${n === 1 ? 'objeto oculto' : 'objetos ocultos'} · Mostrar todo en el Puck (Tab)`);
+  toast(`${n} ${n === 1 ? 'objeto oculto' : 'objetos ocultos'} · Mostrar todo en el Puck (Z)`);
 }
 function unhideAll() { checkpoint(); objects.forEach((o) => (o.visible = true)); selectionChanged(); toast('Todo visible'); }
 let modelClean = false;
@@ -3278,7 +3278,7 @@ Object.assign(IC, {
   layers: 'M12 3l9 5-9 5-9-5zM3 13l9 5 9-5', gear: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2',
   modules: 'M12 4a8 3 0 1 0 0 6 8 3 0 0 0 0-6zM4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7', cube: 'M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8',
 });
-// Puck (Tab): cada módulo tiene el suyo, con sus herramientas, y cada quien lo puede personalizar
+// Puck (Z): cada módulo tiene el suyo, con sus herramientas, y cada quien lo puede personalizar
 // (Preferencias > Puck). PUCK_CMDS es la biblioteca de comandos; PUCK_DEFAULT, lo que trae cada módulo de fábrica.
 const setInput = (id, v, ev = 'input') => { const el = $(id); el.value = v; el.dispatchEvent(new Event(ev)); };
 const matSub = (keys) => keys.map((k) => ({ k: 'mat', label: MAT_NAMES[k], run: () => setMaterial(k) }));
@@ -3504,7 +3504,7 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
   return st;
 }
 let puck = null, puckKey = '';
-// ---------- Puck de MODELADO (Tab): Curvas · Superficies · Sólidos, cada una con hasta 3 anillos de herramientas (src/puck3.js) ----------
+// ---------- Puck de MODELADO (Z): Curvas · Superficies · Sólidos, cada una con hasta 3 anillos de herramientas (src/puck3.js) ----------
 // PUCK3_LIB = biblioteca de herramientas. Las 'shared' (mover, duplicar, simetría, borrar...) son instancias por contexto: al usarlas
 // desde un anillo se quedan solo con lo elegido de ese tipo (curvas / superficies / sólidos) y guardan sus opciones por contexto
 // (params = claves de toolDef, p. ej. el plano de la simetría de Superficies no es el de Curvas).
@@ -3586,10 +3586,14 @@ addEventListener('pointermove', (e) => {
 addEventListener('pointerdown', (e) => {
   for (const m of MENUS) if (m.open && m.sticky && !e.target.closest('.puck, .mmenu')) m.close(false);
 }, true);
-// Tab = Puck. Mantener y soltar sobre la opción; una pulsación corta lo deja abierto para hacer clic.
+// Z = Puck. Mantener y soltar sobre la opción; una pulsación corta lo deja abierto para hacer clic.
 // la tecla se reconoce por code, key o keyCode (algunos visores entregan solo uno de los tres)
-const KEY_IDS = { Tab: ['Tab', 'Tab', 9], Space: ['Space', ' ', 32] };
-const isKey = (e, code) => { const [c, k, n] = KEY_IDS[code]; return e.code === c || e.key === k || e.keyCode === n; };
+// El Puck va en la Z (antes Tab: en el visor del usuario Tab no llegaba bien a la página). Sin Ctrl/Alt/Cmd: Ctrl+Z sigue siendo deshacer.
+const KEY_IDS = { KeyZ: ['KeyZ', 'z', 90], Space: ['Space', ' ', 32] };
+const isKey = (e, code) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  const [c, k, n] = KEY_IDS[code]; return e.code === c || (e.key || '').toLowerCase() === k || e.keyCode === n;
+};
 function bindKey(code, getMenu) {
   let m = null;
   addEventListener('keydown', (e) => {
@@ -3599,8 +3603,6 @@ function bindKey(code, getMenu) {
     if (m?.open && m.sticky) return m.close(false);
     m = getMenu();
     m.show(lastPtr.x, lastPtr.y); m.t0 = performance.now();
-    // diagnóstico (v0.39.2): qué tecla llegó y qué menú se abrió
-    toast(`Tecla: code "${e.code || '—'}" · key "${e.key === ' ' ? 'espacio' : e.key}" (${e.keyCode}) → ${m === puck3 ? 'Puck de Modelado' : 'menú ' + (m.el.querySelector('.puck-center b')?.textContent || '')}`);
   }, true);
   addEventListener('keyup', (e) => {
     if (!m) return;
@@ -3611,7 +3613,7 @@ function bindKey(code, getMenu) {
     else m.close(false);
   }, true);
 }
-bindKey('Tab', getPuck);
+bindKey('KeyZ', getPuck);
 bindKey('Space', () => menuFor(2));
 addEventListener('keydown', (e) => { if (e.key === 'Escape') MENUS.forEach((m) => m.close(false)); }, true);
 let mouseMenu = null;
@@ -3620,7 +3622,6 @@ addEventListener('pointerdown', (e) => {
   e.stopImmediatePropagation(); e.preventDefault();
   MENUS.forEach((m) => m.close(false));
   mouseMenu = menuFor(e.button);
-  toast(`Ctrl+Shift+clic (botón ${e.button}) → menú ${mouseMenu.el.querySelector('.puck-center b')?.textContent || ''}`);
   mouseMenu.show(e.clientX, e.clientY);
 }, true);
 addEventListener('pointerup', (e) => {
@@ -3941,7 +3942,7 @@ const MENUBAR = [
   ['Ventanas', [
     { label: 'Panel lateral fijo', run: () => setPinned(!pinned), ...chk(() => pinned) }, { label: 'Pantalla completa', run: fullscreen },
     { label: 'Capas', run: () => (prefs.layersWin?.open === false ? layersWin.show() : layersWin.set({ open: false })), ...chk(() => prefs.layersWin?.open !== false) },
-    { label: 'Puck', key: 'Tab', run: () => getPuck().show(innerWidth / 2, innerHeight / 2) }]],
+    { label: 'Puck', key: 'Z', run: () => getPuck().show(innerWidth / 2, innerHeight / 2) }]],
   ['Preferencias', [{ label: 'Preferencias…', run: () => openPrefs() }, { label: 'Personalizar el Puck…', run: () => openPrefs('puck') }]],
   ['Utilidades', [
     { label: 'Centrar pivote', run: centerPivots }, { label: 'Punto de interés a la selección', key: 'L', run: pivotToSelection },
