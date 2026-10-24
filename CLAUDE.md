@@ -718,6 +718,10 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   guardada). Ahora index.html carga ./src/main.js?v=<versión> y main.js importa concrete.js / puck3.js con ?v=; FORJA_VERSION en main.js (Ayuda › Acerca de muestra la versión).
   REGLA: en cada publicación subir la versión en index.html (script de main.js), en FORJA_VERSION y en los imports de los .js que cambiaron. Probado en el visor real que ?v= funciona.
 
+- (v0.39.2) El usuario (v0.39.1 cargada, motor WebGPU) dice que con Tab le sale el menú "Visualización" (DISPLAY_MM), que en el código solo abren Espacio y Ctrl+Shift+clic der.
+  En las pruebas (clásico, híbrido y visor real) Tab abre el Puck nuevo. Cambios: bindKey reconoce la tecla por code, key o keyCode (isKey, KEY_IDS) y, de diagnóstico, un toast
+  dice qué tecla llegó y qué menú se abrió (también para Ctrl+Shift+clic). QUITAR ese toast cuando se aclare el caso.
+
 ## Siguiente paso
 
 GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/

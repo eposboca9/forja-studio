@@ -10,10 +10,10 @@ import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as N from './nurbs.js';
-import { applyBackground, wallColorAt } from './concrete.js?v=0.39.1';
-import { createPuck3 } from './puck3.js?v=0.39.1';
+import { applyBackground, wallColorAt } from './concrete.js?v=0.39.2';
+import { createPuck3 } from './puck3.js?v=0.39.2';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.39.1';
+const FORJA_VERSION = '0.39.2';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -3587,19 +3587,24 @@ addEventListener('pointerdown', (e) => {
   for (const m of MENUS) if (m.open && m.sticky && !e.target.closest('.puck, .mmenu')) m.close(false);
 }, true);
 // Tab = Puck. Mantener y soltar sobre la opción; una pulsación corta lo deja abierto para hacer clic.
+// la tecla se reconoce por code, key o keyCode (algunos visores entregan solo uno de los tres)
+const KEY_IDS = { Tab: ['Tab', 'Tab', 9], Space: ['Space', ' ', 32] };
+const isKey = (e, code) => { const [c, k, n] = KEY_IDS[code]; return e.code === c || e.key === k || e.keyCode === n; };
 function bindKey(code, getMenu) {
   let m = null;
   addEventListener('keydown', (e) => {
-    if (e.code !== code || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.target.closest?.('dialog')) return;
+    if (!isKey(e, code) || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.target.closest?.('dialog')) return;
     e.preventDefault();
     if (e.repeat) return;
     if (m?.open && m.sticky) return m.close(false);
     m = getMenu();
     m.show(lastPtr.x, lastPtr.y); m.t0 = performance.now();
+    // diagnóstico (v0.39.2): qué tecla llegó y qué menú se abrió
+    toast(`Tecla: code "${e.code || '—'}" · key "${e.key === ' ' ? 'espacio' : e.key}" (${e.keyCode}) → ${m === puck3 ? 'Puck de Modelado' : 'menú ' + (m.el.querySelector('.puck-center b')?.textContent || '')}`);
   }, true);
   addEventListener('keyup', (e) => {
     if (!m) return;
-    if (e.code !== code || !m.open || m.sticky) return;
+    if (!isKey(e, code) || !m.open || m.sticky) return;
     e.preventDefault();
     if (m.hover) m.close(true);
     else if (performance.now() - m.t0 < 400) m.sticky = true;
@@ -3615,6 +3620,7 @@ addEventListener('pointerdown', (e) => {
   e.stopImmediatePropagation(); e.preventDefault();
   MENUS.forEach((m) => m.close(false));
   mouseMenu = menuFor(e.button);
+  toast(`Ctrl+Shift+clic (botón ${e.button}) → menú ${mouseMenu.el.querySelector('.puck-center b')?.textContent || ''}`);
   mouseMenu.show(e.clientX, e.clientY);
 }, true);
 addEventListener('pointerup', (e) => {
