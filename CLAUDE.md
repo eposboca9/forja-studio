@@ -847,3 +847,7 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   {obj, u, v} sobre una superficie (surfacePointAt → surfAnchor) y null si es libre. draft.anchors va en paralelo a draft.pts y la curva creada guarda obj.drawAnchors.
   Prueba: scratchpad al/t29.cjs (ratón real: clic simple, arrastre con Ctrl+Alt hasta un borde y con Shift sobre una cara; punto = S(anclaje) exacto), t40/t20.cjs sigue igual.
   Captura docs/capturas/v0.44.2-curva-arrastrar.png.
+- (Plan, sin código) docs/plan-revolve-trim-revert.md: análisis de AlSurface/AlTrimRegion/AlTrimBoundary/AlDagNode/AlSnap.h y 5 fases (v0.45 ventanas flotantes con _ y × +
+  casillas numéricas junto a cada deslizador; v0.46 revolución con ángulo inicio-fin y ejes X/Y/Z/pivote/elegido/manipulador; v0.47 Trim por regiones como construcción con
+  etapas; v0.48 Untrim Última/Todas + Revert genérico en el registro y Redondeo no destructivo; v0.49 recorte con superficies = intersección). Esperando aprobación del usuario.
+  OJO: los .h NO traen untrim, etapas ni revert (son de la interfaz de Alias), y AlDagNode es jerarquía de TRANSFORMACIONES, no historial de construcción.
