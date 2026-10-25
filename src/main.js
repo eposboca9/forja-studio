@@ -13,7 +13,7 @@ import * as N from './nurbs.js?v=0.42.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.43.2';
+const FORJA_VERSION = '0.44.0';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -4307,11 +4307,25 @@ updateEvalUI();
 // Relaciones entre objetos (src/history.js). Cuando cambia una entrada (p. ej. se mueve un CV de la superficie
 // maestra o de la curva extruida) se recalcula la salida, y en cadena lo que dependa de ella.
 function byId(id) { return objects.find((o) => o.id === id); }
-const inputsOf = (r) => (r.type === 'align' ? [r.master] : r.type === 'blend' || r.type === 'skin' ? [...(r.aIds || [r.a]), ...(r.bIds || [r.b])]
-  : r.type === 'loft' ? r.srcs : r.type === 'project' ? [r.src, r.surf] : r.type === 'fcurve' ? [r.src, r.other] : [r.src]);
-const outputOf = (r) => (r.type === 'align' ? r.slave : r.out);
-const REL_NAMES = { align: 'Align', blend: 'Freeform Blend', skin: 'Skin', offset: 'Offset', mirror: 'Simetría', extrude: 'Extruir', revolve: 'Revolución', loft: 'Loft',
-  project: 'Proyectar', extend: 'Extender', fcurve: 'Carril de redondeo' };
+// ---------- Registro de construcciones (patrón del SDK de Alias) ----------
+// Alias separa la RECETA (AlBlendCurve: parámetros + entradas), el NODO que produce en la escena (AlCurveNode = un objeto de
+// `objects`) y sus PUNTOS DE CONSTRUCCIÓN (AlBlendPoint = las manijas de la vista). Aquí cada tipo de receta (una entrada de
+// `relations`) declara todo lo suyo en un solo bloque, en defineConstruction (más abajo):
+//   name · inputs(r) → ids de los nodos de los que depende · output(r) → id del nodo que produce
+//   build(r, ins, out) → geometría nueva del nodo · panel(r, c) → campos de su ventana (devuelve el resto del título)
+//   points(r, out) → puntos de construcción · diagnose(r, ins, out, fmt) → html del diagnóstico de la unión
+//   summary(r, nm) → línea del panel de historial · labels(r) → etiquetas en la vista [{pos, html}]
+//   editsOutput → también se recalcula si se toca su propio nodo de salida (Align: las filas del borde quedan atadas)
+//   curvePoints → tiene puntos aunque su salida sea una curva · retool → ventana con "Deshacer todo" y "Siguiente"
+const CONSTRUCTIONS = {};
+function defineConstruction(type, def) {
+  CONSTRUCTIONS[type] = { type, inputs: (r) => [r.src], output: (r) => r.out, panel: (r, c) => ` · ${c.nm(r.src)}`, points: () => [], diagnose: null,
+    summary: (r, nm) => `${nm(r.out)} ← ${nm(r.src)}`, labels: null, editsOutput: false, curvePoints: false, retool: false, ...def };
+}
+const constructionOf = (r) => CONSTRUCTIONS[r.type];
+const inputsOf = (r) => constructionOf(r).inputs(r);
+const outputOf = (r) => constructionOf(r).output(r);
+const relName = (r) => constructionOf(r).name;
 // Lado de un Blend / Skin: borde de superficie, curva sobre superficie o una o varias curvas libres encadenadas
 function sideOf(ids, edge) {
   const objs = ids.map(byId);
@@ -4402,23 +4416,302 @@ function alignDiag(r) {
   if (r.curve) return HX.diagnoseCurve(r, m.data, out.data, f);
   return f ? HX.freeDiagnose(r, out.data, f) : HX.diagnose(m.data, r.mEdge, out.data, r.sEdge, r.rev);
 }
-function relationData(r, ins, out) {
-  if (r.type === 'align') return HX.align(r, ins[0].data, out.data, masterField(r));
-  if (r.type === 'blend' || r.type === 'skin') return blendRelData(r);
-  if (r.type === 'project') return projData(r, ins[0], ins[1]);
-  if (r.type === 'extend') return FF.extendData(ins[0].data, r.edge, r.dist, r.cont);
-  if (r.type === 'offset') return HX.offsetData(ins[0].data, r.dist);
-  if (r.type === 'mirror') return HX.mirrorData(ins[0].data, ins[0].kind, r.plane || 'x');
-  if (r.type === 'extrude') return HX.extrudeData(ins[0].data, r.dist, r.dir, r.both);
-  if (r.type === 'revolve') return N.revolve(ins[0].data, revOpts(r, ins[0]));
-  if (r.type === 'fcurve') return fcurveData(r, ins[0], ins[1]);
-  return N.loft(ins.map((c) => c.data));
+// ---------- Puntos de construcción (como AlBlendPoint) ----------
+// Una manija de la vista con identidad dentro de su receta: su papel (role) fija el color y el nombre; get/drag leen y cambian
+// el parámetro de la receta; click = punto de un clic; attach = a qué está pegado ({obj, edge, t} o {obj, t}), como attachedTo().
+const POINT_ROLES = { tension: { kind: 't', label: 'tensión' }, shape: { kind: 's', label: 'forma' }, g3: { kind: 'g', label: 'G3' },
+  distance: { kind: 'd', label: 'distancia' }, flip: { kind: 'f', label: 'invertir' }, slide: { kind: 'm', label: 'punto de unión' } };
+function cpoint(role, pos, dir, o = {}) {
+  const R = POINT_ROLES[role];
+  return { role, kind: R.kind, label: o.label || R.label, pos, dir: dir.lengthSq() > 1e-12 ? dir : new THREE.Vector3(0, 1, 0),
+    start: o.get, drag: o.drag, click: o.click, attach: o.attach || null };
 }
+// cadena de CVs desde la costura P[0..]: tensión en el CV 1, forma en el 2 y G3 en el 3 (solo si keys.g)
+function continuityPoints(r, P, cont, keys) {
+  const H = [], len = (k) => P(k).distanceTo(P(k - 1)) || 1e-3, dir = (k) => P(k).clone().sub(P(k - 1)).normalize();
+  if (cont >= 1) { const l1 = len(1); H.push(cpoint('tension', P(1), dir(1), { get: () => r[keys.t] ?? r.tension, drag: (delta, s0) => { r[keys.t] = Math.max(0.05, s0 * (1 + delta / l1)); } })); }
+  if (cont >= 2) { const l2 = len(2); H.push(cpoint('shape', P(2), dir(2), { get: () => r[keys.s] || 0, drag: (delta, s0) => { r[keys.s] = s0 + delta / l2; } })); }
+  if (cont >= 3 && keys.g) { const l3 = len(3); H.push(cpoint('g3', P(3), dir(3), { get: () => r[keys.g] || 0, drag: (delta, s0) => { r[keys.g] = s0 + delta / l3; } })); }
+  return H;
+}
+// puntos de una cadena de filas de CVs de una superficie: el CV central de cada fila desde el borde
+const rowChain = (d, edge) => (k) => v3(mid(HX.row(d, edge, k)));
+const relationData = (r, ins, out) => constructionOf(r).build(r, ins, out);
+const G_SEG = (from, to) => [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']].filter(([v]) => v >= from && v <= to);
+
+defineConstruction('align', {
+  name: 'Align', inputs: (r) => [r.master], output: (r) => r.slave, editsOutput: true, curvePoints: true,
+  build: (r, ins, out) => HX.align(r, ins[0].data, out.data, masterField(r)),
+  summary: (r, nm) => `${nm(r.slave)} → ${nm(r.master)} · G${r.cont}`,
+  diagnose: (r, ins, out, fmt) => fmt(alignDiag(r), r.cont),
+  labels: (r) => { const a = alignLetters(r); return a ? [{ pos: a[0], html: a[2] }] : []; },
+  panel(r, c) {
+    const { group, fields, set, live, redo, nm } = c;
+    fields.push({ type: 'seg', label: 'Continuidad', opts: G_SEG(0, 3), get: () => r.cont, set: (v) => set('cont', v) },
+      { type: 'range', label: r.curve || !r.varT ? 'Tensión' : 'Tensión inicio', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) },
+      // la forma (mu) cambia cómo llega la superficie al borde sin cambiar la curvatura en él: solo aplica desde G2
+      { type: 'range', label: 'Forma', min: -2, max: 2, step: 0.05, get: () => r.shape ?? 0, start: checkpoint, set: live('shape'), fmt: (v) => v.toFixed(2), show: () => r.cont >= 2 },
+      { type: 'range', label: 'Escala G3', min: -2, max: 2, step: 0.05, get: () => r.shape3 ?? 0, start: checkpoint, set: live('shape3'), fmt: (v) => v.toFixed(2), show: () => r.cont >= 3 },
+      { type: 'group', key: 'alexp', label: 'Control explícito (grado y spans)', fields: [
+        { type: 'check', label: 'Control explícito', get: () => !!r.explicit, set: (v) => { if (v && r.xDeg == null) { const d = byId(r.slave)?.data; r.xDeg = r.curve ? d.deg : (r.sEdge[0] === 'u' ? d.degU : d.degV); r.xSpans = r.curve ? d.cvs.length - d.deg : (r.sEdge[0] === 'u' ? d.cvs.length - d.degU : d.cvs[0].length - d.degV); } set('explicit', v); TW.show(relSpec(r, group)); } },
+        { type: 'seg', label: r.curve ? 'Grado' : 'Grado (cruzando el borde)', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], show: () => !!r.explicit, get: () => r.xDeg ?? 3, set: (v) => set('xDeg', v) },
+        { type: 'range', label: r.curve ? 'Spans' : 'Spans (cruzando el borde)', min: 1, max: 16, step: 1, show: () => !!r.explicit, get: () => r.xSpans ?? 4, start: checkpoint, set: live('xSpans'), fmt: (v) => String(v) }] },
+      { type: 'group', key: 'alblend', label: 'Mezcla (Blending)', fields: [
+        { type: 'range', label: 'Filas de CVs extra', min: 0, max: 6, step: 1, get: () => r.extra || 0, start: checkpoint, set: live('extra'), fmt: (v) => String(v) },
+        { type: 'range', label: 'Factor de mezcla', min: 0, max: 1, step: 0.01, show: () => (r.extra || 0) > 0, get: () => r.blendF ?? 1, start: checkpoint, set: live('blendF'), fmt: (v) => v.toFixed(2) }] },
+      { type: 'check', label: r.curve ? 'Continuar hacia el otro lado' : 'Invertir la dirección del borde', get: () => !!r.rev, set: (v) => set('rev', v) });
+    // tipo de alineación (Alignment Type): Natural = por el flujo propio de la superficie; Normal = el punto más cercano de la maestra;
+    // Vista = proyectando en la dirección en que se miraba; Vector = proyectando a lo largo de un eje
+    const setType = (v) => {
+      checkpoint(); r.atype = v;
+      if (v === 'view') r.avec = camera.getWorldDirection(new THREE.Vector3()).toArray();
+      if (v === 'vector') r.avec = AXES[r.axis ?? 2].toArray();
+      if (r.curve) { retargetCurve(r); try { r.lambda0 = HX.curveNaturalLambda(byId(r.slave).data, r.sEnd, byId(r.master).data, r, masterField(r)); } catch (e) { /* se queda la anterior */ } }
+      redo(); TW.show(relSpec(r, group));
+    };
+    fields.push({ type: 'seg', label: 'Tipo de alineación', opts: [['natural', 'Natural'], ['normal', 'Normal'], ['view', 'Vista'], ['vector', 'Vector']], get: () => r.atype || 'natural', set: setType },
+      { type: 'seg', label: 'Eje del vector', opts: [[0, 'X'], [1, 'Y'], [2, 'Z']], show: () => r.atype === 'vector', get: () => r.axis ?? 2, set: (v) => { r.axis = v; r.avec = AXES[v].toArray(); if (r.curve) retargetCurve(r); set('axis', v); } });
+    if (r.curve) {
+      const ms = byId(r.master);
+      fields.push({ type: 'check', label: 'Extremo contrario de la curva', get: () => !!r.sEnd, set: (v) => { checkpoint(); r.sEnd = v ? 1 : 0; r.lambda0 = HX.curveNaturalLambda(byId(r.slave).data, r.sEnd, ms.data, r); redo(); } });
+      if (ms?.kind === 'curve') fields.push({ type: 'check', label: 'Extremo contrario de la maestra', get: () => !!r.mEnd, set: (v) => { checkpoint(); r.mEnd = v ? 1 : 0; r.mT = v ? 1 : 0; redo(); TW.render(); } },
+        { type: 'range', label: 'Punto de unión en la maestra', min: 0, max: 1, step: 0.005, get: () => r.mT ?? (r.mEnd ? 1 : 0), start: checkpoint, set: live('mT'), fmt: (v) => v.toFixed(3) });
+      else fields.push({ type: 'range', label: 'Posición en el borde', min: 0, max: 1, step: 0.005, get: () => r.mT ?? 0.5, start: checkpoint, set: live('mT'), fmt: (v) => v.toFixed(3) });
+    } else {
+      fields.push({ type: 'group', key: 'alrange', label: 'Alcance a lo largo del borde', fields: [
+        { type: 'check', label: 'Modificar rango', get: () => !!r.modRange, set: (v) => set('modRange', v) },
+        { type: 'range', label: 'Inicio del rango', min: 0, max: 1, step: 0.005, show: () => !!r.modRange, get: () => r.r0 ?? 0, start: checkpoint, set: live('r0'), fmt: (v) => v.toFixed(3) },
+        { type: 'range', label: 'Fin del rango', min: 0, max: 1, step: 0.005, show: () => !!r.modRange, get: () => r.r1 ?? 1, start: checkpoint, set: live('r1'), fmt: (v) => v.toFixed(3) },
+        { type: 'range', label: 'Suavizado', min: 0, max: 0.6, step: 0.005, show: () => !!r.modRange, get: () => r.soft ?? 0, start: checkpoint, set: live('soft'), fmt: (v) => (v ? v.toFixed(3) : 'no') },
+        { type: 'check', label: 'Tensión distinta al final', get: () => !!r.varT, set: (v) => { if (v && r.tensionEnd == null) r.tensionEnd = r.tension; set('varT', v); } },
+        { type: 'range', label: 'Tensión final', min: 0.2, max: 3, step: 0.05, show: () => !!r.varT, get: () => r.tensionEnd ?? r.tension, start: checkpoint, set: live('tensionEnd'), fmt: (v) => v.toFixed(2) }] });
+    }
+    return ` · ${nm(r.slave)} → ${nm(r.master)}`;
+  },
+  points(r, out) {
+    const keys = { t: 'tension', s: 'shape', g: 'shape3' };
+    if (out.kind === 'curve') {
+      // curva alineada: tensión (CV 1), forma (CV 2) y G3 (CV 3) contados desde el extremo, invertir en el CV 0
+      const c = out.data.cvs, at = (k) => v3(c[r.sEnd ? c.length - 1 - k : k]), p0 = at(0), p1 = at(1);
+      const H = continuityPoints(r, at, r.cont, keys);
+      H.push(cpoint('flip', p0, p1.clone().sub(p0).normalize(), { click: () => { r.rev = !r.rev; } }));
+      // deslizador amarillo del punto de unión en la maestra (borde o curva): se arrastra a lo largo de ella y la curva la sigue
+      const ms = byId(r.master);
+      if (ms && !r.mIso && !ms.data.cos && (r.mEdge || ms.kind === 'curve')) {
+        const D = r.mEdge ? HX.edgeCrossDerivs(ms.data, r.mEdge, r.mT ?? 0.5, 1) : HX.curveDerivsAt(ms.data, r.mT ?? 0.5, 1);
+        H.push(cpoint('slide', v3(D[0]), D[1].clone().normalize(), { attach: r.mEdge ? { obj: ms.id, edge: r.mEdge, t: r.mT ?? 0.5 } : { obj: ms.id, t: r.mT ?? 0.5 },
+          get: () => r.mT ?? 0.5,
+          drag: (delta, s0) => { r.mT = Math.min(1, Math.max(0, s0 + delta / (r.mEdge ? HX.edgeLengthApprox(ms.data, r.mEdge) : curveLen(ms.data)))); } }));
+      }
+      return H;
+    }
+    if (out.kind !== 'surface') return [];
+    const d = out.data, H = continuityPoints(r, rowChain(d, r.sEdge), r.cont, keys);
+    // flecha de giro (Flip): en el inicio del borde, apunta a lo largo de él; un clic invierte su dirección
+    const a0 = HX.row(d, r.sEdge, 0), fa = v3(a0[0]), fb = v3(a0[1]);
+    H.push(cpoint('flip', fa, fb.clone().sub(fa).normalize(), { click: () => { r.rev = !r.rev; } }));
+    return H;
+  },
+});
+
+const blendInputs = (r) => [...(r.aIds || [r.a]), ...(r.bIds || [r.b])];
+const blendDiagnose = (r, ins, out, fmt) => {
+  if (exactBlend(r)) return `1: ${fmt(HX.diagnose(ins[0].data, r.aEdge, out.data, 'v0', false), r.contA ?? r.cont)}<br>2: ${fmt(HX.diagnose(ins[1].data, r.bEdge, out.data, 'v1', r.rev), r.contB ?? r.cont)}`;
+  const [A, B] = blendSides(r), [dA, dB] = FF.diagnoseBlend(r, A, B, out.data);
+  return `1: ${fmt(dA, A.kind === 'curves' ? 0 : r.contA ?? 2)}<br>2: ${fmt(dB, B.kind === 'curves' ? 0 : r.contB ?? 2)}`;
+};
+// Lado 1, Lado 2, Inicio [..], Fin [..], Corona: las etiquetas en la vista de Alias
+function blendLabels(r) {
+  const out = byId(r.out);
+  if (!out) return [];
+  const O = FF.surfEval(out.data);
+  const fl = (v) => ({ default: r.type === 'skin' ? 'Unir extremos' : 'Defecto', edge: 'Alinear al borde', extend: 'Extender' })[v || 'default'];
+  // en lados cerrados el inicio y el fin coinciden: una sola etiqueta en la costura
+  const closed = O(0, 0.5).distanceTo(O(1, 0.5)) < 1e-3;
+  return [[O(0.5, 0), 'Lado 1'], [O(0.5, 1), 'Lado 2'], [O(0.25, 0.5), `Corona [${r.crown ? r.crown.toFixed(2) : 'no'}]`],
+    ...(closed ? [[O(0, 0.5), 'Costura (Modificar parámetro)']] : [[O(0, 0.5), `Inicio [${fl(r.flowStart)}]`], [O(1, 0.5), `Fin [${fl(r.flowEnd)}]`]])]
+    .map(([pos, t]) => ({ pos, html: esc(t) }));
+}
+function blendPanel(r, c) {
+  const { group, fields, set, live, redo, nm } = c;
+  const sk = r.type === 'skin', ids = (x) => x.map(nm).join(' + ');
+  const freeA = byId(r.a)?.kind === 'curve' && !byId(r.a)?.data.cos, freeB = byId(r.b)?.kind === 'curve' && !byId(r.b)?.data.cos;
+  if (!sk) {
+    fields.push({ type: 'seg', label: 'Lado 1', opts: G_SEG(0, freeA ? 0 : 3), get: () => r.contA ?? r.cont, set: (v) => set('contA', v) },
+      { type: 'seg', label: 'Lado 2', opts: G_SEG(0, freeB ? 0 : 3), get: () => r.contB ?? r.cont, set: (v) => set('contB', v) },
+      { type: 'range', label: 'Forma lado 1', min: 0.2, max: 3, step: 0.05, get: () => r.tensionA ?? r.tension, start: checkpoint,
+        set: (v) => { r.tensionA = v; if (r.lockShape) r.tensionB = v; redo(); }, fmt: (v) => v.toFixed(2) },
+      { type: 'range', label: 'Forma lado 2', min: 0.2, max: 3, step: 0.05, show: () => !r.lockShape, get: () => r.tensionB ?? r.tension, start: checkpoint, set: live('tensionB'), fmt: (v) => v.toFixed(2) },
+      { type: 'check', label: 'Bloquear formas (Lock Shape Controls)', get: () => !!r.lockShape, set: (v) => { r.lockShape = v; if (v) { r.tensionB = r.tensionA ?? r.tension; redo(); } } });
+  }
+  fields.push({ type: 'range', label: 'Corona (Crown)', min: -1, max: 1, step: 0.02, get: () => r.crown || 0, start: checkpoint, set: live('crown'), fmt: (v) => (v ? v.toFixed(2) : 'no') },
+    { type: 'check', label: 'Modificar parámetro (curvas cerradas)', get: () => !!r.modParam, set: (v) => set('modParam', v) },
+    { type: 'range', label: 'Inicio lado 1', min: 0, max: 1, step: 0.005, show: () => !!r.modParam, get: () => r.pA || 0, start: checkpoint, set: live('pA'), fmt: (v) => v.toFixed(3) },
+    { type: 'range', label: 'Giro lado 2', min: -0.5, max: 0.5, step: 0.005, show: () => !!r.modParam, get: () => r.pB || 0, start: checkpoint, set: live('pB'), fmt: (v) => v.toFixed(3) });
+  const ends = sk ? [['default', 'Unir extremos'], ['extend', 'Extender']] : [['default', 'Defecto'], ['edge', 'Alinear al borde']];
+  fields.push({ type: 'group', key: 'explicit', label: 'Control explícito', fields: [
+    { type: 'check', label: 'Control explícito', get: () => !!r.explicit, set: (v) => set('explicit', v) },
+    { type: 'seg', label: 'Grado U', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], show: () => !!r.explicit, get: () => r.degU ?? 3, set: (v) => set('degU', v) },
+    { type: 'range', label: 'Spans U', min: 1, max: 32, step: 1, show: () => !!r.explicit, get: () => r.spansU ?? 8, start: checkpoint, set: live('spansU'), fmt: (v) => String(v) },
+    ...(sk ? [{ type: 'check', label: 'Reconstruir (Rebuild)', get: () => r.rebuild !== false, set: (v) => set('rebuild', v) }] : [])] },
+  { type: 'group', key: 'flow', label: 'Control de flujo', fields: [
+    { type: 'seg', label: 'Inicio', opts: ends, get: () => r.flowStart || 'default', set: (v) => set('flowStart', v) },
+    ...(sk ? [] : [{ type: 'seg', label: 'Interior', opts: [['free', 'Libre'], ['iso', 'Isoparam.']], get: () => r.flowInt || 'free', set: (v) => set('flowInt', v) }]),
+    { type: 'seg', label: 'Fin', opts: ends, get: () => r.flowEnd || 'default', set: (v) => set('flowEnd', v) },
+    { type: 'check', label: 'Modificar rango', get: () => !!r.modRange, set: (v) => set('modRange', v) },
+    ...[['rA0', 'Lado 1 inicio', 0], ['rA1', 'Lado 1 fin', 1], ['rB0', 'Lado 2 inicio', 0], ['rB1', 'Lado 2 fin', 1]].map(([k, l, d]) => (
+      { type: 'range', label: l, min: 0, max: 1, step: 0.005, show: () => !!r.modRange, get: () => r[k] ?? d, start: checkpoint, set: live(k), fmt: (v) => v.toFixed(3) }))] },
+  { type: 'group', key: 'ctrl', label: 'Opciones de control', fields: [
+    ...(sk ? [] : [{ type: 'check', label: 'Recortar automáticamente', get: () => toolDef.autoTrim !== false, set: (v) => { toolDef.autoTrim = v; saveToolDef(); if (v) autoTrim(r); } }]),
+    { type: 'check', label: 'Comprobar continuidad', get: () => toolDef.contCheck !== false, set: (v) => { toolDef.contCheck = v; saveToolDef(); TW.show(relSpec(r, group)); } }] });
+  return ` · ${ids(r.aIds || [r.a])} ↔ ${ids(r.bIds || [r.b])}`;
+}
+// punto del redondeo G2/G3 (macro: 2 carriles 'fcurve' + 1 blend con la misma r.fg): flecha verde del valor en el carril A
+function gfilletPoints(r) {
+  const rails = relations.filter((x) => x.fg === r.fg && x.type === 'fcurve'), rA = rails[0], c = rA && byId(rA.out), src = rA && byId(rA.src);
+  if (!c || !src) return [];
+  const S = FF.surfEval(src.data), uv = c.data.cos.uv, m = uv[uv.length >> 1], pos = S(m[0], m[1]);
+  const U = rA.edge[0] === 'u', end = rA.edge[1] === '1', e0 = U ? S(end ? 1 : 0, m[1]) : S(m[0], end ? 1 : 0);
+  return [cpoint('distance', pos, pos.clone().sub(e0).normalize(), { label: 'valor', attach: { obj: src.id, edge: rA.edge }, get: () => rA.dist,
+    drag: (delta, s0) => { const v = Math.max(0.01, Math.round((s0 + delta) * 1000) / 1000); rails.forEach((x) => { x.dist = v; if (applyRelation(x)) propagateFrom(byId(x.out)); }); } })];
+}
+defineConstruction('blend', {
+  name: 'Freeform Blend', inputs: blendInputs, retool: true,
+  build: (r) => blendRelData(r), panel: blendPanel, diagnose: blendDiagnose, labels: blendLabels,
+  summary: (r, nm) => `${nm(r.out)} · G${r.contA ?? r.cont}/G${r.contB ?? r.cont}`,
+  points(r, out) {
+    if (r.fg) return gfilletPoints(r);
+    const d = out.data;
+    // con "Bloquear formas" las dos flechas azules mueven la misma forma
+    const H = [...continuityPoints(r, rowChain(d, 'v0'), r.contA ?? r.cont, { t: 'tensionA', s: 'shapeA' }),
+      ...continuityPoints(r, rowChain(d, 'v1'), r.contB ?? r.cont, { t: r.lockShape ? 'tensionA' : 'tensionB', s: 'shapeB' })];
+    // flecha de giro (Flip) del lado 2: si las direcciones no fluyen hacia el mismo lado la superficie se retuerce; un clic invierte el lado 2
+    const b0 = HX.row(d, 'v1', 0), fa = v3(b0[0]), fb = v3(b0[1]);
+    H.push(cpoint('flip', fa, fb.clone().sub(fa).normalize(), { label: 'invertir lado 2', click: () => { r.flip = !r.flip; } }));
+    return H;
+  },
+});
+defineConstruction('skin', {
+  name: 'Skin', inputs: blendInputs, retool: true,
+  build: (r) => blendRelData(r), panel: blendPanel, diagnose: blendDiagnose, labels: blendLabels,
+  summary: (r, nm) => `${nm(r.out)} ← ${(r.aIds || [r.a]).length + (r.bIds || [r.b]).length} curvas`,
+});
+defineConstruction('project', {
+  name: 'Proyectar', inputs: (r) => [r.src, r.surf],
+  build: (r, ins) => projData(r, ins[0], ins[1]),
+  summary: (r, nm) => `${nm(r.out)} ← ${nm(r.src)} en ${nm(r.surf)}`,
+  panel(r, c) {
+    const { group, fields, set, redo, nm } = c;
+    fields.push({ type: 'seg', label: 'Dirección', opts: [['view', 'Vista'], ['y', 'Z'], ['normal', 'Normal']], get: () => r.mode,
+      set: (v) => { toolDef.projMode = v; saveToolDef(); checkpoint(); const d = projDir(v); group.forEach((x) => { x.mode = v; x.dir = d; }); redo(); } },
+    { type: 'seg', label: 'Recortar', opts: [['none', 'No'], ['inside', 'Dentro'], ['outside', 'Fuera']], get: () => r.trim || 'none',
+      set: (v) => { toolDef.projTrim = v; saveToolDef(); set('trim', v); } },
+    { type: 'html', html: () => '<span class="tw-note">Recortar necesita una curva cerrada o que vaya de borde a borde. Mueve la curva original y la proyección, el recorte y los blends la siguen.</span>' });
+    return group.length > 1 ? ` · ${group.length} curvas → ${nm(r.surf)}` : ` · ${nm(r.src)} → ${nm(r.surf)}`;
+  },
+});
+defineConstruction('extend', {
+  name: 'Extender', retool: true,
+  build: (r, ins) => FF.extendData(ins[0].data, r.edge, r.dist, r.cont),
+  diagnose: (r, ins, out, fmt) => fmt(HX.diagnose(ins[0].data, r.edge, out.data, 'v0', false), r.cont),
+  panel(r, c) {
+    const { fields, set, live, nm } = c;
+    fields.push({ type: 'range', label: 'Distancia', min: 0.05, max: 6, step: 0.05, get: () => r.dist, start: checkpoint, set: (v) => { toolDef.extendDist = v; saveToolDef(); live('dist')(v); }, fmt: (v) => v.toFixed(2) + ' dm' },
+      { type: 'seg', label: 'Continuidad', opts: [[1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => r.cont, set: (v) => { toolDef.extendCont = v; saveToolDef(); set('cont', v); } });
+    return ` · ${nm(r.src)}`;
+  },
+  points(r, out) {
+    const d = out.data, p0 = v3(mid(HX.row(d, 'v0', 0))), p = v3(mid(HX.row(d, 'v1', 0)));
+    return [cpoint('distance', p, p.clone().sub(p0).normalize(), { get: () => r.dist, drag: (delta, s0) => { r.dist = Math.max(0.01, Math.round((s0 + delta) * 100) / 100); } })];
+  },
+});
+defineConstruction('offset', {
+  name: 'Offset',
+  build: (r, ins) => HX.offsetData(ins[0].data, r.dist),
+  panel(r, c) {
+    c.fields.push({ type: 'range', label: 'Distancia', min: -2, max: 2, step: 0.01, get: () => r.dist, start: checkpoint, set: (v) => { toolDef.offsetDist = v; saveToolDef(); c.live('dist')(v); }, fmt: (v) => v.toFixed(2) + ' dm' });
+    return ` · ${c.nm(r.src)}`;
+  },
+  points(r, out) {
+    const src = byId(r.src), d = out.data;
+    if (!src) return [];
+    const i = Math.floor(d.cvs.length / 2), j = Math.floor(d.cvs[0].length / 2), p = v3(d.cvs[i][j]), q = v3(src.data.cvs[i][j]);
+    let dir = p.clone().sub(q);
+    const sgn = Math.sign(r.dist) || 1;
+    dir = dir.lengthSq() > 1e-10 ? dir.normalize().multiplyScalar(sgn) : new THREE.Vector3(0, 1, 0);
+    return [cpoint('distance', p, dir.clone().multiplyScalar(sgn), { get: () => r.dist, drag: (delta, s0) => { r.dist = Math.round((s0 + delta) * 100) / 100; } })];
+  },
+});
+defineConstruction('mirror', {
+  name: 'Simetría',
+  build: (r, ins) => HX.mirrorData(ins[0].data, ins[0].kind, r.plane || 'x'),
+  panel(r, c) {
+    c.fields.push({ type: 'seg', label: 'Plano', opts: [['x', 'YZ'], ['z', 'XZ'], ['y', 'XY']], get: () => r.plane || 'x', set: (v) => { toolDef.mirrorPlane = v; saveToolDef(); c.set('plane', v); } });
+    return ` · ${c.nm(r.src)}`;
+  },
+});
+defineConstruction('extrude', {
+  name: 'Extruir',
+  build: (r, ins) => HX.extrudeData(ins[0].data, r.dist, r.dir, r.both),
+  panel(r, c) {
+    const { group, fields, set, live, nm } = c;
+    fields.push({ type: 'range', label: 'Distancia', min: -10, max: 10, step: 0.01, get: () => r.dist, start: checkpoint, set: live('dist'), fmt: (v) => v.toFixed(2) + ' dm' },
+      { type: 'seg', label: 'Dirección', opts: [['auto', 'Normal'], ['x', 'X'], ['z', 'Y'], ['y', 'Z']], get: () => r.dir, set: (v) => { toolDef.extDir = v; saveToolDef(); set('dir', v); } },
+      { type: 'check', label: 'Hacia los dos lados', get: () => r.both, set: (v) => { toolDef.extBoth = v; saveToolDef(); set('both', v); } });
+    return group.length > 1 ? ` · ${group.length} curvas` : ` · ${nm(r.src)}`;
+  },
+  points(r, out) {
+    const d = out.data, p = v3(mid(d.cvs[1])), sgn = Math.sign(r.dist) || 1;
+    return [cpoint('distance', p, p.clone().sub(v3(mid(d.cvs[0]))).normalize(), { get: () => r.dist, drag: (delta, s0) => { r.dist = Math.round((s0 + delta * sgn) * 100) / 100 || 0.01; } })];
+  },
+});
+defineConstruction('revolve', {
+  name: 'Revolución',
+  build: (r, ins) => N.revolve(ins[0].data, revOpts(r, ins[0])),
+  panel(r, c) {
+    const { group, fields, set, live, nm } = c;
+    const setAxis = (v) => {
+      toolDef.revAxis = v === 'vector' ? toolDef.revAxis : v; saveToolDef();
+      if (v === 'vector') { revolveDrag = null; revAxisPick = { rels: group, pts: [] }; toast('Eje de la revolución: clic en el 1.er punto (Ctrl: punto · Ctrl+Alt: curva · Alt: rejilla)'); return; }
+      set('axisMode', v);
+    };
+    fields.push({ type: 'seg', label: 'Eje', opts: [['world', 'Z del origen'], ['pivot', 'Z por el pivote'], ['vector', 'Vector (2 clics)']], get: () => r.axisMode || 'world', set: setAxis },
+      { type: 'range', label: 'Grados', min: 1, max: r.pitch ? 1440 : 360, step: 0.5, get: () => r.angle ?? 360, start: checkpoint, set: live('angle'), fmt: (v) => v.toFixed(1) + '°' },
+      { type: 'range', label: 'Paso (hélice)', min: -5, max: 5, step: 0.01, get: () => r.pitch || 0, start: checkpoint, set: (v) => { toolDef.revPitch = v; saveToolDef(); live('pitch')(v); }, fmt: (v) => (v ? (v * 100).toFixed(0) + ' mm/vuelta' : 'no') },
+      { type: 'check', label: 'Racional (arco exacto)', get: () => r.rational !== false && !r.pitch, set: (v) => { toolDef.revRational = v; saveToolDef(); set('rational', v); TW.show(relSpec(r, group)); } },
+      { type: 'seg', label: 'Grado', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], show: () => r.rational === false || !!r.pitch, get: () => r.deg || 3, set: (v) => { toolDef.revDeg = v; saveToolDef(); set('deg', v); } },
+      { type: 'range', label: 'Tramos', min: 1, max: 32, step: 1, show: () => r.rational === false || !!r.pitch, get: () => r.spans || 8, start: checkpoint, set: (v) => { toolDef.revSpans = v; saveToolDef(); live('spans')(v); }, fmt: (v) => String(v) },
+      { type: 'html', html: () => '<span class="tw-note">Flecha verde = grados · azul = paso. Clic derecho en la vista = aceptar y cerrar.</span>' });
+    return group.length > 1 ? ` · ${group.length} curvas` : ` · ${nm(r.src)}`;
+  },
+  points(r) {
+    const F = revFrame(r);
+    if (!F) return [];
+    const A = THREE.MathUtils.degToRad(r.angle ?? 360), adv = (r.pitch || 0) * A / (2 * Math.PI);
+    const pos = F.foot.clone().addScaledVector(F.e1, Math.cos(A) * F.r).addScaledVector(F.e2, Math.sin(A) * F.r).addScaledVector(F.D, adv);
+    const tan = F.e2.clone().multiplyScalar(Math.cos(A)).addScaledVector(F.e1, -Math.sin(A)).normalize();
+    return [cpoint('distance', pos, tan, { label: 'grados', get: () => r.angle ?? 360,
+        drag: (delta, s0) => { r.angle = Math.max(1, Math.min(r.pitch ? 1440 : 360, Math.round((s0 + THREE.MathUtils.radToDeg(delta / F.r)) * 2) / 2)); } }),
+      cpoint('tension', pos.clone(), F.D.clone(), { label: 'paso', get: () => r.pitch || 0,
+        drag: (delta, s0) => { r.pitch = Math.round((s0 + (delta * 2 * Math.PI) / Math.max(A, 0.1)) * 100) / 100; } })];
+  },
+});
+defineConstruction('loft', {
+  name: 'Loft', inputs: (r) => r.srcs,
+  build: (r, ins) => N.loft(ins.map((c) => c.data)),
+  panel: (r) => ` · ${r.srcs.length} curvas`,
+  summary: (r, nm) => `${nm(r.out)} ← ${r.srcs.length} curvas`,
+});
+defineConstruction('fcurve', {
+  name: 'Carril de redondeo', inputs: (r) => [r.src, r.other],
+  build: (r, ins) => fcurveData(r, ins[0], ins[1]),
+  points: (r) => (r.fg ? gfilletPoints(r) : []),
+});
 function applyRelation(r) {
   const out = byId(outputOf(r)), ins = inputsOf(r).map(byId);
   if (!out || ins.some((o) => !o)) return false;
   try { out.data = relationData(r, ins, out); }
-  catch (e) { console.warn(e); toast(`${REL_NAMES[r.type]}: no se pudo recalcular (${e.message})`); return false; }
+  catch (e) { console.warn(e); toast(`${relName(r)}: no se pudo recalcular (${e.message})`); return false; }
   const was = propagating;
   propagating = true; updateObject(out); propagating = was;
   if (r === arrowsFor && !arrowDrag) updateRelArrows();
@@ -4433,7 +4726,7 @@ function propagateFrom(obj) {
       for (const r of relations) {
         if (done.has(r.id)) continue;
         // un Align también se reaplica si se toca la superficie que se ajusta: sus filas del borde quedan atadas a la maestra
-        const hit = inputsOf(r).includes(id) || (r.type === 'align' && r.slave === id && id === obj.id);
+        const hit = inputsOf(r).includes(id) || (constructionOf(r).editsOutput && outputOf(r) === id && id === obj.id);
         if (!hit) continue;
         done.add(r.id);
         if (applyRelation(r)) queue.push(outputOf(r));
@@ -5172,125 +5465,14 @@ function relSpec(r, group = [r]) {
   const redo = () => { if (r.auto === false) { group.forEach((x) => (x.pending = true)); TW.render(); return; } apply(); };
   const set = (k, v) => { checkpoint(); group.forEach((x) => (x[k] = v)); redo(); };
   const live = (k) => (v) => { group.forEach((x) => (x[k] = v)); redo(); };
-  const G = (from, to) => [[0, 'G0'], [1, 'G1'], [2, 'G2'], [3, 'G3']].filter(([v]) => v >= from && v <= to);
   const nm = (id) => byId(id)?.name || '¿?';
-  const fields = [];
-  let title = REL_NAMES[r.type];
-  if (r.type === 'align') {
-    title += ` · ${nm(r.slave)} → ${nm(r.master)}`;
-    fields.push({ type: 'seg', label: 'Continuidad', opts: G(0, 3), get: () => r.cont, set: (v) => set('cont', v) },
-      { type: 'range', label: r.curve || !r.varT ? 'Tensión' : 'Tensión inicio', min: 0.2, max: 3, step: 0.05, get: () => r.tension, start: checkpoint, set: live('tension'), fmt: (v) => v.toFixed(2) },
-      // la forma (mu) cambia cómo llega la superficie al borde sin cambiar la curvatura en él: solo aplica desde G2
-      { type: 'range', label: 'Forma', min: -2, max: 2, step: 0.05, get: () => r.shape ?? 0, start: checkpoint, set: live('shape'), fmt: (v) => v.toFixed(2), show: () => r.cont >= 2 },
-      { type: 'range', label: 'Escala G3', min: -2, max: 2, step: 0.05, get: () => r.shape3 ?? 0, start: checkpoint, set: live('shape3'), fmt: (v) => v.toFixed(2), show: () => r.cont >= 3 },
-      { type: 'group', key: 'alexp', label: 'Control explícito (grado y spans)', fields: [
-        { type: 'check', label: 'Control explícito', get: () => !!r.explicit, set: (v) => { if (v && r.xDeg == null) { const d = byId(r.slave)?.data; r.xDeg = r.curve ? d.deg : (r.sEdge[0] === 'u' ? d.degU : d.degV); r.xSpans = r.curve ? d.cvs.length - d.deg : (r.sEdge[0] === 'u' ? d.cvs.length - d.degU : d.cvs[0].length - d.degV); } set('explicit', v); TW.show(relSpec(r, group)); } },
-        { type: 'seg', label: r.curve ? 'Grado' : 'Grado (cruzando el borde)', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], show: () => !!r.explicit, get: () => r.xDeg ?? 3, set: (v) => set('xDeg', v) },
-        { type: 'range', label: r.curve ? 'Spans' : 'Spans (cruzando el borde)', min: 1, max: 16, step: 1, show: () => !!r.explicit, get: () => r.xSpans ?? 4, start: checkpoint, set: live('xSpans'), fmt: (v) => String(v) }] },
-      { type: 'group', key: 'alblend', label: 'Mezcla (Blending)', fields: [
-        { type: 'range', label: 'Filas de CVs extra', min: 0, max: 6, step: 1, get: () => r.extra || 0, start: checkpoint, set: live('extra'), fmt: (v) => String(v) },
-        { type: 'range', label: 'Factor de mezcla', min: 0, max: 1, step: 0.01, show: () => (r.extra || 0) > 0, get: () => r.blendF ?? 1, start: checkpoint, set: live('blendF'), fmt: (v) => v.toFixed(2) }] },
-      { type: 'check', label: r.curve ? 'Continuar hacia el otro lado' : 'Invertir la dirección del borde', get: () => !!r.rev, set: (v) => set('rev', v) });
-    // tipo de alineación (Alignment Type): Natural = por el flujo propio de la superficie; Normal = el punto más cercano de la maestra;
-    // Vista = proyectando en la dirección en que se miraba; Vector = proyectando a lo largo de un eje
-    const setType = (v) => {
-      checkpoint(); r.atype = v;
-      if (v === 'view') r.avec = camera.getWorldDirection(new THREE.Vector3()).toArray();
-      if (v === 'vector') r.avec = AXES[r.axis ?? 2].toArray();
-      if (r.curve) { retargetCurve(r); try { r.lambda0 = HX.curveNaturalLambda(byId(r.slave).data, r.sEnd, byId(r.master).data, r, masterField(r)); } catch (e) { /* se queda la anterior */ } }
-      redo(); TW.show(relSpec(r, group));
-    };
-    fields.push({ type: 'seg', label: 'Tipo de alineación', opts: [['natural', 'Natural'], ['normal', 'Normal'], ['view', 'Vista'], ['vector', 'Vector']], get: () => r.atype || 'natural', set: setType },
-      { type: 'seg', label: 'Eje del vector', opts: [[0, 'X'], [1, 'Y'], [2, 'Z']], show: () => r.atype === 'vector', get: () => r.axis ?? 2, set: (v) => { r.axis = v; r.avec = AXES[v].toArray(); if (r.curve) retargetCurve(r); set('axis', v); } });
-    if (r.curve) {
-      const ms = byId(r.master);
-      fields.push({ type: 'check', label: 'Extremo contrario de la curva', get: () => !!r.sEnd, set: (v) => { checkpoint(); r.sEnd = v ? 1 : 0; r.lambda0 = HX.curveNaturalLambda(byId(r.slave).data, r.sEnd, ms.data, r); redo(); } });
-      if (ms?.kind === 'curve') fields.push({ type: 'check', label: 'Extremo contrario de la maestra', get: () => !!r.mEnd, set: (v) => { checkpoint(); r.mEnd = v ? 1 : 0; r.mT = v ? 1 : 0; redo(); TW.render(); } },
-        { type: 'range', label: 'Punto de unión en la maestra', min: 0, max: 1, step: 0.005, get: () => r.mT ?? (r.mEnd ? 1 : 0), start: checkpoint, set: live('mT'), fmt: (v) => v.toFixed(3) });
-      else fields.push({ type: 'range', label: 'Posición en el borde', min: 0, max: 1, step: 0.005, get: () => r.mT ?? 0.5, start: checkpoint, set: live('mT'), fmt: (v) => v.toFixed(3) });
-    } else {
-      fields.push({ type: 'group', key: 'alrange', label: 'Alcance a lo largo del borde', fields: [
-        { type: 'check', label: 'Modificar rango', get: () => !!r.modRange, set: (v) => set('modRange', v) },
-        { type: 'range', label: 'Inicio del rango', min: 0, max: 1, step: 0.005, show: () => !!r.modRange, get: () => r.r0 ?? 0, start: checkpoint, set: live('r0'), fmt: (v) => v.toFixed(3) },
-        { type: 'range', label: 'Fin del rango', min: 0, max: 1, step: 0.005, show: () => !!r.modRange, get: () => r.r1 ?? 1, start: checkpoint, set: live('r1'), fmt: (v) => v.toFixed(3) },
-        { type: 'range', label: 'Suavizado', min: 0, max: 0.6, step: 0.005, show: () => !!r.modRange, get: () => r.soft ?? 0, start: checkpoint, set: live('soft'), fmt: (v) => (v ? v.toFixed(3) : 'no') },
-        { type: 'check', label: 'Tensión distinta al final', get: () => !!r.varT, set: (v) => { if (v && r.tensionEnd == null) r.tensionEnd = r.tension; set('varT', v); } },
-        { type: 'range', label: 'Tensión final', min: 0.2, max: 3, step: 0.05, show: () => !!r.varT, get: () => r.tensionEnd ?? r.tension, start: checkpoint, set: live('tensionEnd'), fmt: (v) => v.toFixed(2) }] });
-    }
-  } else if (r.type === 'blend' || r.type === 'skin') {
-    const sk = r.type === 'skin', ids = (x) => x.map(nm).join(' + ');
-    title += ` · ${ids(r.aIds || [r.a])} ↔ ${ids(r.bIds || [r.b])}`;
-    const freeA = byId(r.a)?.kind === 'curve' && !byId(r.a)?.data.cos, freeB = byId(r.b)?.kind === 'curve' && !byId(r.b)?.data.cos;
-    if (!sk) {
-      fields.push({ type: 'seg', label: 'Lado 1', opts: G(0, freeA ? 0 : 3), get: () => r.contA ?? r.cont, set: (v) => set('contA', v) },
-        { type: 'seg', label: 'Lado 2', opts: G(0, freeB ? 0 : 3), get: () => r.contB ?? r.cont, set: (v) => set('contB', v) },
-        { type: 'range', label: 'Forma lado 1', min: 0.2, max: 3, step: 0.05, get: () => r.tensionA ?? r.tension, start: checkpoint,
-          set: (v) => { r.tensionA = v; if (r.lockShape) r.tensionB = v; redo(); }, fmt: (v) => v.toFixed(2) },
-        { type: 'range', label: 'Forma lado 2', min: 0.2, max: 3, step: 0.05, show: () => !r.lockShape, get: () => r.tensionB ?? r.tension, start: checkpoint, set: live('tensionB'), fmt: (v) => v.toFixed(2) },
-        { type: 'check', label: 'Bloquear formas (Lock Shape Controls)', get: () => !!r.lockShape, set: (v) => { r.lockShape = v; if (v) { r.tensionB = r.tensionA ?? r.tension; redo(); } } });
-    }
-    fields.push({ type: 'range', label: 'Corona (Crown)', min: -1, max: 1, step: 0.02, get: () => r.crown || 0, start: checkpoint, set: live('crown'), fmt: (v) => (v ? v.toFixed(2) : 'no') },
-      { type: 'check', label: 'Modificar parámetro (curvas cerradas)', get: () => !!r.modParam, set: (v) => set('modParam', v) },
-      { type: 'range', label: 'Inicio lado 1', min: 0, max: 1, step: 0.005, show: () => !!r.modParam, get: () => r.pA || 0, start: checkpoint, set: live('pA'), fmt: (v) => v.toFixed(3) },
-      { type: 'range', label: 'Giro lado 2', min: -0.5, max: 0.5, step: 0.005, show: () => !!r.modParam, get: () => r.pB || 0, start: checkpoint, set: live('pB'), fmt: (v) => v.toFixed(3) });
-    const ends = sk ? [['default', 'Unir extremos'], ['extend', 'Extender']] : [['default', 'Defecto'], ['edge', 'Alinear al borde']];
-    fields.push({ type: 'group', key: 'explicit', label: 'Control explícito', fields: [
-      { type: 'check', label: 'Control explícito', get: () => !!r.explicit, set: (v) => set('explicit', v) },
-      { type: 'seg', label: 'Grado U', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], show: () => !!r.explicit, get: () => r.degU ?? 3, set: (v) => set('degU', v) },
-      { type: 'range', label: 'Spans U', min: 1, max: 32, step: 1, show: () => !!r.explicit, get: () => r.spansU ?? 8, start: checkpoint, set: live('spansU'), fmt: (v) => String(v) },
-      ...(sk ? [{ type: 'check', label: 'Reconstruir (Rebuild)', get: () => r.rebuild !== false, set: (v) => set('rebuild', v) }] : [])] },
-    { type: 'group', key: 'flow', label: 'Control de flujo', fields: [
-      { type: 'seg', label: 'Inicio', opts: ends, get: () => r.flowStart || 'default', set: (v) => set('flowStart', v) },
-      ...(sk ? [] : [{ type: 'seg', label: 'Interior', opts: [['free', 'Libre'], ['iso', 'Isoparam.']], get: () => r.flowInt || 'free', set: (v) => set('flowInt', v) }]),
-      { type: 'seg', label: 'Fin', opts: ends, get: () => r.flowEnd || 'default', set: (v) => set('flowEnd', v) },
-      { type: 'check', label: 'Modificar rango', get: () => !!r.modRange, set: (v) => set('modRange', v) },
-      ...[['rA0', 'Lado 1 inicio', 0], ['rA1', 'Lado 1 fin', 1], ['rB0', 'Lado 2 inicio', 0], ['rB1', 'Lado 2 fin', 1]].map(([k, l, d]) => (
-        { type: 'range', label: l, min: 0, max: 1, step: 0.005, show: () => !!r.modRange, get: () => r[k] ?? d, start: checkpoint, set: live(k), fmt: (v) => v.toFixed(3) }))] },
-    { type: 'group', key: 'ctrl', label: 'Opciones de control', fields: [
-      ...(sk ? [] : [{ type: 'check', label: 'Recortar automáticamente', get: () => toolDef.autoTrim !== false, set: (v) => { toolDef.autoTrim = v; saveToolDef(); if (v) autoTrim(r); } }]),
-      { type: 'check', label: 'Comprobar continuidad', get: () => toolDef.contCheck !== false, set: (v) => { toolDef.contCheck = v; saveToolDef(); TW.show(relSpec(r, group)); } }] });
-  } else if (r.type === 'project') {
-    title += group.length > 1 ? ` · ${group.length} curvas → ${nm(r.surf)}` : ` · ${nm(r.src)} → ${nm(r.surf)}`;
-    fields.push({ type: 'seg', label: 'Dirección', opts: [['view', 'Vista'], ['y', 'Z'], ['normal', 'Normal']], get: () => r.mode,
-      set: (v) => { toolDef.projMode = v; saveToolDef(); checkpoint(); const d = projDir(v); group.forEach((x) => { x.mode = v; x.dir = d; }); redo(); } },
-    { type: 'seg', label: 'Recortar', opts: [['none', 'No'], ['inside', 'Dentro'], ['outside', 'Fuera']], get: () => r.trim || 'none',
-      set: (v) => { toolDef.projTrim = v; saveToolDef(); set('trim', v); } },
-    { type: 'html', html: () => '<span class="tw-note">Recortar necesita una curva cerrada o que vaya de borde a borde. Mueve la curva original y la proyección, el recorte y los blends la siguen.</span>' });
-  } else if (r.type === 'extend') {
-    title += ` · ${nm(r.src)}`;
-    fields.push({ type: 'range', label: 'Distancia', min: 0.05, max: 6, step: 0.05, get: () => r.dist, start: checkpoint, set: (v) => { toolDef.extendDist = v; saveToolDef(); live('dist')(v); }, fmt: (v) => v.toFixed(2) + ' dm' },
-      { type: 'seg', label: 'Continuidad', opts: [[1, 'G1'], [2, 'G2'], [3, 'G3']], get: () => r.cont, set: (v) => { toolDef.extendCont = v; saveToolDef(); set('cont', v); } });
-  } else if (r.type === 'revolve') {
-    title += group.length > 1 ? ` · ${group.length} curvas` : ` · ${nm(r.src)}`;
-    const setAxis = (v) => {
-      toolDef.revAxis = v === 'vector' ? toolDef.revAxis : v; saveToolDef();
-      if (v === 'vector') { revolveDrag = null; revAxisPick = { rels: group, pts: [] }; toast('Eje de la revolución: clic en el 1.er punto (Ctrl: punto · Ctrl+Alt: curva · Alt: rejilla)'); return; }
-      set('axisMode', v);
-    };
-    fields.push({ type: 'seg', label: 'Eje', opts: [['world', 'Z del origen'], ['pivot', 'Z por el pivote'], ['vector', 'Vector (2 clics)']], get: () => r.axisMode || 'world', set: setAxis },
-      { type: 'range', label: 'Grados', min: 1, max: r.pitch ? 1440 : 360, step: 0.5, get: () => r.angle ?? 360, start: checkpoint, set: live('angle'), fmt: (v) => v.toFixed(1) + '°' },
-      { type: 'range', label: 'Paso (hélice)', min: -5, max: 5, step: 0.01, get: () => r.pitch || 0, start: checkpoint, set: (v) => { toolDef.revPitch = v; saveToolDef(); live('pitch')(v); }, fmt: (v) => (v ? (v * 100).toFixed(0) + ' mm/vuelta' : 'no') },
-      { type: 'check', label: 'Racional (arco exacto)', get: () => r.rational !== false && !r.pitch, set: (v) => { toolDef.revRational = v; saveToolDef(); set('rational', v); TW.show(relSpec(r, group)); } },
-      { type: 'seg', label: 'Grado', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], show: () => r.rational === false || !!r.pitch, get: () => r.deg || 3, set: (v) => { toolDef.revDeg = v; saveToolDef(); set('deg', v); } },
-      { type: 'range', label: 'Tramos', min: 1, max: 32, step: 1, show: () => r.rational === false || !!r.pitch, get: () => r.spans || 8, start: checkpoint, set: (v) => { toolDef.revSpans = v; saveToolDef(); live('spans')(v); }, fmt: (v) => String(v) },
-      { type: 'html', html: () => '<span class="tw-note">Flecha verde = grados · azul = paso. Clic derecho en la vista = aceptar y cerrar.</span>' });
-  } else if (r.type === 'extrude') {
-    title += group.length > 1 ? ` · ${group.length} curvas` : ` · ${nm(r.src)}`;
-    fields.push({ type: 'range', label: 'Distancia', min: -10, max: 10, step: 0.01, get: () => r.dist, start: checkpoint, set: live('dist'), fmt: (v) => v.toFixed(2) + ' dm' },
-      { type: 'seg', label: 'Dirección', opts: [['auto', 'Normal'], ['x', 'X'], ['z', 'Y'], ['y', 'Z']], get: () => r.dir, set: (v) => { toolDef.extDir = v; saveToolDef(); set('dir', v); } },
-      { type: 'check', label: 'Hacia los dos lados', get: () => r.both, set: (v) => { toolDef.extBoth = v; saveToolDef(); set('both', v); } });
-  } else if (r.type === 'offset') {
-    title += ` · ${nm(r.src)}`;
-    fields.push({ type: 'range', label: 'Distancia', min: -2, max: 2, step: 0.01, get: () => r.dist, start: checkpoint, set: (v) => { toolDef.offsetDist = v; saveToolDef(); live('dist')(v); }, fmt: (v) => v.toFixed(2) + ' dm' });
-  } else if (r.type === 'mirror') {
-    title += ` · ${nm(r.src)}`;
-    fields.push({ type: 'seg', label: 'Plano', opts: [['x', 'YZ'], ['z', 'XZ'], ['y', 'XY']], get: () => r.plane || 'x', set: (v) => { toolDef.mirrorPlane = v; saveToolDef(); set('plane', v); } });
-  } else title += ` · ${r.type === 'loft' ? r.srcs.length + ' curvas' : nm(r.src)}`;
-  if (['align', 'blend', 'skin', 'extend'].includes(r.type) && toolDef.contCheck !== false) fields.push({ type: 'html', html: () => relDiag(r), diagOf: r.id });
+  const fields = [], C = constructionOf(r);
+  const title = C.name + C.panel(r, { group, fields, set, live, redo, apply, nm });
+  if (C.diagnose && toolDef.contCheck !== false) fields.push({ type: 'html', html: () => relDiag(r), diagOf: r.id });
   fields.push({ type: 'check', label: 'Actualizar al momento', get: () => r.auto !== false, set: (v) => { group.forEach((x) => (x.auto = v)); if (v && r.pending) apply(); } });
   const actions = [{ label: 'Quitar historial', run: () => removeRelation(r.id) }, { label: 'Cerrar', primary: true, run: () => TW.hide() }];
   if (r.auto === false) actions.splice(1, 0, { label: r.pending ? 'Actualizar •' : 'Actualizar', primary: !!r.pending, run: () => { apply(); TW.render(); } });
-  if (['blend', 'skin', 'extend'].includes(r.type)) {
+  if (C.retool) {
     // Undo All (borra lo creado) y Next (lo deja y sigue con otro), como en Alias
     actions.unshift({ label: 'Deshacer todo', run: () => { const o = byId(r.out); checkpoint(); if (o) removeObject(o); selectionChanged(); refreshOutliner(); renderHistory(); TW.hide(); if (edgeOp) restartEdgeOp(); } },
       { label: 'Siguiente', run: () => { if (edgeOp?.type === r.type) restartEdgeOp(); else startEdgeOp(r.type); } });
@@ -5317,94 +5499,11 @@ function makeArrow(color) {
 }
 const mid = (arr) => arr[Math.floor(arr.length / 2)];
 const v3 = (q) => new THREE.Vector3(q.x, q.y, q.z);
-// manijas de la relación abierta: { pos, dir, kind: 't' | 's' | 'd', drag(delta, start) }
+// puntos de construcción de la receta abierta (ver defineConstruction): { role, kind, pos, dir, label, start, drag | click, attach }
 function relHandles(r) {
-  const out = byId(outputOf(r));
-  if (out && out.kind === 'curve' && r.type === 'align') {
-    // curva alineada: flecha azul (tensión) en el CV 1 y naranja (forma) en el CV 2, contados desde el extremo
-    const c = out.data.cvs, at = (k) => v3(c[r.sEnd ? c.length - 1 - k : k]), H2 = [];
-    const p0 = at(0), p1 = at(1), l1 = p1.distanceTo(p0) || 1e-3;
-    if (r.cont >= 1) H2.push({ pos: p1, dir: p1.clone().sub(p0).normalize(), kind: 't', label: 'tensión', start: () => r.tension, drag: (delta, s0) => { r.tension = Math.max(0.05, s0 * (1 + delta / l1)); } });
-    if (r.cont >= 2) { const p2 = at(2), l2 = p2.distanceTo(p1) || 1e-3; H2.push({ pos: p2, dir: p2.clone().sub(p1).normalize(), kind: 's', label: 'forma', start: () => r.shape || 0, drag: (delta, s0) => { r.shape = s0 + delta / l2; } }); }
-    H2.push({ pos: p0, dir: p1.clone().sub(p0).normalize(), kind: 'f', label: 'invertir', click: () => { r.rev = !r.rev; } });
-    // deslizador amarillo del punto de unión en la maestra (borde o curva): se arrastra a lo largo de ella y la curva la sigue
-    const ms = byId(r.master);
-    if (ms && !r.mIso && !ms.data.cos && (r.mEdge || ms.kind === 'curve')) {
-      const at = (t) => (r.mEdge ? HX.edgeCrossDerivs(ms.data, r.mEdge, t, 1) : HX.curveDerivsAt(ms.data, t, 1));
-      const t0 = r.mT ?? 0.5, D = at(t0), len = D[1].length() || 1;
-      H2.push({ pos: v3(D[0]), dir: D[1].clone().normalize(), kind: 'm', label: 'punto de unión', start: () => r.mT ?? 0.5,
-        drag: (delta, s0) => { r.mT = Math.min(1, Math.max(0, s0 + delta / (r.mEdge ? HX.edgeLengthApprox(ms.data, r.mEdge) : curveLen(ms.data)))); } });
-    }
-    if (r.cont >= 3) { const p2 = at(2), p3 = at(3), l3 = p3.distanceTo(p2) || 1e-3; H2.push({ pos: p3, dir: p3.clone().sub(p2).normalize(), kind: 'g', label: 'G3', start: () => r.shape3 || 0, drag: (delta, s0) => { r.shape3 = s0 + delta / l3; } }); }
-    return H2;
-  }
-  if (!out || out.kind !== 'surface') return [];
-  const d = out.data, H = [];
-  const rows = (edge, cont, tKey, sKey) => {
-    const p0 = v3(mid(HX.row(d, edge, 0))), p1 = v3(mid(HX.row(d, edge, 1)));
-    const l1 = p1.distanceTo(p0) || 1e-3;
-    if (cont >= 1) H.push({ pos: p1, dir: p1.clone().sub(p0).normalize(), kind: 't', label: 'tensión',
-      start: () => r[tKey] ?? r.tension, drag: (delta, s0) => { r[tKey] = Math.max(0.05, s0 * (1 + delta / l1)); } });
-    if (cont >= 2) {
-      const p2 = v3(mid(HX.row(d, edge, 2))), l2 = p2.distanceTo(p1) || 1e-3;
-      H.push({ pos: p2, dir: p2.clone().sub(p1).normalize(), kind: 's', label: 'forma',
-        start: () => r[sKey] || 0, drag: (delta, s0) => { r[sKey] = s0 + delta / l2; } });
-    }
-    if (cont >= 3 && sKey === 'shape') {
-      const p2 = v3(mid(HX.row(d, edge, 2))), p3 = v3(mid(HX.row(d, edge, 3))), l3 = p3.distanceTo(p2) || 1e-3;
-      H.push({ pos: p3, dir: p3.clone().sub(p2).normalize(), kind: 'g', label: 'G3', start: () => r.shape3 || 0, drag: (delta, s0) => { r.shape3 = s0 + delta / l3; } });
-    }
-  };
-  if (r.type === 'align') {
-    rows(r.sEdge, r.cont, 'tension', 'shape');
-    // flecha de giro (Flip): en el inicio del borde, apunta a lo largo de él; un clic invierte su dirección
-    const a0 = HX.row(d, r.sEdge, 0), fa = v3(a0[0]), fb = v3(a0[1]);
-    H.push({ pos: fa, dir: fb.clone().sub(fa).normalize(), kind: 'f', label: 'invertir', click: () => { r.rev = !r.rev; } });
-  }
-  else if (r.type === 'blend' && !r.fg) {
-    // con "Bloquear formas" las dos flechas azules mueven la misma forma
-    rows('v0', r.contA ?? r.cont, 'tensionA', 'shapeA');
-    rows('v1', r.contB ?? r.cont, r.lockShape ? 'tensionA' : 'tensionB', 'shapeB');
-    // flecha de giro (Flip) del lado 2: si las direcciones no fluyen hacia el mismo lado la superficie se retuerce; un clic invierte el lado 2
-    { const b0 = HX.row(d, 'v1', 0), fa = v3(b0[0]), fb = v3(b0[1]); H.push({ pos: fa, dir: fb.clone().sub(fa).normalize(), kind: 'f', label: 'invertir lado 2', click: () => { r.flip = !r.flip; } }); }
-  } else if (r.type === 'extend') {
-    const p0 = v3(mid(HX.row(d, 'v0', 0))), p = v3(mid(HX.row(d, 'v1', 0))), dir = p.clone().sub(p0).normalize();
-    H.push({ pos: p, dir: dir.lengthSq() ? dir : new THREE.Vector3(0, 1, 0), kind: 'd', label: 'distancia', start: () => r.dist, drag: (delta, s0) => { r.dist = Math.max(0.01, Math.round((s0 + delta) * 100) / 100); } });
-  }
-  else if (r.fg) {
-    const rails = relations.filter((x) => x.fg === r.fg && x.type === 'fcurve'), rA = rails[0], c = rA && byId(rA.out), src = rA && byId(rA.src);
-    if (!c || !src) return H;
-    const S = FF.surfEval(src.data), uv = c.data.cos.uv, m = uv[uv.length >> 1], pos = S(m[0], m[1]);
-    const U = rA.edge[0] === 'u', end = rA.edge[1] === '1', e0 = U ? S(end ? 1 : 0, m[1]) : S(m[0], end ? 1 : 0);
-    const dir = pos.clone().sub(e0);
-    H.push({ pos, dir: dir.lengthSq() > 1e-10 ? dir.normalize() : new THREE.Vector3(0, 1, 0), kind: 'd', label: 'valor', start: () => rA.dist,
-      drag: (delta, s0) => { const v = Math.max(0.01, Math.round((s0 + delta) * 1000) / 1000); rails.forEach((x) => { x.dist = v; if (applyRelation(x)) propagateFrom(byId(x.out)); }); } });
-  }
-  else if (r.type === 'revolve') {
-    const F = revFrame(r);
-    if (!F) return H;
-    const A = THREE.MathUtils.degToRad(r.angle ?? 360), adv = (r.pitch || 0) * A / (2 * Math.PI);
-    const pos = F.foot.clone().addScaledVector(F.e1, Math.cos(A) * F.r).addScaledVector(F.e2, Math.sin(A) * F.r).addScaledVector(F.D, adv);
-    const tan = F.e2.clone().multiplyScalar(Math.cos(A)).addScaledVector(F.e1, -Math.sin(A)).normalize();
-    H.push({ pos, dir: tan, kind: 'd', label: 'grados', start: () => r.angle ?? 360,
-      drag: (delta, s0) => { r.angle = Math.max(1, Math.min(r.pitch ? 1440 : 360, Math.round((s0 + THREE.MathUtils.radToDeg(delta / F.r)) * 2) / 2)); } });
-    H.push({ pos: pos.clone(), dir: F.D.clone(), kind: 't', label: 'paso', start: () => r.pitch || 0,
-      drag: (delta, s0) => { r.pitch = Math.round((s0 + (delta * 2 * Math.PI) / Math.max(A, 0.1)) * 100) / 100; } });
-  }
-  else if (r.type === 'extrude') {
-    const top = d.cvs[1], bot = d.cvs[0], p = v3(mid(top)), dir = p.clone().sub(v3(mid(bot))).normalize();
-    const sgn = Math.sign(r.dist) || 1;
-    H.push({ pos: p, dir: dir.lengthSq() ? dir : new THREE.Vector3(0, 1, 0), kind: 'd', label: 'distancia', start: () => r.dist, drag: (delta, s0) => { r.dist = Math.round((s0 + delta * sgn) * 100) / 100 || 0.01; } });
-  } else if (r.type === 'offset') {
-    const src = byId(r.src);
-    if (!src) return H;
-    const i = Math.floor(d.cvs.length / 2), j = Math.floor(d.cvs[0].length / 2), p = v3(d.cvs[i][j]), q = v3(src.data.cvs[i][j]);
-    let dir = p.clone().sub(q);
-    const sgn = Math.sign(r.dist) || 1;
-    dir = dir.lengthSq() > 1e-10 ? dir.normalize().multiplyScalar(sgn) : new THREE.Vector3(0, 1, 0);
-    H.push({ pos: p, dir: dir.clone().multiplyScalar(sgn), kind: 'd', label: 'distancia', start: () => r.dist, drag: (delta, s0) => { r.dist = Math.round((s0 + delta) * 100) / 100; } });
-  }
-  return H;
+  const out = byId(outputOf(r)), C = constructionOf(r);
+  if (!out || (out.kind !== 'surface' && !(C.curvePoints && out.kind === 'curve'))) return [];
+  return C.points(r, out);
 }
 let arrowsFor = null, arrowDrag = null;
 function updateRelArrows() {
@@ -5443,23 +5542,11 @@ function alignLetters(r) {
   return [at, '', parts.join(' · ')];
 }
 function updateRelLabels() {
-  const r = arrowsFor;
-  if (r && r.type === 'align') {
-    const a = alignLetters(r);
-    relLabelPts = a ? [a] : [];
-    relLabelBox.innerHTML = relLabelPts.map(([, , h]) => `<span class="rel-label">${h}</span>`).join('');
-    return;
-  }
-  const out = r && ['blend', 'skin'].includes(r.type) && byId(r.out);
-  relLabelPts = [];
-  if (!out) { relLabelBox.innerHTML = ''; return; }
-  const O = FF.surfEval(out.data);
-  const fl = (v) => ({ default: r.type === 'skin' ? 'Unir extremos' : 'Defecto', edge: 'Alinear al borde', extend: 'Extender' })[v || 'default'];
-  // en lados cerrados el inicio y el fin coinciden: una sola etiqueta en la costura
-  const closed = O(0, 0.5).distanceTo(O(1, 0.5)) < 1e-3;
-  relLabelPts = [[O(0.5, 0), 'Lado 1'], [O(0.5, 1), 'Lado 2'], [O(0.25, 0.5), `Corona [${r.crown ? r.crown.toFixed(2) : 'no'}]`],
-    ...(closed ? [[O(0, 0.5), 'Costura (Modificar parámetro)']] : [[O(0, 0.5), `Inicio [${fl(r.flowStart)}]`], [O(1, 0.5), `Fin [${fl(r.flowEnd)}]`]])];
-  relLabelBox.innerHTML = relLabelPts.map(([, t]) => `<span class="rel-label">${esc(t)}</span>`).join('');
+  const r = arrowsFor, C = r && constructionOf(r);
+  let L = [];
+  try { L = C?.labels ? C.labels(r) : []; } catch (e) { L = []; }
+  relLabelPts = L.map((x) => [x.pos]);
+  relLabelBox.innerHTML = L.map((x) => `<span class="rel-label">${x.html}</span>`).join('');
 }
 function placeRelLabels() {
   relLabelBox.hidden = !relLabelPts.length || !!carousel || layout === 'render' || layout === 'ai';
@@ -5556,27 +5643,18 @@ function syncToolWinToSelection() {
 
 // --- Panel "Historial de construcción" ---
 function relDiag(r) {
-  const out = byId(outputOf(r)), ins = inputsOf(r).map(byId);
-  if (!out || ins.some((o) => !o) || (out.kind !== 'surface' && !(r.type === 'align' && r.curve))) return '';
+  const out = byId(outputOf(r)), ins = inputsOf(r).map(byId), C = constructionOf(r);
+  if (!C.diagnose || !out || ins.some((o) => !o) || (out.kind !== 'surface' && !(C.curvePoints && r.curve))) return '';
   const fmtD = (d, cont) => {
     const ok = (c) => `<b class="${c ? 'ok' : 'bad'}">${c ? '✓' : '✗'}</b>`;
     return `${ok(d.gap < 1e-3)} hueco ${d.gap.toFixed(4)} dm · ${cont >= 1 ? ok(d.angle < 0.1) : ''} ángulo ${d.angle.toFixed(2)}° · ${d.curv == null ? 'curvatura –' : `${cont >= 2 ? ok(d.curv < 0.05) : ''} curvatura ${(d.curv * 100).toFixed(1)}%`}`;
   };
-  try {
-    if (r.type === 'align') return fmtD(alignDiag(r), r.cont);
-    if (r.type === 'blend' && exactBlend(r)) return `1: ${fmtD(HX.diagnose(ins[0].data, r.aEdge, out.data, 'v0', false), r.contA ?? r.cont)}<br>2: ${fmtD(HX.diagnose(ins[1].data, r.bEdge, out.data, 'v1', r.rev), r.contB ?? r.cont)}`;
-    if (r.type === 'blend' || r.type === 'skin') {
-      const [A, B] = blendSides(r), [dA, dB] = FF.diagnoseBlend(r, A, B, out.data);
-      return `1: ${fmtD(dA, A.kind === 'curves' ? 0 : r.contA ?? 2)}<br>2: ${fmtD(dB, B.kind === 'curves' ? 0 : r.contB ?? 2)}`;
-    }
-    if (r.type === 'extend') return fmtD(HX.diagnose(ins[0].data, r.edge, out.data, 'v0', false), r.cont);
-  } catch (e) { return ''; }
-  return '';
+  try { return C.diagnose(r, ins, out, fmtD); } catch (e) { return ''; }
 }
 let histDiagT = 0;
 function scheduleHistoryDiag() {
   clearTimeout(histDiagT);
-  histDiagT = setTimeout(() => { document.querySelectorAll('[data-diag-of]').forEach((el) => { const r = relations.find((x) => x.id === +el.dataset.diagOf); if (r) el.innerHTML = relDiag(r); }); if (arrowsFor?.type === 'align') updateRelLabels(); }, 250);
+  histDiagT = setTimeout(() => { document.querySelectorAll('[data-diag-of]').forEach((el) => { const r = relations.find((x) => x.id === +el.dataset.diagOf); if (r) el.innerHTML = relDiag(r); }); if (arrowsFor && constructionOf(arrowsFor).labels) updateRelLabels(); }, 250);
 }
 function renderHistory() {
   recomputeDeps(); objects.forEach(applyVisibility);
@@ -5588,12 +5666,10 @@ function renderHistory() {
   }
   const nm = (id) => esc(byId(id)?.name || '¿?');
   box.innerHTML = relations.map((r) => {
-    const title = r.type === 'align' ? `${nm(r.slave)} → ${nm(r.master)} · G${r.cont}` : r.type === 'blend' ? `${nm(r.out)} · G${r.contA ?? r.cont}/G${r.contB ?? r.cont}`
-      : r.type === 'skin' ? `${nm(r.out)} ← ${(r.aIds || [r.a]).length + (r.bIds || [r.b]).length} curvas` : r.type === 'project' ? `${nm(r.out)} ← ${nm(r.src)} en ${nm(r.surf)}`
-      : r.type === 'loft' ? `${nm(r.out)} ← ${r.srcs.length} curvas` : `${nm(r.out)} ← ${nm(r.src)}`;
-    return `<div class="hist-rel" data-rel="${r.id}"><div class="hist-h"><b>${REL_NAMES[r.type]}</b><span>${title}</span>
+    const C = constructionOf(r), title = C.summary(r, nm);
+    return `<div class="hist-rel" data-rel="${r.id}"><div class="hist-h"><b>${C.name}</b><span>${title}</span>
       <button class="mini" data-edit title="Abrir sus opciones">⋯</button><button class="mini" data-del title="Quitar historial (la forma se queda)">×</button></div>
-      ${['align', 'blend', 'skin', 'extend'].includes(r.type) ? `<p class="hist-diag" data-diag-of="${r.id}">${relDiag(r)}</p>` : ''}</div>`;
+      ${C.diagnose ? `<p class="hist-diag" data-diag-of="${r.id}">${relDiag(r)}</p>` : ''}</div>`;
   }).join('');
   box.querySelectorAll('.hist-rel').forEach((el) => {
     const r = relations.find((x) => x.id === +el.dataset.rel);
@@ -6648,7 +6724,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF };
+window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, applyRelation, propagateFrom, renderHistory };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

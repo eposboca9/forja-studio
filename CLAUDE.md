@@ -33,6 +33,7 @@ una tecla para alternar Diagnóstico (cebra/curvatura) ↔ Render, edición de C
   SVG/DXF 2D (proyección paralela), .zip sin compresión. Validado con occt-import-js (OpenCASCADE) en el scratchpad.
 - `src/logo.js`: logotipo Nodo.
 - `src/freeform.js`: Freeform Blend / Skin por estaciones, curvas sobre superficie (proyectar), recortes (trimGeometry) y Extender. Pura matemática.
+- `docs/alias-sdk.md`: lo que dicen los .h del SDK de Alias (AlBlendCurve, AlBlendPoint, AlCurveNode, AlDagNode) y qué se adoptó.
 - `src/history.js`: historial de construcción (Align G0–G3, Blend G1/G2, Offset, Simetría, diagnóstico de unión). Pura matemática.
 - `src/forge/engine.js` + `src/forge/replicad_single.wasm`: motor de FORGE = el código de modelado de BumpForge (app del usuario,
   https://claude.ai/artifact/S7MagYHBjK4qJ9bKmJjo3y) como módulo nativo de Forja (startForge(ctx)). Sus controles están en index.html
@@ -820,3 +821,14 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   busca λ (hullLambda) para que los tramos CV0..CV(K+1) se parezcan a los de la curva original (rel.hullScale = false lo apaga). Resultado en 30 casos sobre el vaso:
   hueco 0, ángulo 0°, curvatura 0 % (G2/G3); círculo racional exacto en cualquier punto. Pruebas: scratchpad t40/t22.cjs, t23.cjs, t24.cjs (captura
   docs/capturas/v0.43.2-align-casco.png: antes / ahora).
+- (v0.44) Refactor con el patrón del SDK de Alias (docs/alias-sdk.md), SIN cambiar la matemática: REGISTRO DE CONSTRUCCIONES en main.js
+  (defineConstruction(type, {name, inputs, output, build, panel, points, diagnose, summary, labels, editsOutput, curvePoints, retool}),
+  constructionOf(r), inputsOf/outputOf/relName salen del registro). Ya no hay cadenas de r.type === '...' en relationData, relSpec,
+  relHandles, relDiag, updateRelLabels ni renderHistory: una herramienta nueva = un bloque defineConstruction. PUNTOS DE CONSTRUCCIÓN
+  (como AlBlendPoint): cpoint(role, pos, dir, {get, drag, click, attach}) con POINT_ROLES (tension t, shape s, g3 g, distance d,
+  flip f, slide m); continuityPoints(r, P(k), cont, keys) da tensión/forma/G3 igual para curvas y superficies; rowChain(d, edge).
+  OJO: G_OPTS (quickPick, con nombres largos) ya existía: el de las ventanas se llama G_SEG. __forja expone relSpec, relHandles, relDiag,
+  addRelation, applyRelation, propagateFrom, renderHistory. Prueba de regresión: scratchpad ref/t25.cjs old|new (17 recetas de 11 tipos:
+  geometría al crear, al mover entradas y al arrastrar cada manija, ventanas, diagnósticos, etiquetas e historial) = IDÉNTICO a v0.43.2.
+  Siguiente (pedido del usuario): bugs de Align (torsión, "proyección hacia arriba"; ojo: el vector por omisión del tipo Vector es Z de
+  Alias = arriba) y el snap que no se desliza (idea de AlBlendPoint: guardar objeto + u,v / t y deslizar cambiando el parámetro).
