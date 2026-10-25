@@ -9,11 +9,11 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import * as N from './nurbs.js?v=0.42.0';
+import * as N from './nurbs.js?v=0.46.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.45.0';
+const FORJA_VERSION = '0.46.0';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -4447,11 +4447,12 @@ function alignDiag(r) {
 // Una manija de la vista con identidad dentro de su receta: su papel (role) fija el color y el nombre; get/drag leen y cambian
 // el parámetro de la receta; click = punto de un clic; attach = a qué está pegado ({obj, edge, t} o {obj, t}), como attachedTo().
 const POINT_ROLES = { tension: { kind: 't', label: 'tensión' }, shape: { kind: 's', label: 'forma' }, g3: { kind: 'g', label: 'G3' },
-  distance: { kind: 'd', label: 'distancia' }, flip: { kind: 'f', label: 'invertir' }, slide: { kind: 'm', label: 'punto de unión' } };
+  distance: { kind: 'd', label: 'distancia' }, flip: { kind: 'f', label: 'invertir' }, slide: { kind: 'm', label: 'punto de unión' },
+  axis: { kind: 'a', label: 'eje' } };
 function cpoint(role, pos, dir, o = {}) {
   const R = POINT_ROLES[role];
   return { role, kind: R.kind, label: o.label || R.label, pos, dir: dir.lengthSq() > 1e-12 ? dir : new THREE.Vector3(0, 1, 0),
-    start: o.get, drag: o.drag, click: o.click, attach: o.attach || null };
+    start: o.get, drag: o.drag, click: o.click, move: o.move, attach: o.attach || null };
 }
 // cadena de CVs desde la costura P[0..]: tensión en el CV 1, forma en el 2 y G3 en el 3 (solo si keys.g)
 function continuityPoints(r, P, cont, keys) {
@@ -4698,34 +4699,59 @@ defineConstruction('extrude', {
   },
 });
 defineConstruction('revolve', {
-  name: 'Revolución',
+  name: 'Revolución', inputs: (r) => (r.axisMode === 'picked' && r.axisObj != null ? [r.src, r.axisObj] : [r.src]),
   build: (r, ins) => N.revolve(ins[0].data, revOpts(r, ins[0])),
   panel(r, c) {
     const { group, fields, set, live, nm } = c;
     const setAxis = (v) => {
-      toolDef.revAxis = v === 'vector' ? toolDef.revAxis : v; saveToolDef();
-      if (v === 'vector') { revolveDrag = null; revAxisPick = { rels: group, pts: [] }; toast('Eje de la revolución: clic en el 1.er punto (Ctrl: punto · Ctrl+Alt: curva · Alt: rejilla)'); return; }
+      if (v in AXIS_IDX || v === 'pivot') { toolDef.revAxis = v; saveToolDef(); }
+      if (v === 'picked') { revolveDrag = null; revAxisPick = { rels: group }; toast('Eje elegido: haz clic en una línea, curva o borde'); return; }
+      if (v === 'manip') {
+        // el manipulador empieza en el eje que había: base en su origen y punta a 2 dm a lo largo de él
+        checkpoint();
+        group.forEach((x) => { const ax = revAxis(x, byId(x.src)); x.origin = ax.origin.toArray(); x.tip = ax.origin.clone().addScaledVector(ax.axis.normalize(), 2).toArray(); x.axisMode = 'manip'; });
+        redo(); TW.show(relSpec(r, group));
+        toast('Arrastra los puntos cian (base y punta del eje) · Ctrl: a un punto · Ctrl+Alt: a una curva');
+        return;
+      }
       set('axisMode', v);
     };
-    fields.push({ type: 'seg', label: 'Eje', opts: [['world', 'Z del origen'], ['pivot', 'Z por el pivote'], ['vector', 'Vector (2 clics)']], get: () => r.axisMode || 'world', set: setAxis },
-      { type: 'range', label: 'Grados', min: 1, max: r.pitch ? 1440 : 360, step: 0.5, get: () => r.angle ?? 360, start: checkpoint, set: live('angle'), fmt: (v) => v.toFixed(1) + '°' },
+    const mode = () => (r.axisMode === 'vector' ? 'manip' : r.axisMode || 'world');
+    const MAXA = r.pitch ? 1440 : 360;
+    fields.push({ type: 'seg', label: 'Eje', opts: [['x', 'X'], ['y', 'Y'], ['world', 'Z'], ['pivot', 'Pivote'], ['picked', 'Elegido'], ['manip', 'Manip']], get: mode, set: setAxis },
+      { type: 'html', show: () => mode() === 'picked', html: () => `<span class="tw-note">Eje: ${esc(byId(r.axisObj)?.name || '¿?')}${r.axisEdge ? ' · ' + EDGE_NAMES[r.axisEdge] : ''} (si lo mueves, la revolución lo sigue)</span>` },
+      { type: 'range', label: 'Inicio', min: -360, max: 360, step: 0.5, get: () => r.a0 || 0, start: checkpoint, set: live('a0'), fmt: (v) => v.toFixed(1) + '°' },
+      { type: 'range', label: 'Fin', min: -360, max: 360 + MAXA, step: 0.5, get: () => (r.a0 || 0) + (r.angle ?? 360), start: checkpoint,
+        set: (v) => { group.forEach((x) => (x.angle = Math.max(1, Math.min(MAXA, v - (x.a0 || 0))))); redo(); }, fmt: (v) => v.toFixed(1) + '°' },
+      { type: 'range', label: 'Barrido', min: 1, max: MAXA, step: 0.5, get: () => r.angle ?? 360, start: checkpoint, set: live('angle'), fmt: (v) => v.toFixed(1) + '°' },
       { type: 'range', label: 'Paso (hélice)', min: -5, max: 5, step: 0.01, get: () => r.pitch || 0, start: checkpoint, set: (v) => { toolDef.revPitch = v; saveToolDef(); live('pitch')(v); }, fmt: (v) => (v ? (v * 100).toFixed(0) + ' mm/vuelta' : 'no') },
       { type: 'check', label: 'Racional (arco exacto)', get: () => r.rational !== false && !r.pitch, set: (v) => { toolDef.revRational = v; saveToolDef(); set('rational', v); TW.show(relSpec(r, group)); } },
       { type: 'seg', label: 'Grado', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], show: () => r.rational === false || !!r.pitch, get: () => r.deg || 3, set: (v) => { toolDef.revDeg = v; saveToolDef(); set('deg', v); } },
       { type: 'range', label: 'Tramos', min: 1, max: 32, step: 1, show: () => r.rational === false || !!r.pitch, get: () => r.spans || 8, start: checkpoint, set: (v) => { toolDef.revSpans = v; saveToolDef(); live('spans')(v); }, fmt: (v) => String(v) },
-      { type: 'html', html: () => '<span class="tw-note">Flecha verde = grados · azul = paso. Clic derecho en la vista = aceptar y cerrar.</span>' });
+      { type: 'html', html: () => '<span class="tw-note">Flechas verdes = inicio y fin del barrido · azul = paso · cian = base y punta del eje (Manip). Clic derecho en la vista = aceptar y cerrar.</span>' });
     return group.length > 1 ? ` · ${group.length} curvas` : ` · ${nm(r.src)}`;
   },
   points(r) {
-    const F = revFrame(r);
-    if (!F) return [];
-    const A = THREE.MathUtils.degToRad(r.angle ?? 360), adv = (r.pitch || 0) * A / (2 * Math.PI);
-    const pos = F.foot.clone().addScaledVector(F.e1, Math.cos(A) * F.r).addScaledVector(F.e2, Math.sin(A) * F.r).addScaledVector(F.D, adv);
-    const tan = F.e2.clone().multiplyScalar(Math.cos(A)).addScaledVector(F.e1, -Math.sin(A)).normalize();
-    return [cpoint('distance', pos, tan, { label: 'grados', get: () => r.angle ?? 360,
-        drag: (delta, s0) => { r.angle = Math.max(1, Math.min(r.pitch ? 1440 : 360, Math.round((s0 + THREE.MathUtils.radToDeg(delta / F.r)) * 2) / 2)); } }),
+    const F = revFrame(r), H = [];
+    if (r.axisMode === 'manip' && r.origin && r.tip) {
+      // manipulador del eje: base y punta, libres en 3D con snap
+      const O = new THREE.Vector3(...r.origin), T = new THREE.Vector3(...r.tip), d = T.clone().sub(O).normalize();
+      H.push(cpoint('axis', O, d, { label: 'base del eje', move: (p) => { r.origin = p.toArray(); } }),
+        cpoint('axis', T, d, { label: 'punta del eje', move: (p) => { r.tip = p.toArray(); } }));
+    }
+    if (!F) return H;
+    const MAXA = r.pitch ? 1440 : 360, S = THREE.MathUtils.degToRad(r.a0 || 0), A = THREE.MathUtils.degToRad(r.angle ?? 360), adv = (r.pitch || 0) * A / (2 * Math.PI);
+    const ptAt = (a, h) => F.foot.clone().addScaledVector(F.e1, Math.cos(a) * F.r).addScaledVector(F.e2, Math.sin(a) * F.r).addScaledVector(F.D, h);
+    const tanAt = (a) => F.e2.clone().multiplyScalar(Math.cos(a)).addScaledVector(F.e1, -Math.sin(a)).normalize();
+    const pos = ptAt(S + A, adv), deg = (delta) => THREE.MathUtils.radToDeg(delta / F.r);
+    H.push(cpoint('distance', pos, tanAt(S + A), { label: 'fin', get: () => r.angle ?? 360,
+        drag: (delta, s0) => { r.angle = Math.max(1, Math.min(MAXA, Math.round((s0 + deg(delta)) * 2) / 2)); } }),
+      // inicio: se mueve el comienzo del barrido y el fin se queda donde estaba
+      cpoint('distance', ptAt(S, 0), tanAt(S).negate(), { label: 'inicio', get: () => [r.a0 || 0, r.angle ?? 360],
+        drag: (delta, s0) => { const d = Math.round(-deg(delta) * 2) / 2, ang = Math.max(1, Math.min(MAXA, s0[1] - d)); r.a0 = s0[0] + (s0[1] - ang); r.angle = ang; } }),
       cpoint('tension', pos.clone(), F.D.clone(), { label: 'paso', get: () => r.pitch || 0,
-        drag: (delta, s0) => { r.pitch = Math.round((s0 + (delta * 2 * Math.PI) / Math.max(A, 0.1)) * 100) / 100; } })];
+        drag: (delta, s0) => { r.pitch = Math.round((s0 + (delta * 2 * Math.PI) / Math.max(A, 0.1)) * 100) / 100; } }));
+    return H;
   },
 });
 defineConstruction('loft', {
@@ -4847,6 +4873,7 @@ const TW = {
         return;
       }
       if (f.type === 'seg') {
+        if (f.opts.length > 4) row.classList.add('tw-wide');   // muchas opciones: la etiqueta encima y los botones a todo el ancho
         row.innerHTML = `<label>${esc(f.label)}</label><div class="tw-seg">${f.opts.map(([v, l]) => `<button data-v="${v}" aria-pressed="${String(f.get() === v)}">${esc(l)}</button>`).join('')}</div>`;
         row.querySelectorAll('button').forEach((bt) => bt.addEventListener('click', () => {
           const v = f.opts.find(([x]) => String(x) === bt.dataset.v)[0];
@@ -5414,11 +5441,31 @@ function mirrorSelection() {
 // Revolución como Plasticity: se crea al momento y el ángulo sigue al ratón alrededor del eje (Alt: de 15 en 15°);
 // clic izquierdo = deja el ángulo y la ventana abierta; clic derecho o Esc = aceptar y cerrar. Eje: Z del origen, Z por el pivote
 // de la curva o Vector (2 clics). Opciones: grados, paso helicoidal, racional (arco exacto) o no racional con grado y tramos.
+// Eje (como la ventana Revolve de Alias): X · Y · Z por el origen (ejes de Alias, Z arriba) · Z por el pivote de la curva ·
+// Elegido (una línea, curva o borde: va de su inicio a su fin y lo sigue con historial) · Manip (base y punta que se arrastran
+// con snap; 'vector' = el eje antiguo de 2 clics). Barrido: de r.a0 (inicio) a r.a0 + r.angle (fin), en grados.
+const AXIS_IDX = { x: 0, y: 1, z: 2, world: 2 };
+function pickedAxisPts(r) {
+  const o = byId(r.axisObj);
+  if (!o) return null;
+  let a, b;
+  if (r.axisEdge && o.kind === 'surface') {
+    const S = FF.surfEval(o.data), uv = (t) => (r.axisEdge[0] === 'u' ? [+r.axisEdge[1], t] : [t, +r.axisEdge[1]]);
+    a = S(...uv(0)); b = S(...uv(1));
+  } else if (o.kind === 'curve') { const c = N.curveOf(o.data); a = c.getPoint(0); b = c.getPoint(1); }
+  return a && b && a.distanceTo(b) > 1e-6 ? [a, b] : null;
+}
+function revAxis(r, src) {
+  const m = r.axisMode || 'world';
+  if (m in AXIS_IDX) return { origin: new THREE.Vector3(), axis: AXES[AXIS_IDX[m]].clone() };
+  if (m === 'pivot' && src?.pivot) return { origin: src.pivot.clone(), axis: AXES[2].clone() };
+  if (m === 'picked') { const L = pickedAxisPts(r); if (L) return { origin: L[0], axis: L[1].clone().sub(L[0]) }; }
+  if (m === 'manip' && r.origin && r.tip) { const O = new THREE.Vector3(...r.origin), d = new THREE.Vector3(...r.tip).sub(O); if (d.lengthSq() > 1e-10) return { origin: O, axis: d }; }
+  if (m === 'vector' && r.origin && r.axis) return { origin: new THREE.Vector3(...r.origin), axis: new THREE.Vector3(...r.axis) };
+  return { origin: new THREE.Vector3(), axis: AXES[2].clone() };
+}
 function revOpts(r, src) {
-  const o = { angle: r.angle ?? 360, pitch: r.pitch || 0, rational: r.rational !== false, deg: r.deg || 3, spans: r.spans || 8 };
-  if (r.axisMode === 'pivot' && src?.pivot) { o.origin = src.pivot.clone(); o.axis = AXES[2]; }
-  else if (r.axisMode === 'vector' && r.origin && r.axis) { o.origin = new THREE.Vector3(...r.origin); o.axis = new THREE.Vector3(...r.axis); }
-  return o;
+  return { angle: r.angle ?? 360, start: r.a0 || 0, pitch: r.pitch || 0, rational: r.rational !== false, deg: r.deg || 3, spans: r.spans || 8, ...revAxis(r, src) };
 }
 // eje y CV del perfil más alejado del eje (para la flecha del ángulo y el arrastre)
 function revFrame(r) {
@@ -5463,7 +5510,9 @@ addEventListener('pointermove', (e) => {
   const q = ray.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(F.D, F.foot), new THREE.Vector3());
   if (!q) return;
   const v = q.sub(F.foot);
-  let a = THREE.MathUtils.radToDeg(Math.atan2(v.dot(F.e2), v.dot(F.e1)));
+  // ángulo medido desde el inicio del barrido (r.a0)
+  let a = THREE.MathUtils.radToDeg(Math.atan2(v.dot(F.e2), v.dot(F.e1))) - (r.a0 || 0);
+  a = ((a % 360) + 360) % 360;
   if (a <= 0) a += 360;
   if (e.altKey || snapToggles.grid) a = Math.max(15, Math.round(a / 15) * 15);
   setRevolve(revolveDrag.rels, 'angle', Math.round(a * 10) / 10);
@@ -5472,15 +5521,17 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   if (revAxisPick) {
     if (e.button !== 0) return;
     e.stopImmediatePropagation(); e.preventDefault();
-    const p = placePoint(e);
-    if (!p) return;
-    revAxisPick.pts.push(p);
-    if (revAxisPick.pts.length === 1) { toast('Eje de la revolución: ahora el 2.º punto (la dirección del eje)'); return; }
-    const [a, b] = revAxisPick.pts, d = b.clone().sub(a);
-    if (d.lengthSq() < 1e-8) { revAxisPick.pts.pop(); return toast('Los dos puntos del eje son el mismo: elige otro.'); }
-    const rels = revAxisPick.rels; revAxisPick = null; hideSnap();
-    checkpoint(); rels.forEach((r) => { r.axisMode = 'vector'; r.origin = a.toArray(); r.axis = d.normalize().toArray(); applyRelation(r); });
-    TW.show(relSpec(rels[0], rels)); toast('Eje definido. Ajusta los grados con la flecha verde o en la ventana.');
+    down = null;   // este clic solo elige el eje: no selecciona la línea (si no, la ventana de la revolución se cerraría)
+    // Eje elegido (Picked): la línea, curva o borde más cercano al clic; el eje va de su inicio a su fin y la sigue con historial
+    const rels = revAxisPick.rels, srcIds = new Set(rels.map((r) => r.src));
+    const c = lineCandidates(e, 'both', 12, (o) => !srcIds.has(o.id))[0];
+    if (!c) return toast('Eje elegido: haz clic cerca de una línea, curva o borde (no del perfil).');
+    revAxisPick = null;
+    checkpoint();
+    rels.forEach((r) => { r.axisMode = 'picked'; r.axisObj = c.obj.id; r.axisEdge = c.edge || null; applyRelation(r); });
+    if (!pickedAxisPts(rels[0])) toast('Esa curva empieza y acaba en el mismo punto: no sirve de eje.');
+    else toast(`Eje = ${c.obj.name}${c.edge ? ' · ' + EDGE_NAMES[c.edge] : ''}. Si lo mueves, la revolución lo sigue.`);
+    TW.show(relSpec(rels[0], rels)); renderHistory();
     return;
   }
   if (!revolveDrag) return;
@@ -5572,7 +5623,7 @@ function relSpec(r, group = [r]) {
 const relArrows = new THREE.Group();
 relArrows.renderOrder = 40;
 scene.add(relArrows);
-const ARROW_COLORS = { t: '#2f7bff', s: '#ff9a1f', g: '#a46bff', d: '#2fb36b', f: '#ff5fb0', m: '#ffd400' };
+const ARROW_COLORS = { t: '#2f7bff', s: '#ff9a1f', g: '#a46bff', d: '#2fb36b', f: '#ff5fb0', m: '#ffd400', a: '#14b8c8' };
 function makeArrow(color) {
   const g = new THREE.Group(), m = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true });
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.8, 8), m); shaft.position.y = 0.4;
@@ -5666,7 +5717,7 @@ addEventListener('pointerdown', (e) => {
     updateRelArrows(); TW.render(); renderHistory(); scheduleHistoryDiag();
     return;
   }
-  arrowDrag = { h, s0: h.start(), x: e.clientX, y: e.clientY, pos: h.pos.clone(), dir: h.dir.clone(), pane: paneAt(e.clientX) };
+  arrowDrag = { h, s0: h.start ? h.start() : null, x: e.clientX, y: e.clientY, pos: h.pos.clone(), dir: h.dir.clone(), pane: paneAt(e.clientX) };
   renderer.domElement.setPointerCapture(e.pointerId);
 }, true);
 addEventListener('pointermove', (e) => {
@@ -5674,6 +5725,18 @@ addEventListener('pointermove', (e) => {
   if (!g) return;
   const r = renderer.domElement.getBoundingClientRect();
   useAspect(g.pane);
+  if (g.h.move) {
+    // punto libre (extremo del eje de una revolución): snap a punto (Ctrl) / curva (Ctrl+Alt) o, sin snap, en el plano de la pantalla
+    const sn = findSnap(e.clientX, e.clientY, snapModes(e), {});
+    let p = sn?.point;
+    if (sn) showSnap(sn);
+    else { hideSnap(); setRay(e); p = ray.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(viewDir(), g.pos), new THREE.Vector3()); }
+    if (!p) return;
+    g.h.move(p);
+    if (applyRelation(arrowsFor)) { const out = byId(outputOf(arrowsFor)); if (out) propagateFrom(out); }
+    updateRelArrows();
+    return;
+  }
   const scr = (v) => { const q = v.clone().project(camera); return new THREE.Vector2(r.left + g.pane.x + ((q.x + 1) / 2) * g.pane.w, r.top + ((1 - q.y) / 2) * g.pane.h); };
   const unit = camera.position.distanceTo(g.pos) * 0.1;
   const s = scr(g.pos.clone().addScaledVector(g.dir, unit)).sub(scr(g.pos)).divideScalar(unit);
@@ -5685,6 +5748,7 @@ addEventListener('pointermove', (e) => {
 });
 addEventListener('pointerup', () => {
   if (!arrowDrag) return;
+  if (arrowDrag.h.move) hideSnap();
   arrowDrag = null;
   TW.render(); renderHistory(); scheduleHistoryDiag();
 });

@@ -858,3 +858,13 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   rangeScale(f) saca la escala y la unidad del texto fmt (p. ej. paso dm → mm/vuelta), hasta 4 decimales, coma o punto, Enter/salir aplica, Esc deja, se limita a
   [min, max] y a entero si step ≥ 1; la tecla no llega a los atajos (stopPropagation). Prueba: scratchpad al/t30.cjs (37,25° exacto, paso 12,5 mm/vuelta = 0,125 dm,
   tramos 7,6 → 8, tope 1440°, arrastrar / minimizar / cerrar / reabrir / recargar). Capturas docs/capturas/v0.45-*.png.
+- (v0.46) Revolución (fase 2 del plan): nurbs.revolve acepta o.start (grados; el giro va de start a start + angle, la hélice sube según lo girado desde el inicio).
+  main.js: revAxis(r, src) = eje por modo: 'x' | 'y' | 'z'/'world' (AXES de Alias por el origen; 'world' = Z, el de siempre), 'pivot' (Z por el pivote), 'picked'
+  (r.axisObj + r.axisEdge: de inicio a fin de esa curva o borde, pickedAxisPts; la revolución lo tiene como ENTRADA, así sigue a la línea con historial), 'manip'
+  (r.origin + r.tip, dos puntos de construcción nuevos role 'axis' kind 'a' cian que se arrastran LIBRES en 3D con snap: cpoint {move}; arrowDrag con h.move usa
+  findSnap o el plano de la pantalla) y 'vector' (eje antiguo de 2 clics, se muestra como Manip). r.a0 = inicio, r.angle = barrido; ventana: Eje X·Y·Z·Pivote·Elegido·Manip,
+  Inicio, Fin (= a0 + angle), Barrido (+ casillas numéricas de la v0.45); flechas verdes 'fin' e 'inicio' (inicio mueve el comienzo y deja el fin). El clic de "Elegido"
+  pone down = null (si no, también elegía la línea y la ventana se cerraba). Filas 'seg' con más de 4 opciones: .tw-wide (etiqueta encima, botones a todo el ancho).
+  OJO sentido: el barrido gira como siempre (visto desde arriba en ejes de Alias, en el sentido del reloj); cambiarlo invertiría las normales (convención Su×Sv hacia dentro).
+  Prueba: scratchpad al/t31.cjs (radio constante alrededor de X/Y/Z ~1e-15; inicio 30° / fin 120° exactos; Fin 200 escrito → barrido 170; eje elegido con clic real y la
+  línea movida → la superficie la sigue; punta del manipulador arrastrada con el ratón → la superficie gira alrededor del eje nuevo). Captura docs/capturas/v0.46-revolucion-ventana.png.

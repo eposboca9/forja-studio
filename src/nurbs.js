@@ -162,7 +162,10 @@ export function revolve(c, o = {}) {
     if (r <= 1e-12) { e1 = Math.abs(D.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1); e1.addScaledVector(D, -e1.dot(D)).normalize(); }
     return { foot, r, e1, e2: e1.clone().cross(D), w: p.w ?? 1 };
   });
-  const at = (f, a, rr = f.r) => f.foot.clone().addScaledVector(f.e1, Math.cos(a) * rr).addScaledVector(f.e2, Math.sin(a) * rr).addScaledVector(D, (pitch * a) / (2 * Math.PI));
+  // o.start = ángulo inicial del barrido (grados, como el 1.º de los dos ángulos de createRevolvedSurface de Alias): el giro va de
+  // start a start + angle; la hélice sube según lo girado desde el inicio (el perfil girado a "start" no cambia de altura)
+  const a0 = THREE.MathUtils.degToRad(o.start || 0);
+  const at = (f, a, rr = f.r) => f.foot.clone().addScaledVector(f.e1, Math.cos(a0 + a) * rr).addScaledVector(f.e2, Math.sin(a0 + a) * rr).addScaledVector(D, (pitch * a) / (2 * Math.PI));
   const rational = o.rational !== false && !pitch;
   if (rational) {
     const n = Math.max(1, Math.ceil(ang / (Math.PI / 2) - 1e-9)), dA = ang / n, cw = Math.cos(dA / 2);
