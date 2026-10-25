@@ -11,8 +11,9 @@ const RX = RC + 36;            // fin de la zona de ondas (X)
 const RW = 50, RGAP = 6;       // ancho de cada anillo de herramientas y separación
 const ringIn = (k) => RX + 6 + k * (RW + RGAP), ringOut = (k) => ringIn(k) + RW, ringMid = (k) => ringIn(k) + RW / 2;
 const ROW_STEP = 2 * RX + 18;  // separación de las 3 categorías al abrir
-const reduce = matchMedia('(prefers-reduced-motion: reduce)');
-const T = (ms) => (reduce.matches ? 0 : ms);
+// (v0.49.1) CERO LATENCIA: el Puck aparece, se abre y resalta al instante (sin animaciones ni esperas), para la memoria muscular
+const reduce = { matches: true };
+const T = () => 0;
 
 export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, soon }) {
   const el = document.createElement('div');
@@ -27,9 +28,10 @@ export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, s
   const catEls = {};
   let ringEls = [], tools = [], ripple = null, swallow = false, dwell = null;
   // soltar el botón sobre una herramienta (tras pulsar en un círculo o en un anillo) = ejecutarla, sin más clics
-  addEventListener('pointerup', () => {
+  addEventListener('pointerup', (e) => {
     if (!st.drag) return;
     st.drag = false;
+    if (st.open) st.pickAt(e.clientX, e.clientY);   // la herramienta bajo el cursor en el instante de soltar
     if (st.open && st.hover) { swallow = false; st.close(true); }
   }, true);
   el.addEventListener('pointerdown', (e) => { if (e.button === 0 && e.target.closest('.p3-tool, .p3-ring')) st.drag = true; });
@@ -178,7 +180,7 @@ export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, s
   };
   st.close = (go) => {
     if (!st.open) return;
-    st.open = false; el.hidden = true; st.drag = false; clearTimeout(dwell?.t); dwell = null;
+    st.open = false; el.hidden = true; st.drag = false; dwell = null;
     const h = st.hover; st.hover = null;
     if (go && h) (h.t.soon || !h.t.run ? soon(h.t.label) : () => run(h.id, cfg.active))();
   };
@@ -193,15 +195,16 @@ export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, s
     }
     return null;
   };
-  const armDwell = (key, ms, fn) => { if (dwell?.key === key) return; clearTimeout(dwell?.t); dwell = { key, t: setTimeout(() => { if (st.open) fn(); }, T(ms) || 1) }; };
+  // sin esperas: entrar en un círculo lo abre en ese mismo movimiento; cada ENTRADA en la zona de ondas suelta un anillo
+  const armDwell = (key, ms, fn) => { if (dwell?.key === key) return; dwell = { key }; fn(); };
   st.pickAt = (px, py) => {
     const c = cfg.active, n = c ? openOf(c) : 0;
     const dx = px - st.at.x, dy = py - st.at.y, d = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
     if (!st.sticky || st.drag) {   // gesto en curso (Z mantenida o botón pulsado)
       const hit = catAt(dx, dy);
-      if (hit?.zone === 'core' && (hit.id !== c || !n)) armDwell('core:' + hit.id, 170, () => coreClick(hit.id));
-      else if (hit?.zone === 'x') armDwell('x:' + hit.id + ':' + n, 320, () => release(hit.id));
-      else if (!hit) { clearTimeout(dwell?.t); dwell = null; }
+      if (hit?.zone === 'core' && (hit.id !== c || !n)) armDwell('core:' + hit.id, 0, () => coreClick(hit.id));
+      else if (hit?.zone === 'x') armDwell('x:' + hit.id, 0, () => release(hit.id));
+      else if (!hit) dwell = null;
     }
     if (!n) return;
     const k = [...Array(n).keys()].find((q) => d >= ringIn(q) - 4 && d <= ringOut(q) + 4);

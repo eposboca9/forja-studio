@@ -11,9 +11,9 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as N from './nurbs.js?v=0.47.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
-import { createPuck3 } from './puck3.js?v=0.49.0';
+import { createPuck3 } from './puck3.js?v=0.49.1';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.49.0';
+const FORJA_VERSION = '0.49.1';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -1201,7 +1201,8 @@ function setPickMode(m, filter = null) {
   pickMode = m; pickFilter = m === 'object' ? filter : null;
   if (pickFilter) toast(`Elegir solo ${PICK_NAMES[pickFilter]}.`);
   document.querySelectorAll('[data-pick]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pick === m)));
-  selObjs.length = 0; selCVs.clear(); mouseXform = false;
+  selObjs.length = 0; selCVs.clear();
+  if (!toolIs('xform')) mouseXform = false;   // Mover / Rotar / Escalar siguen activos al cambiar entre Objetos y CVs
   selectionChanged(); updateHint();
 }
 
@@ -1279,7 +1280,7 @@ let mouseXform = false;
 const XFORM_LABELS = { translate: 'Mover', rotate: 'Rotar', scale: 'Escalar' };
 function setXform(m) {
   // Mover / Rotar / Escalar son herramientas: quitan la anterior. Arrastrar en el vacío sigue moviendo (no es un clic)
-  beginTool('xform', { label: XFORM_LABELS[m], cleanup: () => { mouseXform = false; updateHint(); } });
+  beginTool('xform', { label: XFORM_LABELS[m], persist: true, cleanup: () => { mouseXform = false; updateHint(); } });
   xform = m; pivotEdit = false; mouseXform = true;
   gizmo.setMode(m);
   updateXformButtons(); attachGizmo();
@@ -1659,25 +1660,38 @@ async function clickPick(e, how) {
     if ($('click-pivot').checked) setPivot(hit.point || (() => { const c = cvRef(hit.cv); return new THREE.Vector3(c.x, c.y, c.z); })());
   } else if (how === 'replace' || how === 'add') clearSelection();   // clic en el vacío: se suelta todo (y el HUD se va)
 }
+// CV más cercano al cursor EN PANTALLA dentro de una caja de tolerancia de CV_HIT px (no hace falta acertar al píxel); a igual distancia
+// gana el más cercano a la cámara. Devuelve el userData del CV o null.
+const CV_HIT = 8;
+function cvAtScreen(e, objs, px = CV_HIT) {
+  const pn = paneAt(e.clientX), r = renderer.domElement.getBoundingClientRect();
+  useAspect(pn);
+  const q = new THREE.Vector3();
+  let best = null, bd = px * px + 1e-9, bz = Infinity;
+  for (const o of objs) for (const h of o.parts.handles.children) {
+    q.copy(h.position).project(camera);
+    if (q.z < -1 || q.z > 1) continue;
+    const dx = r.left + pn.x + ((q.x + 1) / 2) * pn.w - e.clientX, dy = r.top + ((1 - q.y) / 2) * pn.h - e.clientY, d = dx * dx + dy * dy;
+    if (d < bd - 0.25 || (Math.abs(d - bd) <= 0.25 && q.z < bz)) { bd = d; bz = q.z; best = h.userData; }
+  }
+  return best;
+}
 function pickAt(e) {
   setRay(e);
   const live = objects.filter((o) => o.visible);
   if (pickMode === 'cv') {
-    // de los CVs tocados, el más cercano al rayo (al cursor en pantalla), no el más cercano a la cámara
-    const hits = ray.intersectObjects(live.filter((o) => cvTargets.has(o.id)).flatMap((o) => o.parts.handles.children), false);
-    let best = null, bd = Infinity;
-    for (const h of hits) { const d = ray.ray.distanceSqToPoint(h.object.position) / h.object.scale.x ** 2; if (d < bd) { bd = d; best = h; } }
-    if (best) return { cv: best.object.userData };
+    const best = cvAtScreen(e, live.filter((o) => cvTargets.has(o.id) && o.parts.handles.visible));
+    if (best) return { cv: best };
+    setRay(e);
     // si no se tocó un CV, el objeto bajo el cursor enciende (o apaga) sus CVs
     ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
     const oh = ray.intersectObjects(live.filter((o) => o.kind !== 'mesh').map((o) => pickTarget(o)), false)[0];
     return oh ? { cvTarget: oh.object.userData.obj } : null;
   }
   // los CVs de los objetos elegidos se pueden tocar directamente (con Mover activo se arrastran sin cambiar de modo)
-  const cvHits = ray.intersectObjects(live.filter((o) => selObjs.includes(o) && o.kind !== 'mesh').flatMap((o) => o.parts.handles.children), false);
-  let bestCv = null, bdCv = Infinity;
-  for (const h of cvHits) { const d = ray.ray.distanceSqToPoint(h.object.position) / h.object.scale.x ** 2; if (d < bdCv) { bdCv = d; bestCv = h; } }
-  if (bestCv) return { cv: bestCv.object.userData, enterCV: true };
+  const bestCv = cvAtScreen(e, live.filter((o) => selObjs.includes(o) && o.kind !== 'mesh' && o.parts.handles.visible));
+  setRay(e);
+  if (bestCv) return { cv: bestCv, enterCV: true };
   ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
   const hit = ray.intersectObjects(live.filter(pickable).map((o) => pickTarget(o)), false)[0];
   return hit ? { obj: hit.object.userData.obj, point: hit.point } : null;
@@ -1856,7 +1870,9 @@ const TOOL_LABELS = { curve: 'Curva', plane: 'Plano', circle: 'Círculo', edge: 
 function setTool(t) {
   if (t === 'select') { if (activeTool?.id.startsWith('tool:')) endActiveTool('done'); else setToolRaw('select'); return; }
   // dibujar no se corta con un clic en el vacío (ahí se ponen los puntos): solo Esc, "Nada" u otra herramienta
-  beginTool('tool:' + t, { label: TOOL_LABELS[t] || t, voidKill: t === 'edge', cleanup: () => { if (tool === t) setToolRaw('select'); } });
+  // cleanup con COMMIT del trabajo en curso: una curva con 2 o más CVs se guarda antes de limpiar (Esc, "Nada", otra herramienta);
+  // solo se descarta si tiene 0 o 1 CV
+  beginTool('tool:' + t, { label: TOOL_LABELS[t] || t, voidKill: t === 'edge', cleanup: () => { if (tool !== t) return; commitWIP(); setToolRaw('select'); } });
   setToolRaw(t);
 }
 function setToolRaw(t) {
@@ -1946,6 +1962,11 @@ function finishDraft() {
   toast(`${obj.name} creada`);
 }
 function cancelDraft() { draft = null; showDraft(); }
+// trabajo en curso de las herramientas de creación secuencial: devuelve lo creado (o null si no había bastante para crear nada)
+function commitWIP() {
+  if (tool === 'curve' && draft && draft.pts.length >= 2) { const n = objects.length; finishDraft(); return objects.length > n ? objects[objects.length - 1] : null; }
+  return null;
+}
 
 // ---------- Operaciones (un clic, estilo Plasticity) ----------
 const selCurves = () => selObjs.filter((o) => o.kind === 'curve');
@@ -3809,7 +3830,7 @@ function makeRadial(items, { r = 140, title = '', keepTool = false } = {}) {
     syncRadialVeil();
     void el.offsetWidth;                       // parte del estado cerrado (todo en el centro) para que la flor se abra
     el.classList.add('bloom');
-    clearTimeout(st.settleT); st.settleT = setTimeout(() => st.open && el.classList.add('settled'), 280);
+    el.classList.add('settled');
   };
   st.close = (run) => {
     if (!st.open) return;
@@ -3930,6 +3951,7 @@ function bindKey(code, getMenu) {
     if (!m) return;
     if (!isKey(e, code) || !m.open || m.sticky) return;
     e.preventDefault();
+    m.pickAt(lastPtr.x, lastPtr.y);
     if (m.hover) m.close(true);
     else if (performance.now() - m.t0 < 400) m.sticky = true;
     else m.close(false);
@@ -3948,11 +3970,17 @@ addEventListener('focusin', (e) => { if (!typing(e.target) && e.target !== docum
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && MENUS.some((m) => m.open)) { e.stopImmediatePropagation(); MENUS.forEach((m) => m.close(false)); } }, true);
 // ---------- Kill switch: Esc o clic en el vacío → cleanup() de la herramienta activa, soltar todo y volver a IDLE ----------
 function escapeAll(reason = 'esc') {
+  // Mover / Rotar / Escalar son PERSISTENTES: "Nada" o un clic en el vacío solo sueltan la selección (la herramienta sigue lista para
+  // los siguientes CVs u objetos); solo Esc u otro comando las cierran
+  if (reason !== 'esc' && activeTool?.persist) { clearSelection(); updateHint(); return; }
+  // la curva en dibujo con 2 o más CVs se guarda (commit) y queda en la escena; luego todo se suelta
+  const made = activeTool?.id === 'tool:curve' ? commitWIP() : null;
   endActiveTool(reason);
   if (pivotEdit) togglePivotEdit();
   mouseXform = false;
   if (TW.spec) TW.hide();
   clearSelection(); updateHint();
+  if (made) toast(`${made.name} guardada`);
 }
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || typing(e.target) || !$('quickpick').hidden || e.defaultPrevented) return;
@@ -3979,9 +4007,9 @@ addEventListener('pointerdown', (e) => {
 addEventListener('pointerup', (e) => {
   const v = voidDown; voidDown = null;
   if (!v?.empty || !activeTool || Math.hypot(e.clientX - v.x, e.clientY - v.y) > 5) return;
-  const name = activeTool.label;
+  const name = activeTool.label, persist = activeTool.persist;
   escapeAll('void');
-  toast(`${name}: terminada (clic en el vacío)`);
+  if (!persist) toast(`${name}: terminada (clic en el vacío)`);
 }, true);
 let mouseMenu = null;
 addEventListener('pointerdown', (e) => {
@@ -3996,6 +4024,7 @@ addEventListener('pointerup', (e) => {
   const m = mouseMenu;
   if (!m) return;
   mouseMenu = null; e.stopImmediatePropagation();
+  m.pickAt(e.clientX, e.clientY);   // la opción bajo el cursor en el instante de soltar (sin depender del último movimiento)
   if (m.hover) m.close(true);
   else if (performance.now() - m.t0 < 350) m.sticky = true;      // clic rápido: queda abierto
   else m.close(false);

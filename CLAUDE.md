@@ -923,3 +923,15 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   Medido: plano/plano exacto (2e-16), plano/esfera en 80 ms con puntos a 6e-9 de las dos.
   Pruebas: scratchpad v49app/t34.cjs [state|menu|trim] (Playwright global), v49/tx.mjs (Node; node_modules = enlace a fil/node_modules, por eso las .cjs van en
   v49app), v48/t33b.cjs y t33.cjs siguen igual. Capturas docs/capturas/v0.49-*.png.
+- (v0.49.1) Parches del documento "UX industrial, State Machine y Tolerancias CAD":
+  (1) COMMIT vs ABORTAR: el cleanup de 'tool:<t>' llama a commitWIP() antes de limpiar: la curva en dibujo con ≥ 2 CVs se GUARDA (finishDraft) con Esc, "Nada" u otra
+  herramienta; con 0 o 1 CV se descarta. escapeAll también hace el commit y avisa "<curva> guardada". (El clic en el vacío dentro de Curva sigue añadiendo CVs.)
+  (2) MENÚS A CERO LATENCIA: CSS (v0.49.1) quita transition/animation de .puck, .radial-veil, .p3-veil y oculta .p3-drop; puck3.js sin animaciones (reduce = {matches:true}, T = 0)
+  y sin esperas (entrar en un círculo lo abre en el mismo movimiento; cada entrada en la zona de ondas suelta un anillo); makeRadial sin el temporizador .settled. Al soltar
+  (botón, Z o Ctrl+Shift+botón) se vuelve a calcular la opción bajo el cursor en ese instante (pickAt en pointerup / keyup) antes de ejecutar.
+  (3) TOLERANCIA DE CVs: cvAtScreen(e, objs, px = CV_HIT = 8) = el CV más cercano al cursor EN PANTALLA dentro de 8 px (a igual distancia, el más cercano a la cámara);
+  lo usa pickAt (modo CV y CVs de lo elegido) en lugar del rayo contra la esfera.
+  (4) MOVER / ROTAR / ESCALAR PERSISTENTES: beginTool('xform', {persist: true}); escapeAll con reason ≠ 'esc' y herramienta persist solo suelta la selección ("Nada" y clic en
+  el vacío no la cierran); solo Esc u otro comando la cierran. setPickMode ya no apaga mouseXform si la herramienta activa es 'xform'.
+  Prueba: scratchpad v49app/t35.cjs (curva 3 CVs + Esc = guardada, 1 CV = nada, 2 CVs + otra herramienta = guardada; W, clic a 6 px de un CV, Nada, vacío, clic en otro CV
+  y arrastrar = se mueve sin volver a pulsar W; marking y Puck sin pausas). t34.cjs y v48/t33b.cjs siguen igual.
