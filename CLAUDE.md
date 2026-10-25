@@ -868,3 +868,16 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   OJO sentido: el barrido gira como siempre (visto desde arriba en ejes de Alias, en el sentido del reloj); cambiarlo invertiría las normales (convención Su×Sv hacia dentro).
   Prueba: scratchpad al/t31.cjs (radio constante alrededor de X/Y/Z ~1e-15; inicio 30° / fin 120° exactos; Fin 200 escrito → barrido 170; eje elegido con clic real y la
   línea movida → la superficie la sigue; punta del manipulador arrastrada con el ratón → la superficie gira alrededor del eje nuevo). Captura docs/capturas/v0.46-revolucion-ventana.png.
+- (v0.47) Revolución: (1) se crea a 360° (antes 1° siguiendo al ratón); en la sesión (revolveDrag {rels, dragging}) pulsar y arrastrar en la vista = el fin sigue al ratón,
+  soltar = se queda, clic derecho / Esc = aceptar; Shift+Alt navega. (2) SENTIDO como Alias: antihorario visto desde la punta del eje (regla de la mano derecha): nurbs.revolve
+  usa e2 = D × e1 y guarda las filas de CVs AL REVÉS (u = 0 en el fin del barrido, nudos 1 − k) para no invertir las caras; una vuelta completa sale IDÉNTICA a antes
+  (1,8e-15, también no racional), así que el vaso y lo ya guardado no cambian. revFrame usa el mismo e2. Medido: inicio 30 / barrido 90 → de 30° a 120° antihorario.
+  TRIM POR REGIONES (como AlSurface::trim(n, u[], v[])): Superficies › Trim (recortar por piezas) y Puck Superficies anillo 2 (trimSelection: elegir la superficie + curvas
+  de corte). Construcción 'trim' {surf, tools[], proj 'view'|'y'|'normal', dir, keep, picks [[u, v, firma]]}, output = la propia superficie (editable: true = tocar sus CVs no
+  rompe el historial; historyBlockers lo respeta). build = trimData: cada curva se proyecta (o se usa su CoS si ya está sobre esa superficie) → FF.trimLoop → data.rtrim
+  {loops, picks, mode}. freeform.js: regionSig(loops, u, v) = '0110…' (dentro/fuera de cada lazo) y regionRemovedFn(rt) (sin piezas elegidas no recorta). updateSurface
+  combina rtrim con los recortes de CoS. Las piezas se recuerdan por su FIRMA (p[2]), no por el punto: si se mueve una curva de corte el recorte la sigue.
+  Sesión trimOp {rel, full}: clic izq = elegir/soltar pieza (se mide contra la superficie ENTERA, malla de doble cara, para poder elegir piezas ya quitadas), clic der o
+  Enter = aceptar (sin piezas = no se crea), Esc = cancelar. Ventana: Las piezas elegidas Se conservan | Se quitan, Proyección, botón "Soltar todas las piezas elegidas"
+  (campo nuevo de TW type 'button'). cloneData copia data.rtrim (deshacer y .forja). Prueba: scratchpad al/t32.cjs. Captura docs/capturas/v0.47-trim.png.
+  PENDIENTE: Untrim Última/Todas (v0.48), Revert y Redondeo no destructivo; dibujar el borde del corte cuando la curva no está sobre la superficie.

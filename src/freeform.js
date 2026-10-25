@@ -502,6 +502,18 @@ export function trimLoop(cos) {
   for (let c = Math.floor(pb) + 1; c < target; c++) loop.push(corner[c % 4]);
   return loop;
 }
+// Trim por regiones (como trim(n, u[], v[]) de AlSurface): cada lazo de corte parte la superficie en dentro / fuera; la REGIÓN de un
+// punto es de qué lado de cada lazo queda ("0110"…). rt = { loops, picks: [[u, v]…], mode: 'keep' | 'discard' }: las regiones de los
+// puntos elegidos se conservan (y el resto se quita) o se quitan. Sin puntos elegidos no se recorta nada.
+export const regionSig = (loops, u, v) => loops.map((l) => (pointInPoly(l, u, v) ? '1' : '0')).join('');
+export function regionRemovedFn(rt) {
+  if (!rt?.loops?.length || !rt.picks?.length) return null;
+  // cada pieza elegida se recuerda por QUÉ pieza es (su firma, p[2]), no por dónde se hizo clic: si las curvas de corte se mueven, la
+  // pieza sigue siendo la misma. Si cambió el número de cortes, la firma ya no vale y se recalcula desde el punto (u, v).
+  const sigOf = (p) => (typeof p[2] === 'string' && p[2].length === rt.loops.length ? p[2] : regionSig(rt.loops, p[0], p[1]));
+  const set = new Set(rt.picks.map(sigOf)), keep = rt.mode !== 'discard';
+  return (u, v) => set.has(regionSig(rt.loops, u, v)) !== keep;
+}
 // (u, v) → true si ese punto queda recortado. trims: [{ loop, trim: 'inside' | 'outside' }]
 export const removedFn = (trims) => (u, v) => trims.some((t) => pointInPoly(t.loop, u, v) === (t.trim === 'inside'));
 

@@ -154,13 +154,15 @@ export function revolve(c, o = {}) {
   const O = o.origin ? new THREE.Vector3().copy(o.origin) : new THREE.Vector3();
   const D = (o.axis ? new THREE.Vector3().copy(o.axis) : new THREE.Vector3(0, 1, 0)).normalize();
   const pitch = o.pitch || 0, ang = THREE.MathUtils.degToRad(Math.max(0.5, Math.min(pitch ? 3600 : 360, o.angle ?? 360)));   // más de una vuelta solo con paso (hélice)
-  // marco de cada CV del perfil: pie sobre el eje, radio y dos direcciones (e2 = e1 × D, igual que antes: misma orientación)
+  // marco de cada CV del perfil: pie sobre el eje, radio y dos direcciones. e2 = D × e1: el giro va en sentido ANTIHORARIO visto desde la
+  // punta del eje (regla de la mano derecha, como Alias). Para no invertir las caras (convención de Forja: Su × Sv hacia dentro) las filas
+  // de CVs se guardan al revés (u = 0 en el fin del barrido): una vuelta completa da exactamente la misma superficie que antes.
   const frames = c.cvs.map((p) => {
     const v = new THREE.Vector3(p.x, p.y, p.z), foot = O.clone().addScaledVector(D, v.clone().sub(O).dot(D));
     const rv = v.clone().sub(foot), r = rv.length();
     let e1 = r > 1e-12 ? rv.divideScalar(r) : new THREE.Vector3(1, 0, 0);
     if (r <= 1e-12) { e1 = Math.abs(D.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1); e1.addScaledVector(D, -e1.dot(D)).normalize(); }
-    return { foot, r, e1, e2: e1.clone().cross(D), w: p.w ?? 1 };
+    return { foot, r, e1, e2: D.clone().cross(e1), w: p.w ?? 1 };
   });
   // o.start = ángulo inicial del barrido (grados, como el 1.º de los dos ángulos de createRevolvedSurface de Alias): el giro va de
   // start a start + angle; la hélice sube según lo girado desde el inicio (el perfil girado a "start" no cambia de altura)
@@ -175,12 +177,12 @@ export function revolve(c, o = {}) {
       const mid = k % 2 === 1, a = (k * dA) / 2;
       cvs.push(frames.map((f) => { const q = at(f, a, mid ? f.r / cw : f.r); return new THREE.Vector4(q.x, q.y, q.z, f.w * (mid ? cw : 1)); }));
     }
-    return { degU: 2, knotsU, degV: c.deg, knotsV: c.knots.slice(), cvs };
+    return { degU: 2, knotsU: knotsU.map((k) => 1 - k).reverse(), degV: c.deg, knotsV: c.knots.slice(), cvs: cvs.reverse() };
   }
   const deg = Math.max(1, Math.min(MAX_DEGREE, o.deg || 3)), spans = Math.max(1, Math.min(MAX_SPANS * 2, o.spans || Math.max(4, Math.ceil((ang / (Math.PI / 2)) * 2))));
   const nU = deg + spans, knotsU = clampedKnots(nU, deg), g = greville(knotsU, deg, nU);
   // cada fila (un CV del perfil) se interpola como curva no racional a lo largo del giro; todas comparten nudos
   const rows = frames.map((f) => fitCurve(g.map((t) => at(f, t * ang)), deg).cvs);
   const cvs = g.map((_, i) => frames.map((f, j) => new THREE.Vector4(rows[j][i].x, rows[j][i].y, rows[j][i].z, f.w)));
-  return { degU: deg, knotsU, degV: c.deg, knotsV: c.knots.slice(), cvs };
+  return { degU: deg, knotsU: knotsU.map((k) => 1 - k).reverse(), degV: c.deg, knotsV: c.knots.slice(), cvs: cvs.reverse() };
 }
