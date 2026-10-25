@@ -881,3 +881,15 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   Enter = aceptar (sin piezas = no se crea), Esc = cancelar. Ventana: Las piezas elegidas Se conservan | Se quitan, Proyección, botón "Soltar todas las piezas elegidas"
   (campo nuevo de TW type 'button'). cloneData copia data.rtrim (deshacer y .forja). Prueba: scratchpad al/t32.cjs. Captura docs/capturas/v0.47-trim.png.
   PENDIENTE: Untrim Última/Todas (v0.48), Revert y Redondeo no destructivo; dibujar el borde del corte cuando la curva no está sobre la superficie.
+- (v0.48) Untrim, Revert y Redondeo no destructivo (fase 4 de docs/plan-revolve-trim-revert.md). ETAPAS de Trim: data.rtrims = [{rel, loops, picks, mode}] en
+  orden (trimStages(d) también lee el data.rtrim de la v0.47; cloneStage, setTrimStages, stageOf(r)); updateSurface quita lo de CUALQUIER etapa; .forja guarda rtrims.
+  Borde del corte: parte nueva p.tedge (edgeCurveMat, siempre visible) con los tramos de cada lazo que separan lo que se queda de lo quitado.
+  UNTRIM (Superficies › Untrim, Puck Superficies anillo 2): ventana con "Etapas: Última | Todas" (toolDef.untrimStage; TW.spec.untrim = herramienta activa); aplica a lo
+  elegido y luego clic en cada superficie; clic derecho / Esc = terminar. Última = quita la última etapa (y su relación) o, si no hay, el último recorte de curva sobre
+  superficie (trim 'none', edge false; también la relación project); Todas = la deja entera. Las curvas de corte no se borran.
+  REVERT (botón en la ventana de cada operación, revertConstruction(r)): C.revert(r, salida) si existe; si no, con editsOutput (Align) vuelve a los datos de ANTES
+  (revertStore: Map id → cloneData, se llena en createAlign / createAlignCurve; no persiste al recargar); si la salida es nueva, la borra. Luego vuelve a mostrar
+  r.consumed (con su nombre r.names) y quita la relación. REDONDEO: al aceptar ya NO borra las superficies de origen: las oculta (nombre "· original") y crea la
+  relación 'fillet' {srcs, consumed, names, outs (superficies + bordes de recorte), kind, n, dist}, editable, sin recálculo (OpenCascade no tiene historial);
+  Revert borra outs y devuelve las originales. Prueba: scratchpad v48/t33.cjs (Playwright global, no el de fil/node_modules; OpenCascade servido desde
+  /tmp/claude-0/-home-user/.../npmcdn/replicad-opencascadejs@0.20.2). Siguiente: v0.49 recorte con superficies (intersección).
