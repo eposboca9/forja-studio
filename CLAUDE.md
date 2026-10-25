@@ -840,3 +840,10 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   se mide hacia el otro lado y se cambia el signo de las impares). Curva dibujada exactamente por la normal (perpendicular a la pared) → no tiene dirección
   tangente: vuelve a la isoparamétrica. Medido (scratchpad al/t27.cjs): en el plano tangente 0°, curva por el labio conserva su dirección (2°), hueco 0,
   ángulo 0, curvatura 0 % en G2/G3. Captura docs/capturas/v0.44.1-align-tangente.png (al/t28.cjs).
+- (v0.44.2) Herramienta Curva como Alias: pulsar · arrastrar · SOLTAR = CV (ya no hace falta un segundo clic). pointermove actualiza draft.hover también con el botón
+  izquierdo pulsado (down && buttons === 1), así el punto se desliza con el snap mientras se arrastra; el pointerup de la herramienta Curva añade el punto aunque el ratón
+  se haya movido (antes > 5 px = nada). ANCLAJE como AlBlendPoint::attachedTo: placePoint deja placeAnchor = {obj, t} en una curva, {obj, edge, t} en un borde de superficie
+  (curvePolylines da a cada borde su evaluador exacto l.ev reconociendo u0/u1/v0/v1 y el sentido por los extremos; findSnap guarda best.edge/param),
+  {obj, u, v} sobre una superficie (surfacePointAt → surfAnchor) y null si es libre. draft.anchors va en paralelo a draft.pts y la curva creada guarda obj.drawAnchors.
+  Prueba: scratchpad al/t29.cjs (ratón real: clic simple, arrastre con Ctrl+Alt hasta un borde y con Shift sobre una cara; punto = S(anclaje) exacto), t40/t20.cjs sigue igual.
+  Captura docs/capturas/v0.44.2-curva-arrastrar.png.

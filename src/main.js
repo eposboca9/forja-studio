@@ -13,7 +13,7 @@ import * as N from './nurbs.js?v=0.42.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.44.1';
+const FORJA_VERSION = '0.44.2';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -1421,10 +1421,20 @@ function curvePolylines(ex) {
       const line = o.samples.slice(), n = line.length - 1, host = o.data.cos && byId(o.data.cos.surf);
       if (host) { const S = FF.surfEval(host.data), uv = o.data.cos.uv; if (uv.length === line.length) line.ev = (t) => { const x = t * (uv.length - 1), i = Math.min(uv.length - 2, Math.floor(x)), f = x - i; return S(uv[i][0] + (uv[i + 1][0] - uv[i][0]) * f, uv[i][1] + (uv[i + 1][1] - uv[i][1]) * f); }; }
       else { const c = N.curveOf(o.data); line.ev = (t) => c.getPoint(Math.min(1, Math.max(0, t))); }
-      line.n = n; out.push(line); continue;
+      line.n = n; line.obj = o; out.push(line); continue;
     }
     const e = o.edgePts || [], E = (e.length - 1) / 4;   // el contorno son 4 bordes seguidos
-    for (let k = 0; k < 4 && E >= 1; k++) out.push(e.slice(k * E, k * E + E + 1));
+    const S = o.kind === 'surface' ? FF.surfEval(o.data) : null;
+    for (let k = 0; k < 4 && E >= 1; k++) {
+      const l = e.slice(k * E, k * E + E + 1); l.obj = o; l.n = l.length - 1;
+      // evaluador exacto del borde: se reconoce cuál de los 4 bordes (u0, u1, v0, v1) y en qué sentido es por sus extremos
+      if (S) for (const ed of ['u0', 'u1', 'v0', 'v1']) {
+        const uv = (t) => (ed[0] === 'u' ? [+ed[1], t] : [t, +ed[1]]), a0 = S(...uv(0)), a1 = S(...uv(1)), tol = 1e-4 + 1e-3 * a0.distanceTo(a1);
+        if (a0.distanceTo(l[0]) < tol && a1.distanceTo(l[l.n]) < tol) { l.ev = (t) => S(...uv(Math.min(1, Math.max(0, t)))); l.edge = ed; break; }
+        if (a1.distanceTo(l[0]) < tol && a0.distanceTo(l[l.n]) < tol) { l.ev = (t) => S(...uv(1 - Math.min(1, Math.max(0, t)))); l.edge = ed; l.rev = true; break; }
+      }
+      out.push(l);
+    }
     // y las líneas de parche (isoparamétricas de los límites de span), sin las partes recortadas
     if (prefs.snapIso !== false) (o.isoLines || []).forEach((l) => out.push(l));
   }
@@ -1491,7 +1501,12 @@ function findSnap(x, y, modes, ex = {}) {
       const t = (a + b) / 2;
       best.point = L.ev(t); best.param = t;
     }
-    if (best) { delete best.line; delete best.i; delete best.f; }
+    if (best) {
+      best.obj = best.line?.obj;
+      // en un borde de superficie el parámetro se guarda a lo largo del borde (0..1 de u o v), no de la polilínea
+      if (best.line?.edge && best.param != null) { best.edge = best.line.edge; if (best.line.rev) best.param = 1 - best.param; }
+      delete best.line; delete best.i; delete best.f;
+    }
   }
   return best;
 }
@@ -1676,22 +1691,28 @@ function surfacePointAt(own = null) {
   const hit = ray.intersectObjects(list.map((o) => o.parts.mesh), false)[0];
   if (!hit) return null;
   const o = list.find((x) => x.parts.mesh === hit.object);
-  if (o?.kind === 'surface' && hit.uv) { const S = FF.surfEval(o.data); return S(hit.uv.x, hit.uv.y); }
+  if (o?.kind === 'surface' && hit.uv) { const S = FF.surfEval(o.data); surfAnchor = { obj: o.id, u: hit.uv.x, v: hit.uv.y }; return S(hit.uv.x, hit.uv.y); }
+  surfAnchor = o ? { obj: o.id } : null;
   return hit.point.clone();
 }
+let surfAnchor = null;
 // "Snap topológico" (punto, curva o superficie): el resultado es el punto 3D absoluto y NO se aplana a ningún plano ni eje;
 // solo el snap a la REJILLA (Alt) respeta la restricción del eje o del plano. Lo usan dibujar, mover CVs/objetos y el pivote.
 const isTopoSnap = (s) => !!s && s.kind !== 'rejilla';
+// placeAnchor = a qué quedó pegado el último punto (como attachedTo() de AlBlendPoint): {obj, t} en una curva, {obj, u, v} en una
+// superficie, {obj} en un borde o un punto suelto de un objeto; null = punto libre (plano de dibujo o rejilla)
+let placeAnchor = null;
 function placePoint(e, solid = false) {
   const modes = snapModes(e);
   const s = findSnap(e.clientX, e.clientY, modes, {});
-  if (s) { showSnap(s); return s.point; }
+  placeAnchor = null;
+  if (s) { showSnap(s); if (s.obj) placeAnchor = { obj: s.obj.id, ...(s.edge ? { edge: s.edge } : {}), ...(s.param != null ? { t: s.param } : {}) }; return s.point; }
   setRay(e);
   // superficie: botón fijo o Shift mantenido al dibujar; con Ctrl o Ctrl+Alt, si no hay punto ni curva cerca, el punto se desliza
   // sobre la superficie que hay debajo (S(u, v) exacta en cada movimiento del ratón)
   if (modes.surface || modes.point || modes.curve || (e.shiftKey && !e.altKey)) {
     const q = surfacePointAt();
-    if (q) { showSnap({ point: q, kind: 'superficie' }); return q; }
+    if (q) { showSnap({ point: q, kind: 'superficie' }); placeAnchor = surfAnchor; return q; }
   }
   const k = resolvePlaneKind(solid), gk = modes.grid && k === 'free' ? 'xz' : k;   // en perspectiva la rejilla es la del suelo
   const p = ray.ray.intersectPlane(planeFor(gk), new THREE.Vector3());
@@ -1809,7 +1830,7 @@ const draftLine = new Line2(new LineGeometry(), draftMat);
 const draftHandles = new THREE.Group();
 scene.add(draftLine, draftHandles);
 draftLine.visible = false;
-function startDraft() { draft = { pts: [], hover: null }; showDraft(); }
+function startDraft() { draft = { pts: [], anchors: [], hover: null }; showDraft(); }
 function showDraft() {
   draftHandles.clear();
   draftLine.visible = false;
@@ -1856,6 +1877,8 @@ function finishDraft() {
   const ax = { xz: 'y', xy: 'z', yz: 'x' }[pk];
   if (ax && draft.pts.some((q) => Math.abs(q[ax] - draft.pts[0][ax]) > 1e-6)) pk = 'free';
   const obj = addCurve(draftCurveData(draft.pts, pk));
+  // anclaje de cada punto dibujado (objeto + t o u, v), como AlBlendPoint::attachedTo; null = punto libre
+  if (draft.anchors.some(Boolean)) obj.drawAnchors = draft.anchors.slice();
   startDraft();
   applySelection([obj], 'replace');   // la curva recién creada queda activa, con sus CVs a la vista
   toast(`${obj.name} creada`);
@@ -1923,7 +1946,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
       marquee.hidden = false;
     }
   }
-  if (tool === 'curve' && draft && !e.buttons) { draft.hover = placePoint(e); showDraft(); }
+  if (tool === 'curve' && draft && (!e.buttons || (down && e.buttons === 1))) { draft.hover = placePoint(e); showDraft(); }
 });
 renderer.domElement.addEventListener('pointerleave', () => { if (draft) { draft.hover = null; showDraft(); } });
 ['keydown', 'keyup'].forEach((t) => addEventListener(t, (e) => {
@@ -1939,13 +1962,15 @@ addEventListener('pointerup', (e) => {
   if (!d || e.target !== renderer.domElement && !d.boxing) return;
   const how = howFor(e);
   if (d.boxing) { marquee.hidden = true; boxSelect(d, e, how); return; }
-  if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5 || gizmo.dragging) return;
-  if (tool === 'curve') {
-    if (e.button !== 0) return;
+  // Curva (como Alias): pulsar, arrastrar (el punto se desliza con el snap por la curva o la superficie) y SOLTAR = el CV queda donde
+  // se soltó, con su anclaje paramétrico. No hace falta un segundo clic aunque el ratón se haya movido.
+  if (tool === 'curve' && !gizmo.dragging) {
+    if (e.button !== 0 || !draft) return;
     const p = placePoint(e);
-    if (p) { draft.pts.push(p); draft.hover = null; showDraft(); }
+    if (p) { draft.pts.push(p); draft.anchors.push(placeAnchor); draft.hover = null; showDraft(); }
     return;
   }
+  if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5 || gizmo.dragging) return;
   if (fil) return;   // el redondeo (Redondear) se queda con sus propios clics
   if (tool === 'edge') { edgeClick(e); return; }
   if (tool === 'circle') {
