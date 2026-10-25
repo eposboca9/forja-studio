@@ -832,3 +832,11 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   geometría al crear, al mover entradas y al arrastrar cada manija, ventanas, diagnósticos, etiquetas e historial) = IDÉNTICO a v0.43.2.
   Siguiente (pedido del usuario): bugs de Align (torsión, "proyección hacia arriba"; ojo: el vector por omisión del tipo Vector es Z de
   Alias = arriba) y el snap que no se desliza (idea de AlBlendPoint: guardar objeto + u,v / t y deslizar cambiando el parámetro).
+- (v0.44.1) Caso del usuario: curva alineada al borde de arriba de un CILINDRO "se proyecta hacia arriba" en Natural/Normal/Vector. No era un fallo de
+  cálculo: en un cilindro el plano tangente del borde es vertical y la isoparamétrica cruzada, la perpendicular al borde y el eje Z proyectado son
+  TODOS verticales. Faltaba el modo de AlBlendPoint kGeometricInterp: nuevo tipo 'tangent' ("Tangente", el primero de la lista para curva→borde y el de
+  ARRANQUE en curvas nuevas; toolDef.alignCurveType recuerda la elección): r.tdir = dirección con la que salía la curva al crearla, acostada en el plano
+  tangente (history.js curveEdgeDirDerivs; G2/G3 = derivadas de la superficie a lo largo de esa dirección en (u, v); si la dirección sale de la superficie
+  se mide hacia el otro lado y se cambia el signo de las impares). Curva dibujada exactamente por la normal (perpendicular a la pared) → no tiene dirección
+  tangente: vuelve a la isoparamétrica. Medido (scratchpad al/t27.cjs): en el plano tangente 0°, curva por el labio conserva su dirección (2°), hueco 0,
+  ángulo 0, curvatura 0 % en G2/G3. Captura docs/capturas/v0.44.1-align-tangente.png (al/t28.cjs).

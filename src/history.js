@@ -357,7 +357,7 @@ export function masterDerivs(rel, M, K, field = null, endPt = null) {
     const F = field.frames([rel.mT ?? 0], [endPt || new THREE.Vector3()])[0], E = F.E;
     return [F.P.clone(), E[1].clone().negate(), E[2].clone(), E[3].clone().negate()].slice(0, K + 1).concat(Array(Math.max(0, K - 3)).fill(0).map(() => new THREE.Vector3()));
   }
-  if (rel.mEdge && rel.curve && ['normal', 'vector', 'view'].includes(rel.atype)) return curveEdgeDirDerivs(rel, M, K);
+  if (rel.mEdge && rel.curve && ['normal', 'vector', 'view', 'tangent'].includes(rel.atype)) return curveEdgeDirDerivs(rel, M, K);
   if (rel.mEdge) return edgeCrossDerivs(M, rel.mEdge, rel.mT ?? 0.5, K);
   // curva maestra: el punto de unión se puede recorrer de principio a fin (mT); la curva esclava sale hacia el lado contrario al extremo elegido
   return curveDerivsAt(M, rel.mT ?? (rel.mEnd ? 1 : 0), K, rel.mEnd ? -1 : 1);
@@ -372,20 +372,32 @@ function curveEdgeDirDerivs(rel, M, K) {
   const P = (u, v) => { const q = new THREE.Vector3(); S.getPoint(Math.min(1, Math.max(0, u)), Math.min(1, Math.max(0, v)), q); return q; };
   const h = 1e-4, Su = P(uv[0] + h, uv[1]).sub(P(uv[0] - h, uv[1])).divideScalar(2 * h), Sv = P(uv[0], uv[1] + h).sub(P(uv[0], uv[1] - h)).divideScalar(2 * h);
   const nrm = Su.clone().cross(Sv).normalize(), T = (isU(e) ? Sv : Su).clone().normalize();
-  let d = rel.atype === 'normal' ? base.clone().addScaledVector(T, -base.dot(T)) : new THREE.Vector3(...(rel.avec || [0, 1, 0]));
-  d.addScaledVector(nrm, -d.dot(nrm));
-  if (d.lengthSq() < 1e-12) return edgeCrossDerivs(M, e, t, K);
-  if (d.dot(base) < 0) d.negate();
+  let d;
+  if (rel.atype === 'tangent') {
+    // Tangente de la curva (como kGeometricInterp de AlBlendPoint): la dirección que traía la curva, acostada en el plano tangente.
+    // rel.tdir sale del extremo hacia fuera de la superficie; las derivadas de la maestra miran hacia dentro (por eso el signo menos).
+    d = new THREE.Vector3(...(rel.tdir || [0, 1, 0])).negate();
+    d.addScaledVector(nrm, -d.dot(nrm));
+    if (d.lengthSq() < 1e-6) return edgeCrossDerivs(M, e, t, K);   // la curva salía justo por la normal: no hay dirección tangente
+  } else {
+    d = rel.atype === 'normal' ? base.clone().addScaledVector(T, -base.dot(T)) : new THREE.Vector3(...(rel.avec || [0, 1, 0]));
+    d.addScaledVector(nrm, -d.dot(nrm));
+    if (d.lengthSq() < 1e-12) return edgeCrossDerivs(M, e, t, K);
+    if (d.dot(base) < 0) d.negate();
+  }
   d.normalize().multiplyScalar(base.length());
   // dirección en (u, v) que da ese vector, y derivadas de S a lo largo de esa línea (hacia dentro: diferencias de un lado)
   const a = Su.dot(Su), b = Su.dot(Sv), c = Sv.dot(Sv), p = Su.dot(d), q = Sv.dot(d), det = a * c - b * b || 1e-12;
   const w = [(p * c - q * b) / det, (a * q - b * p) / det];
   let hh = 4e-3;
-  const inside = (k) => { const u = uv[0] + k * hh * w[0], v = uv[1] + k * hh * w[1]; return u > -1e-9 && u < 1 + 1e-9 && v > -1e-9 && v < 1 + 1e-9; };
-  while (hh > 1e-5 && !inside(4)) hh /= 2;
-  const pts = [0, 1, 2, 3, 4].map((k) => P(uv[0] + k * hh * w[0], uv[1] + k * hh * w[1]));
+  // si la dirección sale de la superficie (p. ej. la tangente de la curva apunta por encima del borde), se mide hacia el otro lado
+  // y se cambia el signo de las derivadas impares: D_k(−w) = (−1)^k D_k(w)
+  const inside = (k, sg) => { const u = uv[0] + sg * k * hh * w[0], v = uv[1] + sg * k * hh * w[1]; return u > -1e-9 && u < 1 + 1e-9 && v > -1e-9 && v < 1 + 1e-9; };
+  const sg = inside(1e-3, 1) || !inside(1e-3, -1) ? 1 : -1;
+  while (hh > 1e-5 && !inside(4, sg)) hh /= 2;
+  const pts = [0, 1, 2, 3, 4].map((k) => P(uv[0] + sg * k * hh * w[0], uv[1] + sg * k * hh * w[1]));
   const comb = (cf, div) => cf.reduce((acc, x, i) => acc.addScaledVector(pts[i], x), new THREE.Vector3()).divideScalar(div);
-  const out = [P(uv[0], uv[1]), d.clone(), comb([35, -104, 114, -56, 11], 12 * hh * hh), comb([-5, 18, -24, 14, -3], 2 * hh ** 3)];
+  const out = [P(uv[0], uv[1]), d.clone(), comb([35, -104, 114, -56, 11], 12 * hh * hh), comb([-5, 18, -24, 14, -3], 2 * hh ** 3).multiplyScalar(sg)];
   while (out.length <= K) out.push(new THREE.Vector3());
   return out.slice(0, K + 1);
 }

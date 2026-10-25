@@ -13,11 +13,11 @@ import * as N from './nurbs.js?v=0.42.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.44.0';
+const FORJA_VERSION = '0.44.1';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
-import * as HX from './history.js?v=0.43.2';
+import * as HX from './history.js?v=0.44.1';
 import * as FF from './freeform.js?v=0.43.0';
 import * as FL from './fillet.js?v=0.42.0';
 import { getOCC } from './occ.js';
@@ -4464,12 +4464,17 @@ defineConstruction('align', {
     // Vista = proyectando en la dirección en que se miraba; Vector = proyectando a lo largo de un eje
     const setType = (v) => {
       checkpoint(); r.atype = v;
+      if (r.curve && r.mEdge) { toolDef.alignCurveType = v; saveToolDef(); }
+      if (v === 'tangent' && !r.tdir && r.orig) { const [a, b] = r.orig.pts; r.tdir = new THREE.Vector3(b[0] - a[0], b[1] - a[1], b[2] - a[2]).normalize().toArray(); }
       if (v === 'view') r.avec = camera.getWorldDirection(new THREE.Vector3()).toArray();
       if (v === 'vector') r.avec = AXES[r.axis ?? 2].toArray();
       if (r.curve) { retargetCurve(r); try { r.lambda0 = HX.curveNaturalLambda(byId(r.slave).data, r.sEnd, byId(r.master).data, r, masterField(r)); } catch (e) { /* se queda la anterior */ } }
       redo(); TW.show(relSpec(r, group));
     };
-    fields.push({ type: 'seg', label: 'Tipo de alineación', opts: [['natural', 'Natural'], ['normal', 'Normal'], ['view', 'Vista'], ['vector', 'Vector']], get: () => r.atype || 'natural', set: setType },
+    const types = [['natural', 'Natural'], ['normal', 'Normal'], ['view', 'Vista'], ['vector', 'Vector']];
+    // curva a un borde: también "Tangente de la curva" (la dirección que traía la curva, acostada en el plano tangente de la superficie)
+    if (r.curve && r.mEdge) types.unshift(['tangent', 'Tangente']);
+    fields.push({ type: 'seg', label: 'Tipo de alineación', opts: types, get: () => r.atype || 'natural', set: setType },
       { type: 'seg', label: 'Eje del vector', opts: [[0, 'X'], [1, 'Y'], [2, 'Z']], show: () => r.atype === 'vector', get: () => r.axis ?? 2, set: (v) => { r.axis = v; r.avec = AXES[v].toArray(); if (r.curve) retargetCurve(r); set('axis', v); } });
     if (r.curve) {
       const ms = byId(r.master);
@@ -5137,7 +5142,12 @@ function createAlignCurve(s, m, cont = toolDef.alignCont) {
   try {
     if (m.iso) { r.mIso = m.iso; retargetCurve(r); }
     else if (m.obj.kind === 'curve') { r.mEnd = m.end; r.mT = m.end ? 1 : 0; }
-    else { r.mEdge = m.edge; const c = s.obj.data.cvs[s.end ? s.obj.data.cvs.length - 1 : 0]; r.mT = HX.edgeParamNear(m.obj.data, m.edge, v3(c)); }
+    else {
+      r.mEdge = m.edge; const cv = s.obj.data.cvs, c = cv[s.end ? cv.length - 1 : 0], c1 = cv[s.end ? cv.length - 2 : 1]; r.mT = HX.edgeParamNear(m.obj.data, m.edge, v3(c));
+      // por omisión la curva conserva su propia dirección acostada sobre la superficie (Tangente de la curva); Natural = isoparamétrica cruzada
+      r.tdir = v3(c1).sub(v3(c)).normalize().toArray();
+      r.atype = toolDef.alignCurveType || 'tangent';
+    }
     s.obj.data = HX.prepareCurve(s.obj.data, cont);
     r.lambda0 = HX.curveNaturalLambda(s.obj.data, r.sEnd, m.obj.data, r, masterField(r));
     addRelation(r);
