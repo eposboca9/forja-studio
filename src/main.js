@@ -13,11 +13,11 @@ import * as N from './nurbs.js?v=0.42.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.43.1';
+const FORJA_VERSION = '0.43.2';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
-import * as HX from './history.js?v=0.43.0';
+import * as HX from './history.js?v=0.43.2';
 import * as FF from './freeform.js?v=0.43.0';
 import * as FL from './fillet.js?v=0.42.0';
 import { getOCC } from './occ.js';

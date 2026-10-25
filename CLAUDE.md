@@ -813,3 +813,10 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
 4. Editor de atajos (esperando la lista de atajos de Alias del usuario).
 5. Integrar OpenCASCADE (opencascade.js, WebAssembly) para sólidos, booleanas y redondeos.
 6. Guardar y abrir proyectos (archivo .json) y exportar a STEP/OBJ.
+- (v0.43.2) Align de curva corregido (pedido "Normal vs. tangente isoparamétrica"): la dirección ya era la isoparamétrica cruzada (Natural; Normal solo si se
+  elige). Fallos reales: (1) bordes RACIONALES (revoluciones, círculos): edgeCrossDerivs, curveEndDerivs y curveDerivsAt ignoraban los pesos -> hueco de hasta
+  0,08 dm entre CVs; ahora derivadas homogéneas + regla del cociente (ratDerivs, history.js). (2) Escala del casco (Tangent Scale): en G2/G3 el 3.er/4.º CV salía
+  a 20-30 dm (λ³·M'''). alignCurve elige el término libre sobre la tangente (mu, nu: no cambian la curvatura) para conservar el tramo original, y curveNaturalLambda
+  busca λ (hullLambda) para que los tramos CV0..CV(K+1) se parezcan a los de la curva original (rel.hullScale = false lo apaga). Resultado en 30 casos sobre el vaso:
+  hueco 0, ángulo 0°, curvatura 0 % (G2/G3); círculo racional exacto en cualquier punto. Pruebas: scratchpad t40/t22.cjs, t23.cjs, t24.cjs (captura
+  docs/capturas/v0.43.2-align-casco.png: antes / ahora).

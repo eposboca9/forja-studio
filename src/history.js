@@ -291,8 +291,23 @@ function basisFns(knots, p, n, t) {
 }
 const curveFromEnd = (c, end) => ({ P: (end ? c.cvs.slice().reverse() : c.cvs.slice()), knots: end ? reverseKnots(c.knots) : c.knots, deg: c.deg });
 // derivadas 0..K en el extremo de una curva (hacia dentro de la curva)
+// Curvas y superficies RACIONALES (círculos, revoluciones): las derivadas se toman en coordenadas homogéneas (w·P, w) y se pasan
+// a puntos con la regla del cociente C^(k) = (A^(k) − Σ C(k,i) w^(i) C^(k−i)) / w. Sin esto el punto y las tangentes de un borde
+// de revolución salían desplazados entre CVs (hueco de hasta 0,08 dm en el Align de curva).
+const wOf = (v) => (v.w === undefined ? 1 : v.w);
+const binom = (n, k) => { let r = 1; for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i; return r; };
+function ratDerivs(Pw, W, knots, p, K) {
+  const A = startDerivs(Pw, knots, p, K), w = startDerivs(W.map((x) => new THREE.Vector3(x, 0, 0)), knots, p, K).map((v) => v.x), C = [];
+  for (let k = 0; k <= K; k++) {
+    const q = (A[k] || new THREE.Vector3()).clone();
+    for (let i = 1; i <= k; i++) q.addScaledVector(C[k - i], -binom(k, i) * (w[i] || 0));
+    C.push(q.divideScalar(w[0] || 1));
+  }
+  return C;
+}
 export function curveEndDerivs(c, end, K) {
-  const f = curveFromEnd(c, end), d = startDerivs(f.P.map(xyz), f.knots, f.deg, Math.min(K, f.P.length - 1));
+  const f = curveFromEnd(c, end), kk = Math.min(K, f.P.length - 1);
+  const d = ratDerivs(f.P.map((v) => xyz(v).multiplyScalar(wOf(v))), f.P.map(wOf), f.knots, f.deg, kk);
   while (d.length <= K) d.push(new THREE.Vector3());
   return d;
 }
@@ -301,13 +316,15 @@ export function edgeCrossDerivs(M, mEdge, t, K) {
   const al = along(M, mEdge), cr = cross(M, mEdge);
   const u = al.knots[al.deg] + t * (al.knots[al.n] - al.knots[al.deg]);
   const B = basisFns(al.knots, al.deg, al.n, u);
-  const nr = Math.min(K, cr.n - 1) + 1, P = [];
+  const nr = Math.min(K, cr.n - 1) + 1, P = [], W = [];
   for (let k = 0; k < nr; k++) {
+    // la isoparamétrica cruzada en t tiene CVs homogéneos Σ B_j·(w·P, w) de cada fila
     const r = row(M, mEdge, k), q = new THREE.Vector3();
-    for (let j = 0; j < r.length; j++) q.addScaledVector(xyz(r[j]), B[j]);
-    P.push(q);
+    let w = 0;
+    for (let j = 0; j < r.length; j++) { q.addScaledVector(xyz(r[j]), B[j] * wOf(r[j])); w += B[j] * wOf(r[j]); }
+    P.push(q); W.push(w);
   }
-  const d = startDerivs(P, cr.knots, cr.deg, nr - 1);
+  const d = ratDerivs(P, W, cr.knots, cr.deg, nr - 1);
   while (d.length <= K) d.push(new THREE.Vector3());
   return d;
 }
@@ -315,14 +332,24 @@ export function edgeCrossDerivs(M, mEdge, t, K) {
 export function curveDerivsAt(c, t, K, sign = 1) {
   const p = c.deg, n = c.cvs.length, u = c.knots[p] + t * (c.knots[n] - c.knots[p]);
   const ev = (Q, kn, deg) => { const B = basisFns(kn, deg, Q.length, u), q = new THREE.Vector3(); Q.forEach((v, i) => q.addScaledVector(v, B[i])); return q; };
-  let Q = c.cvs.map(xyz);
-  const out = [ev(Q, c.knots, p)];
-  for (let k = 1; k <= K; k++) {
-    if (k > p || Q.length < 2) { out.push(new THREE.Vector3()); continue; }
-    Q = Q.slice(0, -1).map((v, i) => { const den = c.knots[i + p + 1] - c.knots[i + k]; return Q[i + 1].clone().sub(v).multiplyScalar(den > 1e-12 ? (p - k + 1) / den : 0); });
-    out.push(ev(Q, c.knots.slice(k, c.knots.length - k), p - k).multiplyScalar(sign ** k));
+  // derivadas homogéneas (w·P y w) y regla del cociente para curvas racionales
+  const hom = (Q0) => {
+    let Q = Q0;
+    const out = [ev(Q, c.knots, p)];
+    for (let k = 1; k <= K; k++) {
+      if (k > p || Q.length < 2) { out.push(new THREE.Vector3()); continue; }
+      Q = Q.slice(0, -1).map((v, i) => { const den = c.knots[i + p + 1] - c.knots[i + k]; return Q[i + 1].clone().sub(v).multiplyScalar(den > 1e-12 ? (p - k + 1) / den : 0); });
+      out.push(ev(Q, c.knots.slice(k, c.knots.length - k), p - k));
+    }
+    return out;
+  };
+  const A = hom(c.cvs.map((v) => xyz(v).multiplyScalar(wOf(v)))), w = hom(c.cvs.map((v) => new THREE.Vector3(wOf(v), 0, 0))).map((v) => v.x), out = [];
+  for (let k = 0; k <= K; k++) {
+    const q = A[k].clone();
+    for (let i = 1; i <= k; i++) q.addScaledVector(out[k - i], -binom(k, i) * w[i]);
+    out.push(q.divideScalar(w[0] || 1));
   }
-  return out;
+  return out.map((q, k) => q.multiplyScalar(sign ** k));
 }
 export function masterDerivs(rel, M, K, field = null, endPt = null) {
   if (field) {
@@ -395,29 +422,72 @@ export function prepareCurve(S, cont, ex = null) {
 }
 export function curveNaturalLambda(S, sEnd, M, rel, field = null) {
   const a = curveEndDerivs(S, sEnd, 1)[1].length(), b = masterDerivs(rel, M, 1, field, N.curveOf(S).getPoint(sEnd ? 0.9 : 0.1))[1].length();
-  return a > 1e-9 && b > 1e-9 ? a / b : 1;
+  const nat = a > 1e-9 && b > 1e-9 ? a / b : 1;
+  return (rel.cont || 0) >= 2 && rel.hullScale !== false ? hullLambda(S, sEnd || 0, M, rel, field, nat) : nat;
 }
+// Escala del casco (Tangent Scale) en G2/G3: la tensión natural se busca para que los tramos del casco que se mueven
+// (CV0→CV1 ... CV(K)→CV(K+1)) queden lo más parecidos posible a los de la curva original (error en escala logarítmica).
+// Con G1 basta igualar el primer tramo (nat). Sin esto, con λ³·M''' el 4.º CV de un G3 salía a 20-30 dm.
+function hullLambda(S, end, M, rel, field, nat) {
+  const d = prepareCurve(S, rel.cont, rel.explicit ? { deg: rel.xDeg, spans: rel.xSpans } : null), n = d.cvs.length, nr = Math.min(10, n), K = rel.cont;
+  const orig = rel.orig && rel.orig.n === n && rel.orig.end === end ? rel.orig : { n, end, pts: Array.from({ length: nr }, (_, k) => { const q = d.cvs[end ? n - 1 - k : k]; return [q.x, q.y, q.z]; }) };
+  const top = Math.min(K + 1, nr - 1), seg = (P, k) => Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1], P[k][2] - P[k - 1][2]);
+  const L0 = []; for (let k = 1; k <= top; k++) L0.push(Math.max(1e-6, seg(orig.pts, k)));
+  const cost = (lg) => {
+    try {
+      const out = alignCurve({ ...rel, sEnd: end, lambda0: Math.exp(lg), tension: 1, orig, extra: 0, extraPrev: 0 }, M, d, field);
+      const P = Array.from({ length: top + 1 }, (_, k) => { const q = out.cvs[end ? n - 1 - k : k]; return [q.x, q.y, q.z]; });
+      let c = 0; for (let k = 1; k <= top; k++) c += Math.log(Math.max(1e-6, seg(P, k)) / L0[k - 1]) ** 2;
+      return Number.isFinite(c) ? c : Infinity;
+    } catch (e) { return Infinity; }
+  };
+  const lo = Math.log(nat) - Math.log(12), hi = Math.log(nat) + Math.log(3), steps = 30;
+  let best = Math.log(nat), bc = cost(best);
+  for (let i = 0; i <= steps; i++) { const lg = lo + ((hi - lo) * i) / steps, c = cost(lg); if (c < bc) { bc = c; best = lg; } }
+  let a = best - (hi - lo) / steps, b = best + (hi - lo) / steps; // sección áurea alrededor del mejor
+  const g = 0.381966;
+  for (let it = 0; it < 30; it++) { const x1 = a + g * (b - a), x2 = b - g * (b - a); if (cost(x1) < cost(x2)) b = x2; else a = x1; }
+  const lg = (a + b) / 2;
+  return Math.exp(cost(lg) < bc ? lg : best);
+}
+
 export function alignCurve(rel, M, S, field = null) {
   const d = prepareCurve(S, rel.cont, rel.explicit ? { deg: rel.xDeg, spans: rel.xSpans } : null), end = rel.sEnd || 0, K = rel.cont;
   const Dm = masterDerivs(rel, M, K, field, N.curveOf(d).getPoint(end ? 0.9 : 0.1));
   const f = curveFromEnd(d, end), P = f.P.map(xyz);
-  const sign = rel.rev ? 1 : -1, lam = rel.lambda0 * rel.tension, mu = (rel.shape || 0) * lam;
+  const n = d.cvs.length, nr = Math.min(10, n);
+  // forma original de los primeros CVs desde el extremo (para el "Blending" de filas extra y la escala del casco)
+  if (!rel.orig || rel.orig.n !== n || rel.orig.end !== end) rel.orig = { n, end, pts: Array.from({ length: nr }, (_, k) => { const q = d.cvs[end ? n - 1 - k : k]; return [q.x, q.y, q.z]; }) };
+  const sign = rel.rev ? 1 : -1, lam = rel.lambda0 * rel.tension;
+  let mu = (rel.shape || 0) * lam;
+  // Escala del casco (Tangent Scale): la dirección siempre es la de la maestra (isoparamétrica cruzada en Natural), pero el
+  // término libre a lo largo de la tangente (mu en G2, nu en G3: no cambian la curvatura) se elige para que el 3.er / 4.º CV
+  // conserve el tramo del casco ORIGINAL de la curva medido sobre la tangente; así no se dispara ni hace bucles.
+  const T = Dm[1].clone().multiplyScalar(sign), Tl = T.length(), Tn = Tl > 1e-12 ? T.clone().divideScalar(Tl) : null;
+  const auto = rel.hullScale !== false && Tn && rel.orig.pts.length > K;
   P[0].copy(Dm[0]);
   for (let k = 1; k <= K; k++) {
-    const target = Dm[k].clone().multiplyScalar((sign * lam) ** k);
-    if (k === 2) target.addScaledVector(Dm[1], mu * sign);
-    if (k === 3) { target.addScaledVector(Dm[2], 3 * lam * mu); target.addScaledVector(Dm[1], (rel.shape3 || 0) * lam ** 2); }
     P[k].set(0, 0, 0);
     const D0 = startDerivs(P.slice(0, k + 1), f.knots, f.deg, k)[k];
     P[k].set(1, 1, 1);
-    const c = startDerivs(P.slice(0, k + 1), f.knots, f.deg, k)[k].x - D0.x;
-    P[k].copy(target.sub(D0).divideScalar(Math.abs(c) > 1e-12 ? c : 1));
+    let c = startDerivs(P.slice(0, k + 1), f.knots, f.deg, k)[k].x - D0.x;
+    if (Math.abs(c) <= 1e-12) c = 1;
+    const target = Dm[k].clone().multiplyScalar((sign * lam) ** k);
+    let goalAdd = 0;
+    if (auto && k >= 2) {
+      // con el término libre en 0, dónde caería el CV k, y cuánto moverlo sobre la tangente para igualar el casco original
+      const base = target.clone();
+      if (k === 3) base.addScaledVector(Dm[2], 3 * lam * mu);
+      const Pk = base.sub(D0).divideScalar(c), o = rel.orig.pts;
+      const goal = P[k - 1].clone().add(new THREE.Vector3(o[k][0] - o[k - 1][0], o[k][1] - o[k - 1][1], o[k][2] - o[k - 1][2]));
+      goalAdd = goal.sub(Pk).dot(Tn) * c / Tl; // en unidades de T
+    }
+    if (k === 2) { mu += goalAdd; target.addScaledVector(T, mu); }
+    if (k === 3) { target.addScaledVector(Dm[2], 3 * lam * mu); target.addScaledVector(T, goalAdd * 1 + (rel.shape3 || 0) * lam ** 2 * sign); }
+    P[k].copy(target.sub(D0).divideScalar(c));
   }
   const out = { ...d, cvs: d.cvs.map((q) => q.clone()) };
-  const n = out.cvs.length, at = (k) => out.cvs[end ? n - 1 - k : k];
-  // forma original de los primeros CVs desde el extremo (para el "Blending" de filas extra)
-  const nr = Math.min(10, n);
-  if (!rel.orig || rel.orig.n !== n || rel.orig.end !== end) rel.orig = { n, end, pts: Array.from({ length: nr }, (_, k) => { const q = d.cvs[end ? n - 1 - k : k]; return [q.x, q.y, q.z]; }) };
+  const at = (k) => out.cvs[end ? n - 1 - k : k];
   for (let k = 0; k <= K; k++) at(k).set(P[k].x, P[k].y, P[k].z, at(k).w);
   const ex = Math.max(0, Math.min(rel.extra || 0, nr - 2 - K)), bf = rel.blendF ?? 1, top = Math.max(ex, Math.min(rel.extraPrev || 0, nr - 2 - K));
   rel.extraPrev = ex;
