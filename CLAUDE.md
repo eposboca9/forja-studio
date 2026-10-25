@@ -851,3 +851,10 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   casillas numéricas junto a cada deslizador; v0.46 revolución con ángulo inicio-fin y ejes X/Y/Z/pivote/elegido/manipulador; v0.47 Trim por regiones como construcción con
   etapas; v0.48 Untrim Última/Todas + Revert genérico en el registro y Redondeo no destructivo; v0.49 recorte con superficies = intersección). Esperando aprobación del usuario.
   OJO: los .h NO traen untrim, etapas ni revert (son de la interfaz de Alias), y AlDagNode es jerarquía de TRANSFORMACIONES, no historial de construcción.
+- (v0.45) Ventanas flotantes y números exactos (fase 1 de docs/plan-revolve-trim-revert.md). main.js "Ventanas flotantes": winState(id) = prefs.wins[id] {x, y, min, closed};
+  placeWin (libre por la pantalla, siempre quedan 80 px de la barra a la vista), dragWin(el, id, selectorBarra), setWinMin, winButtons() (_ y ×). Ventana de herramienta
+  (id 'tool', #tw-min nuevo; × sigue cerrando la herramienta) y Transform info (id 'hud'; × = closed hasta Ventanas › Transform info; migra prefs.hudPos).
+  Ventanas › Recolocar ventanas borra posiciones. Capas sigue anclada a la barra izquierda (decisión de la v0.36). Cada campo 'range' de TW lleva casilla .tw-num:
+  rangeScale(f) saca la escala y la unidad del texto fmt (p. ej. paso dm → mm/vuelta), hasta 4 decimales, coma o punto, Enter/salir aplica, Esc deja, se limita a
+  [min, max] y a entero si step ≥ 1; la tecla no llega a los atajos (stopPropagation). Prueba: scratchpad al/t30.cjs (37,25° exacto, paso 12,5 mm/vuelta = 0,125 dm,
+  tramos 7,6 → 8, tope 1440°, arrastrar / minimizar / cerrar / reabrir / recargar). Capturas docs/capturas/v0.45-*.png.

@@ -876,6 +876,19 @@
   .hud-f { box-shadow: none !important; background: var(--win-field); border-radius: 6px; height: 28px; }
   .hud-f.on { box-shadow: inset 0 0 0 1.5px #2f7bff !important; color: var(--fg); }
   .hud-list { box-shadow: none; background: var(--win-field); border-radius: 8px; }
+  /* Ventanas flotantes: _ minimizar (solo queda la barra) y × cerrar; casilla numérica junto a cada deslizador */
+  .win-btn { flex: none; width: 22px; height: 22px; border: 0; border-radius: 5px; background: none; color: var(--fg); font: 600 14px/1 var(--font-mono, monospace); cursor: pointer; opacity: .6; padding: 0; }
+  .win-btn:hover { opacity: 1; background: var(--win-field); }
+  .hud-head { display: flex; align-items: center; }
+  .hud-head span { flex: 1; min-width: 0; }
+  .win-min > :not(.tw-head):not(.hud-head) { display: none !important; }
+  .win-min .tw-head, .win-min .hud-head { margin-bottom: 0; }
+  .toolwin { width: 300px; }
+  .tw-numw { display: flex; align-items: center; gap: 3px; }
+  .tw-num { width: 58px; height: 22px; padding: 0 6px; border: 1px solid transparent; border-radius: 5px; background: var(--win-field); color: var(--fg);
+    font: 11px var(--font-mono, monospace); text-align: right; outline: none; }
+  .tw-num:focus { border-color: #2f7bff; }
+  .tw-numw em { font-style: normal; font-size: 10px; color: var(--muted); max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .float-win { background: transparent !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 0 !important; }
   .panel .sec h2, .panel .muted, .fw-count, .ly-n { color: inherit; }
   /* ===== Módulo FORGE en el panel de Forja: los controles de BumpForge con el aspecto de Forja =====
@@ -1909,7 +1922,7 @@
   </div>
 
   <div class="toolwin" id="toolwin" hidden role="dialog" aria-label="Opciones de la herramienta">
-    <div class="tw-head" id="tw-head"><b id="tw-title"></b><button class="tw-x" id="tw-close" title="Cerrar" aria-label="Cerrar">×</button></div>
+    <div class="tw-head" id="tw-head"><b id="tw-title"></b><button class="win-btn" id="tw-min" data-win="min" title="Minimizar" aria-label="Minimizar">_</button><button class="tw-x win-btn" id="tw-close" title="Cerrar" aria-label="Cerrar">×</button></div>
     <div class="tw-body" id="tw-body"></div>
   </div>
   <div class="quickpick" id="quickpick" hidden></div>
@@ -2045,6 +2058,6 @@
   "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
 } }
 </script>
-<script type="module" src="./src/main.js?v=0.44.2"></script>
+<script type="module" src="./src/main.js?v=0.45.0"></script>
 </body>
 </html>

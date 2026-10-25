@@ -13,7 +13,7 @@ import * as N from './nurbs.js?v=0.42.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.40.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.44.2';
+const FORJA_VERSION = '0.45.0';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -4121,6 +4121,8 @@ const MENUBAR = [
   ['Ventanas', [
     { label: 'Panel lateral fijo', run: () => setPinned(!pinned), ...chk(() => pinned) }, { label: 'Pantalla completa', run: fullscreen },
     { label: 'Capas', run: () => (prefs.layersWin?.open === false ? layersWin.show() : layersWin.set({ open: false })), ...chk(() => prefs.layersWin?.open !== false) },
+    { label: 'Transform info', run: () => { const st = winState('hud'); st.closed = !st.closed; savePrefs(); hudRender(); }, ...chk(() => !winState('hud').closed) },
+    { label: 'Recolocar ventanas', run: () => { ['tool', 'hud'].forEach((id) => { const st = winState(id); delete st.x; delete st.y; st.min = false; }); savePrefs(); location.reload(); } },
     { label: 'Puck', key: 'Z', run: () => getPuck().show(innerWidth / 2, innerHeight / 2) }]],
   ['Preferencias', [{ label: 'Preferencias…', run: () => openPrefs() }, { label: 'Personalizar el Puck…', run: () => openPrefs('puck') }]],
   ['Utilidades', [
@@ -4782,9 +4784,46 @@ const toolDef = Object.assign({ curveDeg: 3, curveSpans: 0, alignCont: 2, alignT
 const saveToolDef = () => { prefs.tools = toolDef; savePrefs(); };
 
 // --- Ventana de opciones de la herramienta: un desenfoque de lo que hay detrás, sin marco, con los ajustes encima ---
+// ---------- Ventanas flotantes (opciones de herramienta, Transform info) ----------
+// Barra de título: arrastrar = mover libre por toda la pantalla (la barra nunca se pierde fuera de ella), _ = minimizar
+// (queda solo la barra), × = cerrar. Posición, minimizado y cerrado se recuerdan en prefs.wins[id].
+function winState(id) { return ((prefs.wins ||= {})[id] ||= {}); }
+function winButtons() {
+  return '<button class="win-btn" data-win="min" title="Minimizar" aria-label="Minimizar">_</button>'
+    + '<button class="win-btn" data-win="close" title="Cerrar" aria-label="Cerrar">×</button>';
+}
+function placeWin(el, id) {
+  const st = winState(id);
+  el.classList.toggle('win-min', !!st.min);
+  el.querySelectorAll('[data-win="min"]').forEach((b) => { b.textContent = st.min ? '▢' : '_'; b.title = st.min ? 'Restaurar' : 'Minimizar'; });
+  if (st.x == null) return;
+  const w = el.offsetWidth || 280;
+  // libre por la pantalla, pero siempre quedan 80 px de la barra a la vista para poder agarrarla
+  const x = Math.min(innerWidth - 80, Math.max(80 - w, st.x)), y = Math.min(innerHeight - 32, Math.max(0, st.y));
+  Object.assign(el.style, { left: x + 'px', top: y + 'px', right: 'auto', bottom: 'auto', translate: 'none' });
+}
+function setWinMin(el, id, v) { winState(id).min = v; placeWin(el, id); savePrefs(); }
+function dragWin(el, id, headSel) {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || !e.target.closest(headSel) || e.target.closest('button, input')) return;
+    e.preventDefault();
+    const r = el.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top, st = winState(id);
+    const mv = (m) => { st.x = m.clientX - ox; st.y = m.clientY - oy; placeWin(el, id); };
+    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); savePrefs(); };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up);
+  });
+}
+// Casilla numérica de un deslizador: el número se muestra en las mismas unidades que su texto (fmt; p. ej. el paso de la hélice
+// se guarda en dm y se lee en mm/vuelta), con hasta 4 decimales, sin redondear a lo que muestra el deslizador.
+function rangeScale(f) {
+  const probe = f.max || f.min || 1, t = String(f.fmt(probe)), m = t.match(/^-?\d+(?:[.,]\d+)?/);
+  const k = m ? parseFloat(m[0].replace(',', '.')) / probe : 1;
+  return { k: Number.isFinite(k) && k ? Math.round(k * 1e6) / 1e6 : 1, unit: m ? t.slice(m[0].length).trim() : '' };
+}
+const numShow = (x) => String(+(+x).toFixed(4));
 const TW = {
   spec: null,
-  show(spec) { this.spec = spec; this.render(); $('toolwin').hidden = false; updateRelArrows(); },
+  show(spec) { this.spec = spec; this.render(); $('toolwin').hidden = false; placeWin($('toolwin'), 'tool'); updateRelArrows(); },
   hide() { this.spec = null; $('toolwin').hidden = true; updateRelArrows(); },
   render() {
     const sp = this.spec;
@@ -4814,10 +4853,26 @@ const TW = {
           f.set(v); this.render();
         }));
       } else if (f.type === 'range') {
-        row.innerHTML = `<label>${esc(f.label)}</label><input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${f.get()}"><output>${f.fmt(f.get())}</output>`;
-        const inp = row.querySelector('input'), out = row.querySelector('output');
+        // deslizador + casilla para escribir el valor exacto (como los campos de Alias): Enter o salir de la casilla = aplicar, Esc = dejarlo
+        const { k, unit } = rangeScale(f);
+        row.innerHTML = `<label>${esc(f.label)}</label><input type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${f.get()}">`
+          + `<span class="tw-numw"><input class="tw-num" type="text" inputmode="decimal" spellcheck="false" value="${numShow(f.get() * k)}"><em>${esc(unit)}</em></span>`;
+        const inp = row.querySelector('input[type=range]'), num = row.querySelector('.tw-num');
         inp.addEventListener('pointerdown', () => f.start?.());
-        inp.addEventListener('input', () => { f.set(+inp.value); out.textContent = f.fmt(+inp.value); });
+        inp.addEventListener('input', () => { f.set(+inp.value); num.value = numShow(+inp.value * k); });
+        num.addEventListener('focus', () => num.select());
+        num.addEventListener('keydown', (e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') num.blur();
+          else if (e.key === 'Escape') { num.value = numShow(f.get() * k); num.blur(); }
+        });
+        num.addEventListener('change', () => {
+          let v = parseFloat(num.value.replace(',', '.')) / k;
+          if (!Number.isFinite(v)) { num.value = numShow(f.get() * k); return; }
+          v = Math.min(f.max, Math.max(f.min, v));
+          if (f.step >= 1) v = Math.round(v);
+          f.start?.(); f.set(v); this.render();
+        });
       } else if (f.type === 'check') {
         row.innerHTML = `<label class="tw-check"><input type="checkbox" ${f.get() ? 'checked' : ''}> ${esc(f.label)}</label>`;
         row.querySelector('input').addEventListener('change', (e) => { f.set(e.target.checked); this.render(); });
@@ -4837,13 +4892,10 @@ const TW = {
   },
 };
 $('tw-close').addEventListener('click', () => { if (tool !== 'select') setTool('select'); cancelExtrudeDrag(true); TW.hide(); });
-// la ventana se arrastra por su título
-{
-  const h = $('tw-head'); let d = null;
-  h.addEventListener('pointerdown', (e) => { if (e.target.closest('button')) return; const r = $('toolwin').getBoundingClientRect(); d = { dx: e.clientX - r.left, dy: e.clientY - r.top }; h.setPointerCapture(e.pointerId); });
-  h.addEventListener('pointermove', (e) => { if (d) { $('toolwin').style.left = e.clientX - d.dx + 'px'; $('toolwin').style.top = e.clientY - d.dy + 'px'; } });
-  h.addEventListener('pointerup', () => { d = null; });
-}
+// la ventana se arrastra por su título a cualquier sitio; _ la minimiza (solo queda la barra)
+dragWin($('toolwin'), 'tool', '.tw-head');
+$('tw-min').addEventListener('click', () => setWinMin($('toolwin'), 'tool', !winState('tool').min));
+addEventListener('resize', () => { if (!$('toolwin').hidden) placeWin($('toolwin'), 'tool'); });
 
 // --- Elección rápida junto al cursor (G0 · G1 · G2 · G3 al unir superficies) ---
 function quickPick(x, y, title, opts, def) {
@@ -6549,7 +6601,7 @@ const HUD_ROWS = { t: ['Traslación', 'mm', 4], r: ['Rotación', '°', 2], s: ['
 function hudVal(T, g, a) { const v = g === 't' ? fmtA(T.center)[a] : g === 'r' ? hud.rot[a] : hud.scl[a]; return Math.abs(v) < 5e-5 ? 0 : v; }
 function hudRender() {
   const T = carousel ? null : hudTargets();
-  hudEl.hidden = !T;
+  hudEl.hidden = !T || !!winState('hud').closed;   // × la cierra hasta que se vuelva a abrir desde Ventanas
   if (!T) { hud.key = ''; return; }
   if (T.key !== hud.key) { hud.key = T.key; hud.rot = [0, 0, 0]; hud.scl = [1, 1, 1]; }
   if (hud.drag) return hudRefresh();
@@ -6567,7 +6619,8 @@ function hudRender() {
     return `<div class="hud-row"><label>${T.mode === 'pivot' && g === 't' ? 'Pivote' : T.mode === 'cv' && g === 't' ? 'Posición' : lab}</label>${[0, 1, 2].map((a) =>
       `<div class="hud-f" data-g="${g}" data-a="${a}" title="Arrastra en horizontal (Shift ×10, Ctrl ×0,1) · doble clic para escribir"><i class="ax ax${a}"></i><span>${hudVal(T, g, a).toFixed(dec)}</span></div>`).join('')}<u>${unit}</u></div>`;
   }).join('');
-  hudEl.innerHTML = `<div class="hud-head"><b>Transform info</b><span>${esc(title)}</span></div><p class="hud-sub">${esc(sub)}</p>${list}${rows}`;
+  hudEl.innerHTML = `<div class="hud-head"><b>Transform info</b><span>${esc(title)}</span>${winButtons()}</div><p class="hud-sub">${esc(sub)}</p>${list}${rows}`;
+  placeWin(hudEl, 'hud');
 }
 function hudRefresh() {
   const T = hudTargets();
@@ -6652,17 +6705,15 @@ hudEl.addEventListener('dblclick', (e) => {
 });
 hudEl.addEventListener('contextmenu', (e) => e.preventDefault());
 hudEl.addEventListener('toggle', (e) => { if (e.target.classList?.contains('hud-det')) hud.listClosed = !e.target.open; }, true);
-// se arrastra por la cabecera y recuerda su sitio (prefs.hudPos)
-const placeHud = () => { const q = prefs.hudPos; if (q) Object.assign(hudEl.style, { left: Math.min(innerWidth - 120, Math.max(0, q.x)) + 'px', top: Math.min(innerHeight - 60, Math.max(0, q.y)) + 'px', bottom: 'auto', right: 'auto', translate: 'none' }); };
-placeHud(); addEventListener('resize', placeHud);
-hudEl.addEventListener('pointerdown', (e) => {
-  const h = e.target.closest('.hud-head');
-  if (!h || e.button !== 0) return;
-  e.preventDefault();
-  const r = hudEl.getBoundingClientRect(), ox = e.clientX - r.left, oy = e.clientY - r.top;
-  const mv = (m) => { prefs.hudPos = { x: m.clientX - ox, y: m.clientY - oy }; placeHud(); };
-  const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); savePrefs(); };
-  addEventListener('pointermove', mv); addEventListener('pointerup', up);
+// ventana flotante: se arrastra por la cabecera a cualquier sitio, _ minimiza, × cierra (Ventanas › Transform info la reabre)
+if (prefs.hudPos && winState('hud').x == null) { winState('hud').x = prefs.hudPos.x; winState('hud').y = prefs.hudPos.y; }
+placeWin(hudEl, 'hud'); addEventListener('resize', () => placeWin(hudEl, 'hud'));
+dragWin(hudEl, 'hud', '.hud-head');
+hudEl.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-win]');
+  if (!b) return;
+  if (b.dataset.win === 'min') setWinMin(hudEl, 'hud', !winState('hud').min);
+  else { winState('hud').closed = true; savePrefs(); hudRender(); toast('Transform info cerrado · Ventanas › Transform info lo vuelve a abrir'); }
 });
 hudOn = true;
 
