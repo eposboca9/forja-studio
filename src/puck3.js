@@ -11,9 +11,9 @@ const RX = RC + 36;            // fin de la zona de ondas (X)
 const RW = 50, RGAP = 6;       // ancho de cada anillo de herramientas y separación
 const ringIn = (k) => RX + 6 + k * (RW + RGAP), ringOut = (k) => ringIn(k) + RW, ringMid = (k) => ringIn(k) + RW / 2;
 const ROW_STEP = 2 * RX + 18;  // separación de las 3 categorías al abrir
-// (v0.49.1) CERO LATENCIA: el Puck aparece, se abre y resalta al instante (sin animaciones ni esperas), para la memoria muscular
-const reduce = { matches: true };
-const T = () => 0;
+// (v0.49.2) el Puck vuelve a tener sus animaciones suaves (abrir, cerrar, soltar ondas); los marking menus siguen a 0 ms
+const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+const T = (ms) => (reduce.matches ? 0 : ms);
 
 export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, soon }) {
   const el = document.createElement('div');
@@ -180,7 +180,9 @@ export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, s
   };
   st.close = (go) => {
     if (!st.open) return;
-    st.open = false; el.hidden = true; st.drag = false; dwell = null;
+    st.open = false; st.drag = false; dwell = null;
+    if (!reduce.matches) { const a = stage.animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.9)' }], { duration: T(120), easing: 'ease-in' }); veil.animate([{ opacity: 1 }, { opacity: 0 }], { duration: T(120) }); a.onfinish = () => { if (!st.open) el.hidden = true; }; }
+    else el.hidden = true;
     const h = st.hover; st.hover = null;
     if (go && h) (h.t.soon || !h.t.run ? soon(h.t.label) : () => run(h.id, cfg.active))();
   };

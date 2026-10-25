@@ -935,3 +935,13 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   el vacío no la cierran); solo Esc u otro comando la cierran. setPickMode ya no apaga mouseXform si la herramienta activa es 'xform'.
   Prueba: scratchpad v49app/t35.cjs (curva 3 CVs + Esc = guardada, 1 CV = nada, 2 CVs + otra herramienta = guardada; W, clic a 6 px de un CV, Nada, vacío, clic en otro CV
   y arrastrar = se mueve sin volver a pulsar W; marking y Puck sin pausas). t34.cjs y v48/t33b.cjs siguen igual.
+- (v0.49.2) Documento "Puck animado, Locators y Normales" (los puntos 2, 3 y 6 ya estaban en v0.49 / v0.49.1):
+  (1) PUCK con animaciones otra vez (puck3.js: reduce = matchMedia, T(ms); cierre animado 120 ms y oculta al terminar si no se reabrió); la regla CSS de 0 ms solo
+  aplica a .puck:not(.puck3) (marking menus) y .radial-veil. Las ondas se despliegan / repliegan clic a clic (xClick) y cada categoría recuerda sus anillos (cfg.open[cat]).
+  OJO pruebas: en SwiftShader las transiciones del Puck tardan varios segundos; esperar a document.getAnimations() vacío antes de medir botones (t35.cjs).
+  (2) LOCATORS (main.js "Locators de medición"): locators [{mode 'min'|'max', a, b, r}] anclados por id; updateLocators() en el bucle (recalcula solo si cambia
+  sceneChangedAt): muestreo (curva 161 puntos, superficie 35×35 sin lo recortado) + locRefine (búsqueda de patrón en los parámetros de los dos). Máx = la mayor de las
+  distancias de los puntos de A a B. Línea y puntos ámbar + etiqueta "mín/máx N mm" (.loc-label). Utilidades › Locator mínima / máxima / Borrar; Ctrl+Shift+izq ›
+  Localizador; Ctrl+Shift+medio › Borrar localizadores; SEL_SPECS locmin/locmax (2 objetos, pre o post selección). No van en el deshacer ni en el .forja.
+  (3) INVERTIR NORMALES (Superficies › Invertir normales, Puck Superficies anillo 2, SEL_SPECS flip): invierte U (cvs y nudos 1 − k) y pasa los recortes (etapas, picks y
+  curvas sobre superficie) a 1 − u. Prueba: scratchpad v49app/t36.cjs (locators 50 / 140 / 30 mm exactos y 50 mm tras mover la recta; normal y −1 → +1 con la misma forma).

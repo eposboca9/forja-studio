@@ -11,9 +11,9 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as N from './nurbs.js?v=0.47.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
-import { createPuck3 } from './puck3.js?v=0.49.1';
+import { createPuck3 } from './puck3.js?v=0.49.2';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.49.1';
+const FORJA_VERSION = '0.49.2';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -2004,6 +2004,9 @@ const SEL_SPECS = {
     commit: (st) => { const o = byId(st.out); if (o) finishCreate([o], `${o.name} por ${relations.find((x) => x.out === o.id)?.srcs.length} curvas, con historial`); } },
   project: { label: 'Proyectar', what: 'las curvas y la superficie', ok: (o) => o.kind === 'surface' || isFreeCurve(o), multi: true,
     ready: (v) => v.some((o) => o.kind === 'surface') && v.some(isFreeCurve), run: () => projectRun() },
+  flip: { label: 'Invertir normales', what: 'una o más superficies', pick: 'surface', ok: (o) => o.kind === 'surface', ready: (v) => v.length >= 1, run: () => flipNormalsRun() },
+  locmin: { label: 'Locator mínima', what: '2 objetos (curvas o superficies)', ok: (o) => o.kind === 'curve' || o.kind === 'surface', ready: (v) => v.length === 2, run: () => addLocator('min') },
+  locmax: { label: 'Locator máxima', what: '2 objetos (curvas o superficies)', ok: (o) => o.kind === 'curve' || o.kind === 'surface', ready: (v) => v.length === 2, run: () => addLocator('max') },
   trim: { label: 'Trim', what: 'la superficie a recortar y sus cortes (curvas u otras superficies)', ok: (o) => o.kind === 'surface' || o.kind === 'curve', multi: true,
     ready: (v) => v[0]?.kind === 'surface' && v.length >= 2, run: () => trimRun() },
 };
@@ -3693,7 +3696,7 @@ const PICK_MM = [
 ];
 PICK_MM.extras = [
   { k: 'construct', label: 'Construcción', alias: 'Construction', soon: true },
-  { k: 'locator', label: 'Localizador', alias: 'Locator', soon: true },
+  { k: 'locator', label: 'Localizador', alias: 'Locator', run: () => withSelection('locmin') },
 ];
 const XFORM_MM = [
   { k: 'move', label: 'Mover', alias: 'Move', key: 'W', run: mv },
@@ -3705,7 +3708,7 @@ const XFORM_MM = [
   { k: 'history', label: 'Ver historial', alias: 'Query Edit History', run: queryHistory },
   { k: 'frame', label: 'Mirar a', alias: 'Look At', key: 'F', run: frameSelection },
 ];
-XFORM_MM.extras = [{ k: 'delLoc', label: 'Borrar localizadores', alias: 'Delete Locators', soon: true }];
+XFORM_MM.extras = [{ k: 'delLoc', label: 'Borrar localizadores', alias: 'Delete Locators', run: () => deleteLocators() }];
 const DISPLAY_MM = [
   { k: 'info', label: 'Información', alias: 'Information Window', run: () => $('panel').classList.add('show') },
   { k: 'shadeQ', label: 'Sombreado calidad', alias: 'Shade (Quality)', run: () => { if (layout !== 'diag') switchLayout('diag'); if (diagMode === 'wire') toggleWire(); setShadeReal(true); } },
@@ -3856,7 +3859,8 @@ const PUCK3_LIB = {
   curve: { k: 'curve', label: 'Curva', run: () => setTool('curve') }, circle: { k: 'circle', label: 'Círculo', run: () => setTool('circle') },
   ground: { k: 'ground', label: 'Curva en el suelo', run: () => { setDrawPlane('xz'); setTool('curve'); } },
   front: { k: 'front', label: 'Curva de frente', run: () => { setDrawPlane('xy'); setTool('curve'); } },
-  project: { k: 'project', label: 'Proyectar', run: () => projectSelection() }, trim: { k: 'project', label: 'Trim', run: () => trimSelection() }, untrim: { k: 'project', label: 'Untrim', run: () => untrimSelection() }, cv: { k: 'cv', label: 'CV', run: () => setPickMode('cv') },
+  project: { k: 'project', label: 'Proyectar', run: () => projectSelection() }, trim: { k: 'project', label: 'Trim', run: () => trimSelection() }, untrim: { k: 'project', label: 'Untrim', run: () => untrimSelection() }, flip: { k: 'symm', label: 'Invertir normales', run: () => withSelection('flip') },
+  locmin: { k: 'pivot', label: 'Locator mínima', run: () => withSelection('locmin') }, locmax: { k: 'pivot', label: 'Locator máxima', run: () => withSelection('locmax') }, cv: { k: 'cv', label: 'CV', run: () => setPickMode('cv') },
   plane: { k: 'plane', label: 'Plano', run: () => setTool('plane') }, revolve: { k: 'revolve', label: 'Revolución', run: () => OPS.revolve() },
   loft: { k: 'loft', label: 'Loft', run: () => OPS.loft() }, extrude: { k: 'extrude', label: 'Extruir', run: () => OPS.extrude() },
   skin: { k: 'loft', label: 'Skin', run: () => startEdgeOp('skin') }, blend: { k: 'edit', label: 'Blend', run: () => startEdgeOp('blend') },
@@ -3877,7 +3881,7 @@ const PUCK3_LIB = {
 };
 const PUCK3_CATS = [
   { id: 'curves', label: 'Curvas', k: 'curve', rings: [['curve', 'circle', 'project', 'align', 'pick', 'move'], ['mirror', 'dup', 'rotate', 'scale', 'hide', 'del'], ['ground', 'front', 'cv', 'pivot', 'frame', 'undo']] },
-  { id: 'surfaces', label: 'Superficies', k: 'surf', rings: [['plane', 'revolve', 'loft', 'extrude', 'skin', 'blend'], ['align', 'extend', 'offset', 'fillet', 'gfillet', 'trim', 'untrim', 'mirror', 'dup'], ['move', 'rotate', 'scale', 'pick', 'hide', 'del']] },
+  { id: 'surfaces', label: 'Superficies', k: 'surf', rings: [['plane', 'revolve', 'loft', 'extrude', 'skin', 'blend'], ['align', 'extend', 'offset', 'fillet', 'gfillet', 'trim', 'untrim', 'flip', 'mirror', 'dup'], ['move', 'rotate', 'scale', 'pick', 'hide', 'del']] },
   { id: 'solids', label: 'Sólidos', k: 'cube', rings: [['fillet', 'chamfer', 'bool', 'forge', 'move', 'dup'], ['rotate', 'scale', 'mirror', 'hide', 'del', 'frame'], ['layers', 'showAll', 'undo', 'prefs']] },
 ];
 const CTX_KIND = { curves: (o) => o.kind === 'curve', surfaces: (o) => o.kind === 'surface', solids: (o) => o.kind === 'mesh' };
@@ -4315,6 +4319,7 @@ const MENUBAR = [
     { label: 'Proyectar curva en superficie', run: projectSelection },
     { label: 'Trim (recortar por piezas)', run: () => trimSelection() },
     { label: 'Untrim (quitar recorte)', run: () => untrimSelection() },
+    { label: 'Invertir normales', run: () => withSelection('flip') },
     { sep: true }, { label: 'Quitar historial de la selección', run: () => { const ids = new Set(selObjs.map((o) => o.id)); relations.filter((r) => ids.has(outputOf(r))).forEach((r) => removeRelation(r.id)); } }]],
   ['Borrar', [
     { label: 'Borrar selección', key: 'Supr', run: deleteSelection },
@@ -4354,7 +4359,9 @@ const MENUBAR = [
     { label: 'Puck', key: 'Z', run: () => getPuck().show(innerWidth / 2, innerHeight / 2) }]],
   ['Preferencias', [{ label: 'Preferencias…', run: () => openPrefs() }, { label: 'Personalizar el Puck…', run: () => openPrefs('puck') }]],
   ['Utilidades', [
-    { label: 'Centrar pivote', run: centerPivots }, { label: 'Punto de interés a la selección', key: 'L', run: pivotToSelection },
+    { label: 'Centrar pivote', run: centerPivots },
+    { label: 'Locator: distancia mínima', run: () => withSelection('locmin') }, { label: 'Locator: distancia máxima', run: () => withSelection('locmax') },
+    { label: 'Borrar locators', run: () => deleteLocators() }, { label: 'Punto de interés a la selección', key: 'L', run: pivotToSelection },
     { label: 'Medir distancia', soon: true }]],
   ['Ayuda', [{ label: 'Atajos de teclado', run: () => openPrefs('help') }, { label: 'Ejemplo: Freeform Blend (manija)', run: () => blendDemo() }, { label: 'Qué abrió el último menú', run: () => toast(menuLog.length ? menuLog.slice(-3).reverse().join('  ·  ') : 'Todavía no se abrió ningún menú.') }, { label: 'Acerca de Forja', run: () => toast('FORJA v' + FORJA_VERSION + ' · ' + 'FORJA · modelador NURBS libre (Alias + Plasticity + Blender)') }]],
 ];
@@ -6117,6 +6124,114 @@ function updateRelLabels() {
   relLabelPts = L.map((x) => [x.pos]);
   relLabelBox.innerHTML = L.map((x) => `<span class="rel-label">${x.html}</span>`).join('');
 }
+// ---------- Locators de medición (distancia mínima / máxima entre curvas y superficies) ----------
+// Cada locator queda ANCLADO a sus dos objetos (por id) y se recalcula solo cuando la escena cambia (sceneChangedAt): línea entre los dos
+// puntos + etiqueta en mm. Mínima = el par de puntos más cercano (muestreo + refinado local de los parámetros). Máxima = la mayor separación
+// de A respecto de B (para cada punto de A su distancia a B; la mayor de ellas, como la desviación de Alias).
+const locators = [];
+let locStamp = -1;
+const locGroup = new THREE.Group(); locGroup.renderOrder = 30; scene.add(locGroup);
+const locBox = document.createElement('div'); locBox.className = 'rel-labels loc-labels'; document.body.append(locBox);
+const locMat = new THREE.LineBasicMaterial({ color: 0xffb020, depthTest: false, transparent: true });
+function locEval(o) {   // parámetros → punto; dominio 1D (curva) o 2D (superficie)
+  if (o.kind === 'curve') { const c = N.curveOf(o.data), t = new THREE.Vector3(); return { dim: 1, at: (a) => { const q = c.getPoint(Math.min(1, Math.max(0, a[0]))); return t.set(q.x, q.y, q.z).clone(); } }; }
+  const S = FF.surfEval(o.data), rm = o.removed;
+  return { dim: 2, at: (a) => S(Math.min(1, Math.max(0, a[0])), Math.min(1, Math.max(0, a[1]))), keep: (a) => !rm || !rm(a[0], a[1]) };
+}
+function locSamples(E, n1 = 160, n2 = 34) {
+  const out = [];
+  if (E.dim === 1) for (let i = 0; i <= n1; i++) out.push([i / n1]);
+  else for (let i = 0; i <= n2; i++) for (let j = 0; j <= n2; j++) { const a = [i / n2, j / n2]; if (!E.keep || E.keep(a)) out.push(a); }
+  return out.map((a) => ({ a, p: E.at(a) }));
+}
+function locRefine(EA, EB, a, b) {   // búsqueda local de patrón sobre los parámetros de los dos (minimiza la distancia)
+  let d = EA.at(a).distanceTo(EB.at(b)), h = 0.02;
+  const ok = (E, x) => !E.keep || E.keep(x);
+  for (let it = 0; it < 60 && h > 1e-7; it++) {
+    let moved = false;
+    for (const [E, v] of [[EA, a], [EB, b]]) for (let k = 0; k < E.dim; k++) for (const sg of [-1, 1]) {
+      const x = v.slice(); x[k] = Math.min(1, Math.max(0, x[k] + sg * h));
+      if (!ok(E, x)) continue;
+      const dd = (E === EA ? E.at(x).distanceTo(EB.at(b)) : EA.at(a).distanceTo(E.at(x)));
+      if (dd < d - 1e-12) { d = dd; v.splice(0, v.length, ...x); moved = true; }
+    }
+    if (!moved) h /= 2;
+  }
+  return { d, pa: EA.at(a), pb: EB.at(b) };
+}
+function measureLocator(L) {
+  const A = byId(L.a), B = byId(L.b);
+  if (!A || !B) return null;
+  const EA = locEval(A), EB = locEval(B), SA = locSamples(EA), SB = locSamples(EB);
+  const nearest = (p) => { let bd = Infinity, bi = null; for (const s of SB) { const d = p.distanceToSquared(s.p); if (d < bd) { bd = d; bi = s; } } return { d: Math.sqrt(bd), s: bi }; };
+  if (L.mode === 'max') {
+    let best = null;
+    for (const s of SA) { const n = nearest(s.p); if (!best || n.d > best.d) best = { d: n.d, s, n: n.s }; }
+    const r = locRefine({ ...EA, at: () => best.s.p, dim: 0 }, EB, [], best.n.a.slice());   // distancia de ese punto de A a B, afinada en B
+    return { d: r.d, pa: best.s.p, pb: r.pb };
+  }
+  let best = null;
+  for (const s of SA) { const n = nearest(s.p); if (!best || n.d < best.d) best = { d: n.d, s, n: n.s }; }
+  return locRefine(EA, EB, best.s.a.slice(), best.n.a.slice());
+}
+function addLocator(mode) {
+  const v = selObjs.filter((o) => o.kind === 'curve' || o.kind === 'surface');
+  if (v.length !== 2) return toast('Locator: elige 2 objetos (curvas o superficies).');
+  locators.push({ id: Date.now() + Math.random(), mode, a: v[0].id, b: v[1].id });
+  locStamp = -1; updateLocators();
+  const L = locators[locators.length - 1];
+  toast(`Locator de distancia ${mode === 'max' ? 'MÁXIMA' : 'MÍNIMA'}: ${v[0].name} ↔ ${v[1].name} = ${L.r ? (L.r.d * 100).toFixed(2) + ' mm' : '—'} (se actualiza solo)`);
+}
+function deleteLocators() { const n = locators.length; locators.length = 0; locStamp = -1; updateLocators(); toast(n ? `${n} locator(es) borrado(s)` : 'No hay locators'); }
+function updateLocators() {
+  if (locStamp !== sceneChangedAt) {
+    locStamp = sceneChangedAt;
+    for (let i = locators.length - 1; i >= 0; i--) if (!byId(locators[i].a) || !byId(locators[i].b)) locators.splice(i, 1);
+    locGroup.clear();
+    locBox.innerHTML = '';
+    for (const L of locators) {
+      L.r = measureLocator(L);
+      if (!L.r) continue;
+      const g = new THREE.BufferGeometry().setFromPoints([L.r.pa, L.r.pb]), ln = new THREE.Line(g, locMat);
+      const dot = (p) => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false })); m.position.copy(p); m.renderOrder = 31; m.userData.locDot = true; return m; };
+      ln.renderOrder = 30; locGroup.add(ln, dot(L.r.pa), dot(L.r.pb));
+      const el = document.createElement('span'); el.className = 'rel-label loc-label';
+      el.textContent = `${L.mode === 'max' ? 'máx' : 'mín'} ${(L.r.d * 100).toFixed(2)} mm`;
+      locBox.append(el);
+    }
+  }
+  locBox.hidden = !locators.length || !!carousel || layout === 'render' || layout === 'ai';
+  if (locBox.hidden) return;
+  const pn = panes().find((p) => p.kind !== 'render') || panes()[0], rc = renderer.domElement.getBoundingClientRect();
+  useAspect(pn);
+  locGroup.children.forEach((m) => { if (m.userData.locDot) m.scale.setScalar(pxWorld(m.position, 3.5)); });
+  locators.filter((L) => L.r).forEach((L, i) => {
+    const el = locBox.children[i]; if (!el) return;
+    const q = L.r.pa.clone().add(L.r.pb).multiplyScalar(0.5).project(camera);
+    el.style.display = q.z < 1 ? '' : 'none';
+    el.style.left = rc.left + pn.x + ((q.x + 1) / 2) * pn.w + 'px';
+    el.style.top = rc.top + ((1 - q.y) / 2) * pn.h + 'px';
+  });
+}
+// ---------- Invertir normales: invierte la dirección U (la cara de fuera pasa a ser la de dentro) ----------
+// Los recortes (etapas de Trim y curvas sobre la superficie) se pasan a la nueva U = 1 − u para que sigan en su sitio.
+function flipNormalsRun() {
+  const v = selObjs.filter((o) => o.kind === 'surface');
+  if (!v.length) return toast('Invertir normales: elige una o más superficies.');
+  checkpoint();
+  const fu = (q) => [1 - q[0], q[1], ...q.slice(2)];
+  for (const o of v) {
+    const d = o.data, nd = { ...d, cvs: d.cvs.slice().reverse(), knotsU: d.knotsU.map((k) => 1 - k).reverse() };
+    const st = trimStages(d);
+    if (st.length) { nd.rtrims = st.map((x) => ({ ...cloneStage(x), loops: x.loops.map((l) => l.map(fu)), picks: x.picks.map((p) => [1 - p[0], p[1]]) })); delete nd.rtrim; }
+    o.data = nd;
+    objects.filter((c) => c.kind === 'curve' && c.data.cos?.surf === o.id).forEach((c) => { c.data = { ...c.data, cos: { ...c.data.cos, uv: c.data.cos.uv.map(fu) } }; });
+    o.flipped = !o.flipped;
+    updateObject(o);
+    objects.filter((c) => c.kind === 'curve' && c.data.cos?.surf === o.id).forEach(updateObject);
+  }
+  toast(`Normales invertidas en ${v.map((o) => o.name).join(', ')}`);
+}
 function placeRelLabels() {
   relLabelBox.hidden = !relLabelPts.length || !!carousel || layout === 'render' || layout === 'ai';
   if (relLabelBox.hidden) return;
@@ -7234,7 +7349,7 @@ function renderFrame(now) {
   scaleHandles();
   originAxes.scale.setScalar(pxWorld(originAxes.position, 1));
   if (relArrows.children.length) scaleRelArrows();
-  placeRelLabels();
+  placeRelLabels(); updateLocators();
   // la sombra solo cambia si cambia la escena (no al mover la cámara): se recalcula si algo cambió hace poco, si se arrastra el gizmo,
   // y siempre en Forge y durante el carrusel (sus objetos cambian por dentro)
   if (gizmoDrag) sceneChangedAt = performance.now();
@@ -7311,7 +7426,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, trimSelection, finishTrim, untrimSelection, doUntrim, revertConstruction, endFillet, activeTool: () => activeTool?.id || "idle", escapeAll, awaitSel: () => awaitSel, revolveDrag: () => revolveDrag, MENUS: () => MENUS, setXform, offsetSelection, loftSelection, revolveSelection, extrudeSelection, filPreview, trimStages, relSpecOf: (r) => relSpec(r), trimOp: () => trimOp, applyRelation, propagateFrom, renderHistory };
+window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, trimSelection, finishTrim, untrimSelection, doUntrim, revertConstruction, endFillet, locators, addLocator, deleteLocators, flipNormalsRun, withSelection, activeTool: () => activeTool?.id || "idle", escapeAll, awaitSel: () => awaitSel, revolveDrag: () => revolveDrag, MENUS: () => MENUS, setXform, offsetSelection, loftSelection, revolveSelection, extrudeSelection, filPreview, trimStages, relSpecOf: (r) => relSpec(r), trimOp: () => trimOp, applyRelation, propagateFrom, renderHistory };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;
