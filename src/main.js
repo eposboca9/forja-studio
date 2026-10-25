@@ -11,14 +11,14 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as N from './nurbs.js?v=0.47.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
-import { createPuck3 } from './puck3.js?v=0.40.0';
+import { createPuck3 } from './puck3.js?v=0.49.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.48.0';
+const FORJA_VERSION = '0.49.0';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
 import * as HX from './history.js?v=0.44.1';
-import * as FF from './freeform.js?v=0.47.0';
+import * as FF from './freeform.js?v=0.49.0';
 import * as FL from './fillet.js?v=0.42.0';
 import { getOCC } from './occ.js';
 import { createAO } from './ao.js';
@@ -1244,6 +1244,7 @@ function selectionChanged() {
   refreshOutliner();
   updateStatus();
   if (toolsReady) syncToolWinToSelection();
+  if (awaitSel) awaitChanged();
 }
 
 // Gizmo: se coloca en el centro de lo seleccionado y mueve todos los CVs afectados a la vez
@@ -1275,14 +1276,18 @@ let xform = 'translate', pivotEdit = false;
 // Como en Alias: con Mover/Rotar/Escalar activo, arrastrar en la vista transforma lo elegido con los tres
 // botones del ratón (izq = X, medio = Y, der = Z). El gizmo de ejes sigue funcionando igual.
 let mouseXform = false;
+const XFORM_LABELS = { translate: 'Mover', rotate: 'Rotar', scale: 'Escalar' };
 function setXform(m) {
+  // Mover / Rotar / Escalar son herramientas: quitan la anterior. Arrastrar en el vacío sigue moviendo (no es un clic)
+  beginTool('xform', { label: XFORM_LABELS[m], cleanup: () => { mouseXform = false; updateHint(); } });
   xform = m; pivotEdit = false; mouseXform = true;
   gizmo.setMode(m);
   updateXformButtons(); attachGizmo();
 }
 function togglePivotEdit() {
-  if (pivotEdit) { pivotEdit = false; gizmo.setMode(xform); updateXformButtons(); attachGizmo(); renderSelectionPanel(); return; }
+  if (pivotEdit) { pivotEdit = false; toolDone('pivot'); gizmo.setMode(xform); updateXformButtons(); attachGizmo(); renderSelectionPanel(); return; }
   if (pickMode !== 'object' || !selObjs.length) return toast('Selecciona un objeto (modo Objetos) para editar su pivote.');
+  beginTool('pivot', { label: 'Pivote', voidKill: false, cleanup: () => { if (pivotEdit) { pivotEdit = false; gizmo.setMode(xform); updateXformButtons(); attachGizmo(); renderSelectionPanel(); } } });
   pivotEdit = true;
   gizmo.setMode('translate');
   updateXformButtons(); attachGizmo(); renderSelectionPanel();
@@ -1678,6 +1683,37 @@ function pickAt(e) {
   return hit ? { obj: hit.object.userData.obj, point: hit.point } : null;
 }
 
+// ---------- Máquina de estados de las herramientas (UNA sola activa; sin ninguna = IDLE) ----------
+// Toda herramienta que se queda con el ratón o el teclado (dibujar, bordes, Trim, Untrim, Revolución, Extruir, Redondear, pivote,
+// mover / rotar / escalar, esperar selección...) se registra con beginTool(id, { label, cleanup(reason), voidKill, hit(e) }).
+// Empezar otra, Esc, "Nada" o un clic en el vacío llaman a endActiveTool(reason) → cleanup() de la activa: suelta sus estados
+// temporales, cierra su ventana y quita sus manijas. reason: 'switch' (otra herramienta) | 'esc' | 'void' (clic en el vacío) | 'done'.
+// Cuando la herramienta termina sola (Aceptar, Enter, clic derecho) llama a toolDone(id): sale sin volver a ejecutar su cleanup.
+var activeTool = null;   // var: se lee desde funciones que pueden correr antes de esta línea al arrancar
+function beginTool(id, def = {}) {
+  endActiveTool('switch');
+  activeTool = { id, label: id, voidKill: true, ...def };
+  syncToolState();
+  return activeTool;
+}
+function endActiveTool(reason = 'done') {
+  const t = activeTool;
+  if (!t) return false;
+  activeTool = null;
+  try { t.cleanup?.(reason); } catch (err) { console.warn('cleanup de', t.id, err); }
+  // la ventana de opciones y las manijas de la herramienta se van con ella (al terminar bien se deja la del resultado)
+  if (reason !== 'done' && typeof TW !== 'undefined' && TW.spec) TW.hide();
+  syncToolState();
+  return true;
+}
+function toolDone(id) { if (activeTool && (activeTool.id === id || id == null)) { activeTool = null; syncToolState(); } }
+const toolIs = (id) => activeTool?.id === id;
+function syncToolState() {
+  const app = document.getElementById('app');
+  if (app) app.dataset.tool = activeTool ? activeTool.id : 'idle';
+  if (typeof updateStatus === 'function' && toolsReady) updateStatus();
+}
+
 // ---------- Herramientas ----------
 let tool = 'select';
 // Plano de construcción. 'auto' (por defecto) depende de la vista, como en Alias: vista de arriba = suelo XZ,
@@ -1816,7 +1852,14 @@ function updateHint() {
   const sb = navStyle === 'alias' && $('sel-buttons')?.value === 'add' ? `Izq: añadir ${what} · medio: elegir solo eso · der: quitar` : `Clic: seleccionar ${what}`;
   $('hint').textContent = `${sb} · Arrastrar: recuadro · ${nav} (clic rápido: punto de interés) · W/E/R: mover/rotar/escalar · Alt/Ctrl/Ctrl+Alt: snap · Z: Puck · Ctrl+Shift+botón: menús`;
 }
+const TOOL_LABELS = { curve: 'Curva', plane: 'Plano', circle: 'Círculo', edge: 'Bordes' };
 function setTool(t) {
+  if (t === 'select') { if (activeTool?.id.startsWith('tool:')) endActiveTool('done'); else setToolRaw('select'); return; }
+  // dibujar no se corta con un clic en el vacío (ahí se ponen los puntos): solo Esc, "Nada" u otra herramienta
+  beginTool('tool:' + t, { label: TOOL_LABELS[t] || t, voidKill: t === 'edge', cleanup: () => { if (tool === t) setToolRaw('select'); } });
+  setToolRaw(t);
+}
+function setToolRaw(t) {
   if (tool === 'curve' && t !== 'curve') cancelDraft();
   if (tool === 'edge' && t !== 'edge') endEdgeOp();
   if (t !== 'select') mouseXform = false;
@@ -1917,6 +1960,92 @@ const OPS = {
   extrude: () => extrudeSelection(),
   revolve: () => revolveSelection(),
 };
+// ---------- Selección en los dos sentidos ----------
+// Objeto → Acción (pre-selección): si al llamar la herramienta ya hay lo que necesita elegido, arranca con eso al momento.
+// Acción → Objeto (post-selección): si no, la herramienta queda ESPERANDO (estado 'await:<id>') y cada clic (Shift / Ctrl como
+// siempre) va sumando entradas; las que tienen vista previa (Loft) se rehacen en vivo con cada entrada. Las de una sola entrada
+// (Revolución, Extruir, Offset, Simetría) se ejecutan en cuanto se elige; las de varias (Loft, Proyectar, Trim) con Enter, clic
+// derecho o Aceptar. Esc = cancelar (se quita la vista previa); otra herramienta o clic en el vacío = aceptar lo que haya.
+const isFreeCurve = (o) => o.kind === 'curve' && !o.data.cos;
+const SEL_SPECS = {
+  revolve: { label: 'Revolución', what: 'una curva de perfil', pick: 'curve', ok: isFreeCurve, ready: (v) => v.length >= 1, run: () => revolveRun() },
+  extrude: { label: 'Extruir', what: 'una o más curvas', pick: 'curve', ok: isFreeCurve, ready: (v) => v.length >= 1, run: () => extrudeRun() },
+  offset: { label: 'Offset', what: 'una superficie', pick: 'surface', ok: (o) => o.kind === 'surface', ready: (v) => v.length >= 1, run: () => offsetRun() },
+  mirror: { label: 'Simetría', what: 'superficies o curvas', ok: (o) => o.kind !== 'mesh', ready: (v) => v.length >= 1, run: () => mirrorRun() },
+  loft: { label: 'Loft', what: '2 o más curvas, en orden', pick: 'curve', ok: isFreeCurve, ready: (v) => v.length >= 2, multi: true, run: () => loftRun(),
+    preview(st, v) {
+      if (v.length < 2) { if (st.out) { const o = byId(st.out); st.out = null; if (o) removeObject(o); } return; }
+      const r = st.out && relations.find((x) => x.out === st.out);
+      if (r) { r.srcs = v.map((c) => c.id); applyRelation(r); renderHistory(); return; }
+      const o = addSurface(N.loft(v.map((c) => c.data)), 'Loft');
+      addRelation({ type: 'loft', srcs: v.map((c) => c.id), out: o.id }); st.out = o.id;
+    },
+    commit: (st) => { const o = byId(st.out); if (o) finishCreate([o], `${o.name} por ${relations.find((x) => x.out === o.id)?.srcs.length} curvas, con historial`); } },
+  project: { label: 'Proyectar', what: 'las curvas y la superficie', ok: (o) => o.kind === 'surface' || isFreeCurve(o), multi: true,
+    ready: (v) => v.some((o) => o.kind === 'surface') && v.some(isFreeCurve), run: () => projectRun() },
+  trim: { label: 'Trim', what: 'la superficie a recortar y sus cortes (curvas u otras superficies)', ok: (o) => o.kind === 'surface' || o.kind === 'curve', multi: true,
+    ready: (v) => v[0]?.kind === 'surface' && v.length >= 2, run: () => trimRun() },
+};
+var awaitSel = null;
+function withSelection(key) {
+  const sp = SEL_SPECS[key];
+  if (pickMode !== 'object') setPickMode('object');
+  if (sp.ready(selObjs.filter(sp.ok))) { endActiveTool('switch'); return sp.run(); }   // Objeto → Acción
+  // Acción → Objeto: lo ya elegido que sirve se queda como primera entrada
+  const keep = selObjs.filter(sp.ok);
+  beginTool('await:' + key, { label: sp.label, cleanup: (why) => endAwait(why === 'esc' ? 'cancel' : 'accept') });
+  checkpoint();   // un solo paso de deshacer para todo lo que se vaya previsualizando
+  awaitSel = { key, sp, keepFilter: pickFilter, out: null };
+  if (sp.pick) pickFilter = sp.pick;
+  if (keep.length !== selObjs.length) applySelection(keep, 'replace');
+  TW.show(awaitSpec());
+  toast(`${sp.label}: elige ${sp.what}${sp.multi ? ' · Enter o clic derecho: aceptar' : ''} · Esc: cancelar`);
+  awaitChanged();
+}
+function awaitSpec() {
+  const st = awaitSel;
+  return { title: st.sp.label, awaitSel: true,
+    hint: () => `Elige ${st.sp.what} (clic; Shift o Ctrl como siempre). ${st.sp.multi ? 'Enter o clic derecho: aceptar.' : 'Arranca en cuanto lo eliges.'} Esc: cancelar.`,
+    fields: [{ type: 'html', html: () => { const v = selObjs.filter(st.sp.ok); return `<span class="tw-note">${v.length ? v.map((o) => esc(o.name)).join(' · ') : 'Nada elegido todavía'}${st.sp.multi ? (st.sp.ready(v) ? ' — listo' : ' — falta') : ''}</span>`; } }],
+    actions: [{ label: 'Cancelar', run: () => endActiveTool('esc') }, ...(st.sp.multi ? [{ label: 'Aceptar', primary: true, run: () => endActiveTool('done') }] : [])] };
+}
+function awaitChanged() {
+  const st = awaitSel;
+  if (!st || st.busy) return;
+  const v = selObjs.filter(st.sp.ok);
+  if (st.sp.preview) { st.busy = true; cpMuted++; try { st.sp.preview(st, v); } catch (err) { console.warn(err); } finally { cpMuted--; st.busy = false; } }
+  if (TW.spec?.awaitSel) TW.render();
+  if (!st.sp.multi && st.sp.ready(v)) queueMicrotask(() => { if (awaitSel === st) { toolDone('await:' + st.key); endAwait('accept'); } });
+}
+function endAwait(mode) {
+  const st = awaitSel;
+  if (!st) return;
+  awaitSel = null; pickFilter = st.keepFilter;
+  if (TW.spec?.awaitSel) TW.hide();
+  const v = selObjs.filter(st.sp.ok);
+  if (mode === 'cancel') {
+    if (st.out) { cpMuted++; try { const o = byId(st.out); if (o) removeObject(o); } finally { cpMuted--; } }
+    return toast(`${st.sp.label} cancelado`);
+  }
+  if (st.sp.commit && st.out) return st.sp.commit(st);
+  if (st.sp.ready(v)) return st.sp.run();
+  toast(`${st.sp.label}: faltan entradas (${st.sp.what}); no se hizo nada`);
+}
+addEventListener('keydown', (e) => {
+  if (!awaitSel || e.key !== 'Enter' || typing(e.target)) return;
+  e.preventDefault(); e.stopImmediatePropagation(); endActiveTool('done');
+}, true);
+addEventListener('pointerdown', (e) => {
+  if (!awaitSel || e.button !== 2 || e.target !== renderer.domElement || navHeld || (e.ctrlKey && e.shiftKey)) return;
+  e.preventDefault(); e.stopImmediatePropagation(); endActiveTool('done');
+}, true);
+function revolveSelection() { withSelection('revolve'); }
+function extrudeSelection() { withSelection('extrude'); }
+function loftSelection() { withSelection('loft'); }
+function offsetSelection() { withSelection('offset'); }
+function mirrorSelection() { withSelection('mirror'); }
+function projectSelection() { withSelection('project'); }
+function trimSelection() { withSelection('trim'); }
 
 function deleteSelection() {
   if (pickMode === 'cv') return toast('Para borrar, cambia a modo Objetos (O).');
@@ -2386,6 +2515,8 @@ function updateStatus() {
   const n = pickMode === 'cv' ? selCVs.size : selObjs.length;
   const what = pickMode === 'cv' ? (n === 1 ? 'CV' : 'CVs') : (n === 1 ? 'objeto' : 'objetos');
   $('st-sel').textContent = n ? `Selección: ${n} ${what}` : 'Nada seleccionado';
+  // la herramienta activa (máquina de estados): "IDLE" si no hay ninguna; con espera de selección dice qué falta
+  $('st-sel').textContent += activeTool ? ` · ${activeTool.label.toUpperCase()}${activeTool.id.startsWith('await:') ? ' (eligiendo)' : ''}` : ' · IDLE';
   const ns = objects.filter((o) => o.kind === 'surface').length;
   const nc = objects.filter((o) => o.kind === 'curve').length, nm = objects.filter((o) => o.kind === 'mesh').length;
   const plural = (n, a, b) => `${n} ${n === 1 ? a : b}`;
@@ -3390,10 +3521,6 @@ addEventListener('keydown', (e) => {
   else if (k === '8') setDiag('forja');
   else if (k === 'enter' && tool === 'curve') finishDraft();
   else if (k === 'enter' && tool === 'edge' && edgeOp && EDGE_OPS[edgeOp.type].enter) EDGE_OPS[edgeOp.type].enter();
-  else if (k === 'escape') {
-    if (tool !== 'select') setTool('select'); else if (pivotEdit) togglePivotEdit();
-    else if (mouseXform) { mouseXform = false; updateHint(); } else clearSelection();
-  }
   else if (k === 'delete' || k === 'backspace') deleteSelection();
 });
 
@@ -3415,10 +3542,11 @@ addEventListener('keydown', (e) => {
 // ---------- Comandos de los menús radiales ----------
 function pickNothing() {
   // dibujando una curva, "Nada" la termina (con 2 puntos o más) y sale de la herramienta
+  // y en cualquier otra herramienta es el kill switch: cleanup(), soltar todo e IDLE
   const made = tool === 'curve' && draft && draft.pts.length >= 2;
-  if (made) finishDraft();
-  setTool('select'); mouseXform = false;
-  if (!made) clearSelection();   // la curva recién terminada queda elegida, con sus CVs a la vista
+  if (!made) return escapeAll('void');
+  finishDraft();   // la curva recién terminada queda elegida, con sus CVs a la vista
+  endActiveTool('done'); mouseXform = false;
   updateHint();
 }
 const cloneV4 = (v) => new THREE.Vector4(v.x, v.y, v.z, v.w);
@@ -3588,7 +3716,7 @@ const syncRadialVeil = () => {
   const v = $('view').getBoundingClientRect(), R = m.radius || 260;
   Object.assign(radialVeil.style, { left: m.at.x - v.left - R + 'px', top: m.at.y - v.top - R + 'px', width: 2 * R + 'px', height: 2 * R + 'px' });
 };
-function makeRadial(items, { r = 140, title = '' } = {}) {
+function makeRadial(items, { r = 140, title = '', keepTool = false } = {}) {
   const K = RADIAL_TILT, r2 = r + 78, R = r2 + 46;
   const el = document.createElement('div');
   el.className = 'puck'; el.hidden = true;
@@ -3663,7 +3791,8 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
     const ex = extras.find((o) => Math.abs(dx - o.x) < 105 && Math.abs(dy - o.y) < 21);
     if (ex) { st.highlight(ex); magnify(dx, dy); return; }
     if (d < 52) { st.highlight(null); st.active = null; magnify(dx, dy); return; }
-    if (d < r + 38 || !st.active?.subs.length) { const m = nearest(mains, ang)[0]; st.highlight(near(m, 66) ? m : null); }
+    // marking menu: mientras se mantiene el botón (o la tecla) manda la DIRECCIÓN, como en Alias; ya abierto (sticky), la cercanía
+    if (d < r + 38 || !st.active?.subs.length) { const m = nearest(mains, ang)[0]; st.highlight(near(m, 66) || (!st.sticky && d < r + 90) ? m : null); }
     else {
       const sub = nearest(st.active.subs, ang)[0];
       st.highlight(near(sub, 44) ? sub : near(st.active, 70) ? st.active : null);
@@ -3687,7 +3816,10 @@ function makeRadial(items, { r = 140, title = '' } = {}) {
     st.open = false; el.hidden = true; el.classList.remove('bloom', 'settled');
     syncRadialVeil();
     const h = st.hover;
-    if (run && h) (h.it.soon || !h.it.run ? soon(h.it.label) : h.it.run)();
+    if (!run || !h) return;
+    if (h.it.soon || !h.it.run) return soon(h.it.label);
+    if (!keepTool && !h.it.keepTool) endActiveTool('switch');   // una herramienta nueva corta la anterior (su cleanup)
+    h.it.run();
   };
   all.forEach((x) => {
     x.b.addEventListener('pointerenter', () => st.highlight(x));
@@ -3733,6 +3865,7 @@ function runPuck3(id, ctx) {
   const t = PUCK3_LIB[id], P = prefs.puck3 || (prefs.puck3 = {});
   // desde Visu, IA o Forge las herramientas de modelado llevan antes al módulo Modelado
   if (layout !== 'diag' && layout !== 'split' && !['forge', 'prefs', 'undo', 'layers', 'showAll'].includes(id)) switchLayout('diag');
+  if (!['prefs', 'undo', 'layers', 'showAll'].includes(id)) endActiveTool('switch');   // la herramienta anterior hace su cleanup
   if (ctxInst) { const [cId, cCtx] = ctxInst, ct = PUCK3_LIB[cId]; if (ct?.params) { P.inst = { ...(P.inst || {}), [cCtx + ':' + cId]: Object.fromEntries(ct.params.map((k) => [k, toolDef[k]])) }; savePrefs(); } }
   if (t.shared) {
     const keep = selObjs.filter(CTX_KIND[ctx]);
@@ -3752,11 +3885,11 @@ const puck3 = createPuck3({
 const getPuck = () => puck3;
 const pickMenu = makeRadial(PICK_MM, { r: 128, title: 'Selección' });
 const xformMenu = makeRadial(XFORM_MM, { r: 128, title: 'Transformar' });
-const disp = makeRadial(DISPLAY_MM, { r: 140, title: 'Visualización' });
+const disp = makeRadial(DISPLAY_MM, { r: 140, title: 'Visualización', keepTool: true });
 // En VISU los menús solo llevan cosas de visualización (nada de modelado ni de IA, que cambiarían de módulo)
 const VISU_MM = ['mats', 'mats2', 'env', 'bg', 'tone', 'expo', 'frame'].map((id) => VISU_CMDS[id])
   .concat([{ k: 'screen', label: 'Pantalla', run: fullscreen, sub: [{ k: 'full', label: 'Completa', run: fullscreen }, { k: 'panel', label: 'Panel', run: () => setPinned(!pinned) }] }]);
-const dispVisu = makeRadial(VISU_MM, { r: 140, title: 'Visu' });
+const dispVisu = makeRadial(VISU_MM, { r: 140, title: 'Visu', keepTool: true });
 const MENUS = [puck3, pickMenu, xformMenu, disp, dispVisu];
 // Ctrl+Shift + izq / medio / der = Selección / Transformar / Visualización (en todos los módulos, como Alias)
 const menuFor = (button) => [pickMenu, xformMenu, disp][button] || disp;
@@ -3811,7 +3944,45 @@ const typing = (el) => ['INPUT', 'SELECT', 'TEXTAREA'].includes(el?.tagName) || 
 addEventListener('keydown', (e) => { if (e.key === 'Tab' && !typing(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
 addEventListener('keyup', (e) => { if (e.key === 'Tab' && !typing(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
 addEventListener('focusin', (e) => { if (!typing(e.target) && e.target !== document.body && e.target.matches?.(':focus-visible')) e.target.blur(); }, true);
-addEventListener('keydown', (e) => { if (e.key === 'Escape') MENUS.forEach((m) => m.close(false)); }, true);
+// Esc con un menú abierto solo cierra el menú; si no, lo atiende escapeAll (kill switch)
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && MENUS.some((m) => m.open)) { e.stopImmediatePropagation(); MENUS.forEach((m) => m.close(false)); } }, true);
+// ---------- Kill switch: Esc o clic en el vacío → cleanup() de la herramienta activa, soltar todo y volver a IDLE ----------
+function escapeAll(reason = 'esc') {
+  endActiveTool(reason);
+  if (pivotEdit) togglePivotEdit();
+  mouseXform = false;
+  if (TW.spec) TW.hide();
+  clearSelection(); updateHint();
+}
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || typing(e.target) || !$('quickpick').hidden || e.defaultPrevented) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  escapeAll('esc');
+}, true);
+// ¿el clic cae en el vacío? (ni objeto, ni CV, ni línea, ni manija, ni manipulador, ni lo que la herramienta diga que es suyo)
+function isVoidAt(e) {
+  if (gizmo.axis) return false;
+  if (activeTool?.hit?.(e)) return false;
+  if (pickAt(e)) return false;
+  if (lineCandidates(e, 'both', 8, pickable).length) return false;
+  setRay(e);
+  if (relArrows.children.length && ray.intersectObjects(relArrows.children.map((a) => a.userData.pick), false).length) return false;
+  return true;
+}
+let voidDown = null;
+addEventListener('pointerdown', (e) => {
+  voidDown = null;
+  if (e.target !== renderer.domElement || e.button !== 0 || e.ctrlKey || e.shiftKey || e.altKey || e.metaKey || navHeld) return;
+  if (!activeTool || activeTool.voidKill === false) return;
+  voidDown = { x: e.clientX, y: e.clientY, empty: isVoidAt(e) };
+}, true);
+addEventListener('pointerup', (e) => {
+  const v = voidDown; voidDown = null;
+  if (!v?.empty || !activeTool || Math.hypot(e.clientX - v.x, e.clientY - v.y) > 5) return;
+  const name = activeTool.label;
+  escapeAll('void');
+  toast(`${name}: terminada (clic en el vacío)`);
+}, true);
 let mouseMenu = null;
 addEventListener('pointerdown', (e) => {
   if (!(e.ctrlKey && e.shiftKey) || e.target !== renderer.domElement || carousel) return;
@@ -3958,8 +4129,9 @@ function snapshot() {
     objects: objects.map((o) => ({ id: o.id, kind: o.kind, name: o.name, mat: o.mat, own: o.ownVisible, layer: o.layer, group: o.group, pivot: o.pivot.clone(), data: cloneData(o) })),
   };
 }
+var cpMuted = 0;   // > 0: no se guardan pasos de deshacer (vistas previas en vivo; el paso se guardó al empezar)
 function checkpoint() {
-  if (restoring || cpArmed) return;
+  if (restoring || cpArmed || cpMuted) return;
   cpArmed = true; setTimeout(() => { cpArmed = false; }, 0);
   undoStack.push(snapshot());
   if (undoStack.length > 50) undoStack.shift();
@@ -4157,6 +4329,8 @@ const MENUBAR = [
     { label: 'Medir distancia', soon: true }]],
   ['Ayuda', [{ label: 'Atajos de teclado', run: () => openPrefs('help') }, { label: 'Ejemplo: Freeform Blend (manija)', run: () => blendDemo() }, { label: 'Qué abrió el último menú', run: () => toast(menuLog.length ? menuLog.slice(-3).reverse().join('  ·  ') : 'Todavía no se abrió ningún menú.') }, { label: 'Acerca de Forja', run: () => toast('FORJA v' + FORJA_VERSION + ' · ' + 'FORJA · modelador NURBS libre (Alias + Plasticity + Blender)') }]],
 ];
+// menús cuyos comandos son herramientas o cambian la escena: antes de ejecutarlos la herramienta activa hace su cleanup
+const TOOL_MENUS = ['Editar', 'Borrar', 'Curvas', 'Superficies', 'Utilidades'];
 function buildMenubar() {
   const bar = $('menubar');
   let openBtn = null;
@@ -4164,7 +4338,7 @@ function buildMenubar() {
   drop.className = 'mb-drop'; drop.hidden = true;
   document.body.append(drop);
   const close = () => { drop.hidden = true; openBtn?.setAttribute('aria-expanded', 'false'); openBtn = null; };
-  const open = (btn, items) => {
+  const open = (btn, items, name = btn.textContent) => {
     openBtn?.setAttribute('aria-expanded', 'false');
     openBtn = btn; btn.setAttribute('aria-expanded', 'true');
     drop.innerHTML = '';
@@ -4175,7 +4349,7 @@ function buildMenubar() {
       b.className = 'mb-item' + (it.soon ? ' soon' : '');
       const on = it.check?.();
       b.innerHTML = `<span class="mb-chk">${on ? '✓' : ''}</span><span>${esc(it.label)}</span><kbd>${it.soon ? 'pronto' : esc(it.key || '')}</kbd>`;
-      b.addEventListener('click', () => { close(); it.soon ? soon(it.label) : it.run(); });
+      b.addEventListener('click', () => { close(); if (it.soon) return soon(it.label); if (TOOL_MENUS.includes(name)) endActiveTool('switch'); it.run(); });
       drop.append(b);
     }
     const r = btn.getBoundingClientRect();
@@ -4732,7 +4906,11 @@ defineConstruction('revolve', {
     const { group, fields, set, live, nm } = c;
     const setAxis = (v) => {
       if (v in AXIS_IDX || v === 'pivot') { toolDef.revAxis = v; saveToolDef(); }
-      if (v === 'picked') { revolveDrag = null; revAxisPick = { rels: group }; toast('Eje elegido: haz clic en una línea, curva o borde'); return; }
+      if (v === 'picked') {
+        revolveDrag = null;
+        beginTool('revaxis', { label: 'Eje elegido', voidKill: false, cleanup: () => { revAxisPick = null; } });
+        revAxisPick = { rels: group }; toast('Eje elegido: haz clic en una línea, curva o borde'); return;
+      }
       if (v === 'manip') {
         // el manipulador empieza en el eje que había: base en su origen y punta a 2 dm a lo largo de él
         checkpoint();
@@ -4791,10 +4969,13 @@ defineConstruction('loft', {
 // Herramientas de corte = curvas: las libres se proyectan sobre la superficie (Vista / Z / Normal); las curvas sobre esa superficie se usan
 // tal cual. Cada una, cerrada o de borde a borde, parte la superficie. r.picks = puntos (u, v) elegidos con clics; r.keep = esas regiones se
 // conservan (true) o se quitan (false). La salida es la propia superficie (sus CVs no cambian: se guarda data.rtrim y se dibuja recortada).
+// devuelve una lista de cortes [{uv, closed}] en el (u, v) de la superficie: una curva da uno; otra SUPERFICIE da las curvas de
+// intersección de las dos (FF.intersectSurfaces), que siguen a esa superficie con historial si se mueve
 function trimToolUV(r, c, srf) {
-  if (c.data.cos?.surf === srf.id) return { uv: c.data.cos.uv, closed: !!c.data.cos.closed };
+  if (c.kind === 'surface') return FF.intersectSurfaces(srf.data, c.data).map((x) => ({ uv: x.a, closed: x.closed }));
+  if (c.data.cos?.surf === srf.id) return [{ uv: c.data.cos.uv, closed: !!c.data.cos.closed }];
   const pr = FF.projectCurve(c.data, srf.data, r.proj === 'normal' ? 'normal' : 'dir', r.dir);
-  return { uv: pr.uv, closed: pr.closed };
+  return [{ uv: pr.uv, closed: pr.closed }];
 }
 // ETAPAS: cada Trim es una etapa de la superficie, data.rtrims = [{ rel, loops, picks, mode }] en el orden en que se hicieron (Untrim
 // "Última" quita la de más atrás). data.rtrim (v0.47) = una sola etapa antigua, se lee igual.
@@ -4804,7 +4985,7 @@ function setTrimStages(o, st) { const d = { ...o.data }; delete d.rtrim; if (st.
 const stageOf = (r) => trimStages(byId(r.surf)?.data || {}).find((st) => st.rel === r.id);
 function trimData(r, ins, out) {
   const srf = ins[0], loops = [];
-  ins.slice(1).forEach((c) => { const t = trimToolUV(r, c, srf), l = t.uv?.length > 1 ? FF.trimLoop(t) : null; if (l) loops.push(l); });
+  ins.slice(1).forEach((c) => trimToolUV(r, c, srf).forEach((t) => { const l = t.uv?.length > 1 ? FF.trimLoop(t) : null; if (l) loops.push(l); }));
   const stage = { rel: r.id, loops, picks: (r.picks || []).map((q) => q.slice()), mode: r.keep === false ? 'discard' : 'keep' };
   const st = trimStages(out.data).slice(), i = st.findIndex((x) => x.rel === r.id);
   if (i >= 0) st[i] = stage; else st.push(stage);
@@ -4822,7 +5003,7 @@ defineConstruction('trim', {
         set: (v) => { toolDef.trimKeep = v === 'keep'; saveToolDef(); set('keep', v === 'keep'); } },
       { type: 'seg', label: 'Proyección', opts: [['view', 'Vista'], ['y', 'Z'], ['normal', 'Normal']], get: () => r.proj || 'view',
         set: (v) => { toolDef.trimProj = v; saveToolDef(); checkpoint(); r.proj = v; r.dir = projDir(v); redo(); } },
-      { type: 'html', html: () => `<span class="tw-note">${r.tools.length} curva(s) de corte · ${stageOf(r)?.loops.length ?? 0} corte(s) sobre la superficie · ${r.picks?.length || 0} pieza(s) elegida(s).${trimOp?.rel === r ? '<br>Clic en una pieza = elegirla o soltarla · clic derecho o Enter = aceptar · Esc = cancelar.' : ''}</span>` },
+      { type: 'html', html: () => `<span class="tw-note">${r.tools.length} herramienta(s) de corte (curvas o superficies) · ${stageOf(r)?.loops.length ?? 0} corte(s) sobre la superficie · ${r.picks?.length || 0} pieza(s) elegida(s).${trimOp?.rel === r ? '<br>Clic en una pieza = elegirla o soltarla · clic derecho o Enter = aceptar · Esc = cancelar.' : ''}</span>` },
       { type: 'button', label: 'Soltar todas las piezas elegidas', run: () => { checkpoint(); r.picks = []; redo(); TW.render(); } });
     return ` · ${nm(r.surf)}`;
   },
@@ -5000,7 +5181,7 @@ const TW = {
     }
   },
 };
-$('tw-close').addEventListener('click', () => { if (tool !== 'select') setTool('select'); cancelExtrudeDrag(true); TW.hide(); });
+$('tw-close').addEventListener('click', () => { endActiveTool('esc'); if (tool !== 'select') setToolRaw('select'); TW.hide(); });
 // la ventana se arrastra por su título a cualquier sitio; _ la minimiza (solo queda la barra)
 dragWin($('toolwin'), 'tool', '.tw-head');
 $('tw-min').addEventListener('click', () => setWinMin($('toolwin'), 'tool', !winState('tool').min));
@@ -5488,7 +5669,7 @@ function createExtend(p) {
   continueEdgeOp(r);
 }
 // Proyectar curvas sobre una superficie (curvas sobre superficie con historial: si mueves la curva, la proyección la sigue)
-function projectSelection() {
+function projectRun() {
   const cs = selCurves().filter((c) => !c.data.cos), srf = selObjs.find((o) => o.kind === 'surface');
   if (!cs.length || !srf) return toast('Proyectar: elige una o más curvas y la superficie (Shift + clic para añadir) y vuelve a pulsar Proyectar.');
   checkpoint();
@@ -5503,19 +5684,22 @@ function projectSelection() {
   TW.show(relSpec(rels[0], rels));
 }
 let trimOp = null;
-function trimSelection() {
-  const srf = selObjs.find((o) => o.kind === 'surface'), tools = selObjs.filter((o) => o.kind === 'curve');
-  if (!srf || !tools.length) return toast('Trim: elige la superficie y una o más curvas de corte (cerradas o de borde a borde) y vuelve a pulsar Trim.');
+function trimRun() {
+  // la PRIMERA superficie elegida es la que se recorta; las demás superficies y las curvas son los cortes
+  const srf = selObjs.find((o) => o.kind === 'surface'), tools = selObjs.filter((o) => o !== srf && (o.kind === 'curve' || o.kind === 'surface'));
+  if (!srf || !tools.length) return toast('Trim: elige la superficie y uno o más cortes (curvas cerradas o de borde a borde, u otras superficies) y vuelve a pulsar Trim.');
   checkpoint();
   const proj = toolDef.trimProj || 'view';
   const r = { type: 'trim', surf: srf.id, tools: tools.map((c) => c.id), proj, dir: projDir(proj), keep: toolDef.trimKeep !== false, picks: [] };
   addRelation(r); applyRelation(r);
   if (!stageOf(r)?.loops.length) {
     relations.splice(relations.indexOf(r), 1); setTrimStages(srf, trimStages(srf.data).filter((x) => x.rel !== r.id)); updateObject(srf); renderHistory();
-    return toast('Esas curvas no cortan la superficie: tienen que ser cerradas o ir de borde a borde (prueba otra Proyección).');
+    return toast('Eso no corta la superficie: las curvas tienen que ser cerradas o ir de borde a borde (prueba otra Proyección); una superficie tiene que atravesarla.');
   }
   // para elegir también piezas ya quitadas, los clics se miden contra la superficie entera (no contra la malla recortada)
   const S = N.surfaceOf(srf.data);
+  // Esc = cancelar; otra herramienta o clic en el vacío = aceptar lo elegido (sin piezas no se recorta nada)
+  beginTool('trim', { label: 'Trim', cleanup: (why) => finishTrim(why !== 'esc'), hit: (e) => { setRay(e); return !!(trimOp && ray.intersectObject(trimOp.full, false)[0]); } });
   trimOp = { rel: r, full: new THREE.Mesh(new ParametricGeometry((u, v, t) => S.getPoint(u, v, t), 48, 48), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide })) };
   TW.show(relSpec(r));
   toast(`Trim: ${stageOf(r).loops.length} corte(s). Clic en las piezas que quieres ${r.keep ? 'conservar' : 'quitar'} · clic derecho o Enter = aceptar · Esc = cancelar`);
@@ -5523,7 +5707,7 @@ function trimSelection() {
 function finishTrim(accept) {
   const op = trimOp;
   if (!op) return;
-  trimOp = null;
+  trimOp = null; toolDone('trim');
   const r = op.rel, srf = byId(r.surf);
   if (!accept || !r.picks.length) {
     const i = relations.indexOf(r); if (i >= 0) relations.splice(i, 1);
@@ -5552,7 +5736,6 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 addEventListener('keydown', (e) => {
   if (!trimOp || typing(e.target)) return;
   if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); finishTrim(true); }
-  else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); finishTrim(false); }
 }, true);
 // ---------- Untrim (como Alias: Etapas Última | Todas) ----------
 // Última = quita el recorte más reciente de la superficie (la última etapa de Trim; si no tiene, el último recorte con curva sobre
@@ -5573,13 +5756,13 @@ function untrimSurface(o, all) {
   updateObject(o);
   return n;
 }
-const untrimActive = () => !!TW.spec?.untrim;
+const untrimActive = () => toolIs('untrim');
 function untrimSpec() {
   return { title: 'Untrim', untrim: true,
     hint: () => 'Clic en una superficie recortada = quitarle el recorte · clic derecho o Esc = terminar',
     fields: [{ type: 'seg', label: 'Etapas', opts: [['last', 'Última'], ['all', 'Todas']], get: () => toolDef.untrimStage || 'last', set: (v) => { toolDef.untrimStage = v; saveToolDef(); } },
       { type: 'html', html: () => '<span class="tw-note">Última = quita solo el recorte más reciente (puedes repetir). Todas = la superficie vuelve entera. Las curvas de corte no se borran.</span>' }],
-    actions: [{ label: 'Terminar', primary: true, run: () => TW.hide() }] };
+    actions: [{ label: 'Terminar', primary: true, run: () => endActiveTool('done') }] };
 }
 function doUntrim(srfs) {
   checkpoint();
@@ -5590,7 +5773,7 @@ function doUntrim(srfs) {
   toast(n ? `Untrim (${all ? 'todas las etapas' : 'última etapa'}): ${n} recorte(s) quitado(s) en ${srfs.map((o) => o.name).join(', ')} (Ctrl+Z deshace)` : `${srfs.map((o) => o.name).join(', ')} no tiene recortes`);
 }
 function untrimSelection() {
-  if (trimOp) finishTrim(false);
+  beginTool('untrim', { label: 'Untrim', cleanup: () => { if (TW.spec?.untrim) TW.hide(); } });
   TW.show(untrimSpec());
   const srfs = selObjs.filter((o) => o.kind === 'surface');
   if (srfs.length) doUntrim(srfs);
@@ -5599,17 +5782,14 @@ function untrimSelection() {
 renderer.domElement.addEventListener('pointerdown', (e) => {
   if (!untrimActive() || navHeld || e.button === 1 || (e.ctrlKey && e.shiftKey)) return;
   e.stopImmediatePropagation(); e.preventDefault(); down = null;
-  if (e.button === 2) return TW.hide();
+  if (e.button === 2) return endActiveTool('done');
   setRay(e);
   const hit = ray.intersectObjects(objects.filter((o) => o.kind === 'surface' && o.visible && pickable(o)).map((o) => o.parts.mesh), false)[0];
-  if (!hit) return toast('Haz clic sobre una superficie recortada.');
+  if (!hit) return;   // en el vacío: lo atiende el kill switch
   doUntrim([hit.object.userData.obj]);
   TW.render();
 }, true);
-addEventListener('keydown', (e) => {
-  if (!untrimActive() || typing(e.target) || e.key !== 'Escape') return;
-  e.preventDefault(); e.stopImmediatePropagation(); TW.hide();
-}, true);
+
 // ---------- Revert (deshacer una operación sin perder lo demás) ----------
 // Borra lo que creó la operación, o devuelve el nodo que modificó a como estaba antes, vuelve a mostrar las superficies que la
 // operación ocultó (r.consumed) y quita la relación. Cada construcción puede dar su propio revert(r, salida).
@@ -5639,14 +5819,14 @@ function revertConstruction(r) {
   toast(`Revert ${C.name}: ${msg}${r.consumed?.length ? `; vuelven ${r.consumed.length} superficie(s) de origen` : ''} (Ctrl+Z deshace)`);
 }
 const projDir = (mode) => (mode === 'y' ? [0, -1, 0] : mode === 'normal' ? null : camera.getWorldDirection(new THREE.Vector3()).toArray());
-function offsetSelection() {
+function offsetRun() {
   const src = selObjs.filter((o) => o.kind === 'surface');
   if (!src.length) return toast('Offset: elige una o más superficies y vuelve a pulsar Offset.');
   checkpoint();
   const made = src.map((s) => { const r = { type: 'offset', src: s.id, dist: toolDef.offsetDist }; const o = addSurface(HX.offsetData(s.data, r.dist), 'Offset'); r.out = o.id; addRelation(r); return o; });
   finishCreate(made, `Offset a ${toolDef.offsetDist.toFixed(2)} dm, con historial`);
 }
-function mirrorSelection() {
+function mirrorRun() {
   const src = selObjs.filter((o) => o.kind !== 'mesh');
   if (!src.length) return toast('Simetría: elige superficies o curvas y vuelve a pulsar Simetría.');
   checkpoint();
@@ -5701,7 +5881,7 @@ function revFrame(r) {
   return best;
 }
 let revolveDrag = null, revAxisPick = null;
-function revolveSelection() {
+function revolveRun() {
   const cs = selCurves();
   if (!cs.length) return toast('Revolución: elige una curva de perfil (mejor dibujada de frente) y vuelve a pulsar Revolución.');
   checkpoint();
@@ -5710,13 +5890,14 @@ function revolveSelection() {
     const o = addSurface(N.revolve(c.data, revOpts(r, c)), 'Revolución'); r.out = o.id; addRelation(r); return r;
   });
   revolveDrag = { rels, dragging: false };
+  beginTool('revolve', { label: 'Revolución', cleanup: () => commitRevolve(true) });
   TW.show(relSpec(rels[0], rels));
   toast('Revolución de 360° · arrastra en la vista para cambiar el fin (Alt: de 15 en 15°) o escribe los grados en la ventana · clic derecho o Esc: aceptar');
 }
 function setRevolve(rels, k, v) { rels.forEach((r) => { r[k] = v; applyRelation(r); }); if (TW.spec?.rel === rels[0]) TW.render(); }
 function commitRevolve(close) {
   const g = revolveDrag?.rels || (TW.spec?.rel?.type === 'revolve' ? [TW.spec.rel] : null);
-  revolveDrag = null; revAxisPick = null;
+  revolveDrag = null; revAxisPick = null; toolDone('revolve'); toolDone('revaxis');
   if (!g) return;
   toolDef.revAngle = g[0].angle; saveToolDef();
   finishCreate(g.map((x) => byId(x.out)).filter(Boolean), `Revolución de ${Math.round(g[0].angle)}° aceptada, con historial`);
@@ -5746,7 +5927,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
     const rels = revAxisPick.rels, srcIds = new Set(rels.map((r) => r.src));
     const c = lineCandidates(e, 'both', 12, (o) => !srcIds.has(o.id))[0];
     if (!c) return toast('Eje elegido: haz clic cerca de una línea, curva o borde (no del perfil).');
-    revAxisPick = null;
+    revAxisPick = null; toolDone('revaxis');
     checkpoint();
     rels.forEach((r) => { r.axisMode = 'picked'; r.axisObj = c.obj.id; r.axisEdge = c.edge || null; applyRelation(r); });
     if (!pickedAxisPts(rels[0])) toast('Esa curva empieza y acaba en el mismo punto: no sirve de eje.');
@@ -5767,8 +5948,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   if (TW.spec?.rel?.type !== 'revolve') return;
   e.stopImmediatePropagation(); e.preventDefault(); commitRevolve(true);
 }, true);
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && (revolveDrag || revAxisPick)) { e.stopImmediatePropagation(); commitRevolve(true); } }, true);
-function loftSelection() {
+function loftRun() {
   const cs = selCurves();
   if (cs.length < 2) return toast('Loft: elige 2 o más curvas, en orden, y vuelve a pulsar Loft.');
   checkpoint();
@@ -5779,7 +5959,7 @@ function loftSelection() {
 }
 // --- Extruir con el ratón: se crea la superficie y la distancia sigue al ratón hasta hacer clic ---
 let extrudeDrag = null;
-function extrudeSelection() {
+function extrudeRun() {
   const cs = selCurves();
   if (!cs.length) return toast('Extruir: elige una o más curvas y vuelve a pulsar Extruir.');
   checkpoint();
@@ -5793,11 +5973,12 @@ function extrudeSelection() {
   const d0 = HX.extrudeData(cs[0].data, 0, rels[0].dir, false).cvs[1][0];
   const axis = new THREE.Vector3(dirv.x - d0.x, dirv.y - d0.y, dirv.z - d0.z);
   extrudeDrag = { rels, c0, axis };
+  beginTool('extrude', { label: 'Extruir', voidKill: false, cleanup: () => cancelExtrudeDrag(true) });
   TW.show(relSpec(rels[0], rels));
   toast('Mueve el ratón arriba / abajo para extruir · clic para terminar · Esc: también termina');
 }
 function setExtrudeDist(rels, d) { rels.forEach((r) => { r.dist = d; applyRelation(r); }); }
-function cancelExtrudeDrag(keep) { if (!extrudeDrag) return; const r = extrudeDrag.rels; extrudeDrag = null; if (keep) { finishCreate(r.map((x) => byId(x.out)).filter(Boolean), 'Extrusión terminada (cambia la distancia en su ventana)'); TW.show(relSpec(r[0], r)); } }
+function cancelExtrudeDrag(keep) { if (!extrudeDrag) return; const r = extrudeDrag.rels; extrudeDrag = null; toolDone('extrude'); if (keep) { finishCreate(r.map((x) => byId(x.out)).filter(Boolean), 'Extrusión terminada (cambia la distancia en su ventana)'); TW.show(relSpec(r[0], r)); } }
 addEventListener('pointermove', (e) => {
   if (!extrudeDrag) return;
   const pn = paneAt(e.clientX), r = renderer.domElement.getBoundingClientRect();
@@ -5814,7 +5995,6 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   e.stopImmediatePropagation(); e.preventDefault();
   cancelExtrudeDrag(true);
 }, true);
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && extrudeDrag) cancelExtrudeDrag(true); }, true);
 
 // --- Ventana de opciones de una relación ya creada (al elegir su resultado se abre para modificarla) ---
 function relSpec(r, group = [r]) {
@@ -6007,7 +6187,7 @@ addEventListener('pointerdown', (e) => {
 
 // al elegir un solo objeto que sale de una relación, su ventana de opciones se abre para modificarla
 function syncToolWinToSelection() {
-  if (tool !== 'select' || extrudeDrag) return;
+  if (tool !== 'select' || extrudeDrag || awaitSel) return;
   const o = selObjs.length === 1 && pickMode === 'object' ? selObjs[0] : null;
   const r = o && relations.find((x) => outputOf(x) === o.id);
   if (r) { if (TW.spec?.rel !== r) TW.show(relSpec(r)); }
@@ -6447,6 +6627,8 @@ async function startFillet() {
   edges.forEach((e) => { e.srcIds = e.faceShapes.map((f) => built.src.find((s) => s.face.IsSame(f))?.id); });
   if (!edges.length) return toast('Redondear: estas superficies no tienen aristas vivas compartidas (las uniones tangentes no se redondean).');
   fil = { oc, built, items, edges, sel: [], hover: -1, dist: toolDef.filDist ?? 0.1, vary: [], preview: null, drag: null, busy: false };
+  // Esc = cancelar; otra herramienta o clic en el vacío = aceptar (si hay resultado)
+  beginTool('fillet', { label: 'Redondear', cleanup: (why) => { if (why !== 'esc' && fil?.sel.length) endFillet(true); if (fil) endFillet(false); }, hit: (e) => filEdgeAt(e).i >= 0 });
   tool = 'fillet';
   // todas las aristas candidatas en gris; las elegidas en azul
   const all = [];
@@ -6633,7 +6815,7 @@ function endFillet(accept) {
 }
 function filCleanup() {
   for (const l of Object.values(fil.lines)) { l.geometry.dispose(); filGroup.remove(l); }
-  filGroup.visible = false; fil = null; tool = 'select';
+  filGroup.visible = false; fil = null; tool = 'select'; toolDone('fillet');
   TW.hide(); updateHint();
 }
 renderer.domElement.addEventListener('pointerdown', (e) => {
@@ -6669,8 +6851,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
 renderer.domElement.addEventListener('contextmenu', (e) => { if (fil) e.preventDefault(); });
 addEventListener('keydown', (e) => {
   if (!fil || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
-  if (e.key === 'Escape') { e.stopImmediatePropagation(); endFillet(false); }
-  else if (e.key === 'Enter') { e.stopImmediatePropagation(); endFillet(true); }
+  if (e.key === 'Enter') { e.stopImmediatePropagation(); endFillet(true); }
   else if (e.key.toLowerCase() === 'v' && !e.ctrlKey) {
     // radio variable en el punto de la arista bajo el cursor (en la primera arista elegida)
     e.stopImmediatePropagation();
@@ -7101,7 +7282,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, trimSelection, finishTrim, untrimSelection, doUntrim, revertConstruction, endFillet, filPreview, trimStages, relSpecOf: (r) => relSpec(r), trimOp: () => trimOp, applyRelation, propagateFrom, renderHistory };
+window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, trimSelection, finishTrim, untrimSelection, doUntrim, revertConstruction, endFillet, activeTool: () => activeTool?.id || "idle", escapeAll, awaitSel: () => awaitSel, revolveDrag: () => revolveDrag, MENUS: () => MENUS, setXform, offsetSelection, loftSelection, revolveSelection, extrudeSelection, filPreview, trimStages, relSpecOf: (r) => relSpec(r), trimOp: () => trimOp, applyRelation, propagateFrom, renderHistory };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

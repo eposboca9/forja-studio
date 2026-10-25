@@ -564,3 +564,141 @@ export function trimGeometry(geo, segs, removed, S) {
   g.setIndex(index);
   return g;
 }
+
+// ---------- Intersección de dos superficies (Trim con superficies, como intersect(AlSurface*) de Alias) ----------
+// 1) se teselan las dos en una rejilla n × n que conoce el (u, v) de cada vértice; 2) cruce triángulo-triángulo (los de B van en
+// cubetas 3D para no probarlos todos): cada cruce es un tramo con (uA, vA) y (uB, vB) en sus extremos; 3) los tramos se encadenan en
+// polilíneas; 4) cada punto se afina con Gauss-Newton sobre F = SA(uA, vA) − SB(uB, vB) (paso de norma mínima), así queda EXACTO
+// sobre las dos superficies. Los extremos que caen en un borde se pegan al borde (así el corte va "de borde a borde").
+// Devuelve [{ a: [[u, v]…] en A, b: [[u, v]…] en B, pts: [Vector3…], closed }].
+export function intersectSurfaces(dA, dB, n = 40) {
+  const SA = surfEval(dA), SB = surfEval(dB), N1 = n + 1;
+  const grid = (S) => { const P = []; for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) P.push(S(i / n, j / n)); return P; };
+  const PA = grid(SA), PB = grid(SB);
+  const uvk = (k) => [Math.floor(k / N1) / n, (k % N1) / n];
+  const tris = () => { const T = []; for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { const a = i * N1 + j, b = a + N1; T.push([a, b, a + 1], [b, b + 1, a + 1]); } return T; };
+  const T = tris();
+  const box = new THREE.Box3(); PA.forEach((p) => box.expandByPoint(p)); PB.forEach((p) => box.expandByPoint(p));
+  const diag = box.getSize(new THREE.Vector3()).length() || 1, tol = diag * 1e-7;
+  // cubetas de los triángulos de B
+  const h = diag / n * 1.5, cell = (x, o) => Math.floor((x - o) / h), mn = box.min, buckets = new Map();
+  const triBox = (P, t) => { const b = new THREE.Box3(); t.forEach((k) => b.expandByPoint(P[k])); return b; };
+  T.forEach((t, ti) => {
+    const b = triBox(PB, t);
+    for (let x = cell(b.min.x, mn.x); x <= cell(b.max.x, mn.x); x++) for (let y = cell(b.min.y, mn.y); y <= cell(b.max.y, mn.y); y++)
+      for (let z = cell(b.min.z, mn.z); z <= cell(b.max.z, mn.z); z++) { const key = x + ',' + y + ',' + z; (buckets.get(key) || buckets.set(key, []).get(key)).push(ti); }
+  });
+  // segmento p→q contra el triángulo (a, b, c): parámetro t en el segmento y baricéntricas (u, v) en el triángulo
+  const e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), pv = new THREE.Vector3(), tv = new THREE.Vector3(), qv = new THREE.Vector3(), d = new THREE.Vector3();
+  const segTri = (p, q, a, b, c) => {
+    d.subVectors(q, p); e1.subVectors(b, a); e2.subVectors(c, a); pv.crossVectors(d, e2);
+    const det = e1.dot(pv); if (Math.abs(det) < 1e-14) return null;
+    const inv = 1 / det; tv.subVectors(p, a);
+    const u = tv.dot(pv) * inv; if (u < -1e-9 || u > 1 + 1e-9) return null;
+    qv.crossVectors(tv, e1);
+    const v = d.dot(qv) * inv; if (v < -1e-9 || u + v > 1 + 1e-9) return null;
+    const t = e2.dot(qv) * inv; if (t < -1e-9 || t > 1 + 1e-9) return null;
+    return { t, u, v };
+  };
+  const lerpUV = (k0, k1, t) => { const a = uvk(k0), b = uvk(k1); return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; };
+  const baryUV = (tri, u, v) => { const a = uvk(tri[0]), b = uvk(tri[1]), c = uvk(tri[2]); return [a[0] + (b[0] - a[0]) * u + (c[0] - a[0]) * v, a[1] + (b[1] - a[1]) * u + (c[1] - a[1]) * v]; };
+  const segs = [], seen = new Int32Array(T.length).fill(-1);
+  T.forEach((ta, ai) => {
+    const b = triBox(PA, ta), cand = [];
+    for (let x = cell(b.min.x, mn.x); x <= cell(b.max.x, mn.x); x++) for (let y = cell(b.min.y, mn.y); y <= cell(b.max.y, mn.y); y++)
+      for (let z = cell(b.min.z, mn.z); z <= cell(b.max.z, mn.z); z++) for (const bi of buckets.get(x + ',' + y + ',' + z) || []) if (seen[bi] !== ai) { seen[bi] = ai; cand.push(bi); }
+    for (const bi of cand) {
+      const tb = T[bi], hits = [];
+      if (!triBox(PB, tb).intersectsBox(b)) continue;
+      for (let k = 0; k < 3; k++) {   // aristas de A contra el triángulo de B
+        const i0 = ta[k], i1 = ta[(k + 1) % 3], r = segTri(PA[i0], PA[i1], PB[tb[0]], PB[tb[1]], PB[tb[2]]);
+        if (r) hits.push({ p: PA[i0].clone().lerp(PA[i1], r.t), a: lerpUV(i0, i1, r.t), b: baryUV(tb, r.u, r.v) });
+      }
+      for (let k = 0; k < 3; k++) {   // aristas de B contra el triángulo de A
+        const i0 = tb[k], i1 = tb[(k + 1) % 3], r = segTri(PB[i0], PB[i1], PA[ta[0]], PA[ta[1]], PA[ta[2]]);
+        if (r) hits.push({ p: PB[i0].clone().lerp(PB[i1], r.t), a: baryUV(ta, r.u, r.v), b: lerpUV(i0, i1, r.t) });
+      }
+      if (hits.length < 2) continue;
+      let best = null, bd = tol;
+      for (let i = 0; i < hits.length; i++) for (let j = i + 1; j < hits.length; j++) { const dd = hits[i].p.distanceTo(hits[j].p); if (dd > bd) { bd = dd; best = [hits[i], hits[j]]; } }
+      if (best) segs.push(best);
+    }
+  });
+  if (!segs.length) return [];
+  // encadenar: extremos que coinciden (cubetas finas de los extremos). Si el corte cae justo sobre aristas de la rejilla salen tramos
+  // repetidos (de los dos triángulos vecinos): se quitan.
+  const q = diag * 1e-6, key = (p) => `${Math.round(p.x / q)},${Math.round(p.y / q)},${Math.round(p.z / q)}`;
+  { const once = new Set(); for (let i = segs.length - 1; i >= 0; i--) { const k = [key(segs[i][0].p), key(segs[i][1].p)].sort().join('|'); if (once.has(k)) segs.splice(i, 1); else once.add(k); } }
+  const ends = new Map(), add = (k, v) => (ends.get(k) || ends.set(k, []).get(k)).push(v);
+  segs.forEach((s, i) => { add(key(s[0].p), [i, 0]); add(key(s[1].p), [i, 1]); });
+  const near = (p) => { const [x, y, z] = key(p).split(',').map(Number), out = [];
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) for (const e of ends.get(`${x + i},${y + j},${z + k}`) || []) out.push(e);
+    return out.filter(([si, w]) => segs[si][w].p.distanceTo(p) < q * 2); };
+  const used = new Uint8Array(segs.length), chains = [];
+  const grow = (chain, atEnd) => {
+    for (;;) {
+      const tip = atEnd ? chain[chain.length - 1] : chain[0], nx = near(tip.p).find(([si]) => !used[si]);
+      if (!nx) return;
+      used[nx[0]] = 1;
+      const other = segs[nx[0]][1 - nx[1]];
+      if (atEnd) chain.push(other); else chain.unshift(other);
+    }
+  };
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue;
+    used[i] = 1;
+    const chain = [segs[i][0], segs[i][1]];
+    grow(chain, true); grow(chain, false);
+    chains.push(chain);
+  }
+  // los cortes que pasan por vértices o aristas de la rejilla quedan partidos: se unen los trozos cuyos extremos están a menos de
+  // una celda (el más cercano primero); luego se quitan los puntos repetidos
+  let cellLen = 0; for (let i = 0; i < n; i++) cellLen = Math.max(cellLen, PA[i * N1].distanceTo(PA[(i + 1) * N1]), PA[i].distanceTo(PA[i + 1]));
+  const gTol = cellLen * 1.01;
+  for (let merged = true; merged && chains.length > 1;) {
+    merged = false;
+    let best = null;
+    for (let i = 0; i < chains.length; i++) for (let j = i + 1; j < chains.length; j++) for (const ei of [0, 1]) for (const ej of [0, 1]) {
+      const a = ei ? chains[i][chains[i].length - 1] : chains[i][0], b = ej ? chains[j][chains[j].length - 1] : chains[j][0], dd = a.p.distanceTo(b.p);
+      if (dd < gTol && (!best || dd < best.dd)) best = { i, j, ei, ej, dd };
+    }
+    if (best) {
+      const A = best.ei ? chains[best.i] : chains[best.i].slice().reverse(), B = best.ej ? chains[best.j].slice().reverse() : chains[best.j];
+      chains[best.i] = A.concat(B); chains.splice(best.j, 1); merged = true;
+    }
+  }
+  for (let c = 0; c < chains.length; c++) chains[c] = chains[c].filter((x, i, arr) => !i || x.p.distanceTo(arr[i - 1].p) > cellLen * 1e-3);
+  for (let c = chains.length - 1; c >= 0; c--) { const ch = chains[c]; let L = 0; for (let i = 1; i < ch.length; i++) L += ch[i].p.distanceTo(ch[i - 1].p); if (ch.length < 2 || L < cellLen * 0.5) chains.splice(c, 1); }
+  // afinar cada punto (Gauss-Newton de norma mínima) y pegar al borde los extremos que lo tocan
+  const cl = (x) => Math.min(1, Math.max(0, x));
+  const refine = (h0) => {
+    let [ua, va] = h0.a, [ub, vb] = h0.b;
+    for (let it = 0; it < 8; it++) {
+      const F = SA(ua, va).sub(SB(ub, vb));
+      if (F.length() < diag * 1e-9) break;
+      const A = tangents(SA, ua, va), B = tangents(SB, ub, vb), cols = [A.Su, A.Sv, B.Su.clone().negate(), B.Sv.clone().negate()];
+      // J Jᵀ (3 × 3) y paso dx = −Jᵀ (J Jᵀ)⁻¹ F
+      const M = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], f = F.toArray();
+      for (const c of cols) { const v = c.toArray(); for (let r = 0; r < 3; r++) for (let s = 0; s < 3; s++) M[r][s] += v[r] * v[s]; }
+      const y = solve3(M, f);
+      if (!y || y.some((x) => !Number.isFinite(x))) break;
+      const yv = new THREE.Vector3(...y), dx = cols.map((c) => -c.dot(yv));
+      ua = cl(ua + dx[0]); va = cl(va + dx[1]); ub = cl(ub + dx[2]); vb = cl(vb + dx[3]);
+    }
+    return { a: [ua, va], b: [ub, vb], p: SA(ua, va) };
+  };
+  const snap = (uv) => uv.map((x) => (x < 0.01 ? 0 : x > 0.99 ? 1 : x));
+  return chains.map((ch) => {
+    const pts = ch.map(refine), closed = pts.length > 3 && pts[0].p.distanceTo(pts[pts.length - 1].p) < gTol;
+    if (closed) pts.pop();
+    else for (const e of [pts[0], pts[pts.length - 1]]) { e.a = snap(e.a); e.b = snap(e.b); }
+    return { a: pts.map((x) => x.a), b: pts.map((x) => x.b), pts: pts.map((x) => x.p), closed };
+  });
+}
+// sistema 3 × 3 (regla de Cramer); null si es singular
+function solve3(M, f) {
+  const det = (m) => m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+  const D = det(M);
+  if (Math.abs(D) < 1e-18) return null;
+  return [0, 1, 2].map((c) => det(M.map((r, i) => r.map((x, j) => (j === c ? f[i] : x)))) / D);
+}

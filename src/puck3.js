@@ -25,7 +25,14 @@ export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, s
   const openOf = (c) => Math.min(cfg.open?.[c] || 0, ringsOf(c).length);
   const setOpen = (c, n) => { cfg.open = { ...(cfg.open || {}), [c]: n }; save(); };
   const catEls = {};
-  let ringEls = [], tools = [], ripple = null;
+  let ringEls = [], tools = [], ripple = null, swallow = false, dwell = null;
+  // soltar el botón sobre una herramienta (tras pulsar en un círculo o en un anillo) = ejecutarla, sin más clics
+  addEventListener('pointerup', () => {
+    if (!st.drag) return;
+    st.drag = false;
+    if (st.open && st.hover) { swallow = false; st.close(true); }
+  }, true);
+  el.addEventListener('pointerdown', (e) => { if (e.button === 0 && e.target.closest('.p3-tool, .p3-ring')) st.drag = true; });
 
   // ---------- construcción ----------
   for (const c of cats) {
@@ -35,7 +42,13 @@ export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, s
       <button class="p3-core" aria-label="${esc(c.label)}">${icon(c.k)}<span>${esc(c.label)}</span></button>`;
     stage.append(g);
     catEls[c.id] = g;
-    g.querySelector('.p3-core').addEventListener('click', (e) => { e.stopPropagation(); coreClick(c.id); });
+    // un solo gesto: pulsar en el círculo lo abre al momento, arrastrar hasta la herramienta y soltar la ejecuta
+    g.querySelector('.p3-core').addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation(); st.drag = true;
+      if (cfg.active !== c.id || !openOf(c.id)) { coreClick(c.id); swallow = true; }
+    });
+    g.querySelector('.p3-core').addEventListener('click', (e) => { e.stopPropagation(); if (swallow) { swallow = false; return; } coreClick(c.id); });
     g.querySelector('.p3-x').addEventListener('click', (e) => { e.stopPropagation(); xClick(c.id); });
     g.querySelector('.p3-core').addEventListener('pointerenter', () => setLabel(c.label, cfg.active === c.id && openOf(c.id) ? 'clic: plegar todo' : 'clic: abrir'));
   }
@@ -165,15 +178,32 @@ export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, s
   };
   st.close = (go) => {
     if (!st.open) return;
-    st.open = false; el.hidden = true;
+    st.open = false; el.hidden = true; st.drag = false; clearTimeout(dwell?.t); dwell = null;
     const h = st.hover; st.hover = null;
     if (go && h) (h.t.soon || !h.t.run ? soon(h.t.label) : () => run(h.id, cfg.active))();
   };
   // mantener Z y pasar por encima: marca la herramienta del anillo (por distancia al centro y ángulo)
+  const catAt = (dx, dy) => {   // categoría bajo el cursor (círculo central o zona de ondas X)
+    for (const [id, g] of Object.entries(catEls)) {
+      const m = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(g.style.transform || '');
+      if (!m) continue;
+      const d = Math.hypot(dx - +m[1], dy - +m[2]) / +m[3];
+      if (d <= RC) return { id, zone: 'core' };
+      if (d <= RX && id === cfg.active && openOf(id)) return { id, zone: 'x' };
+    }
+    return null;
+  };
+  const armDwell = (key, ms, fn) => { if (dwell?.key === key) return; clearTimeout(dwell?.t); dwell = { key, t: setTimeout(() => { if (st.open) fn(); }, T(ms) || 1) }; };
   st.pickAt = (px, py) => {
     const c = cfg.active, n = c ? openOf(c) : 0;
-    if (!n) return;
     const dx = px - st.at.x, dy = py - st.at.y, d = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
+    if (!st.sticky || st.drag) {   // gesto en curso (Z mantenida o botón pulsado)
+      const hit = catAt(dx, dy);
+      if (hit?.zone === 'core' && (hit.id !== c || !n)) armDwell('core:' + hit.id, 170, () => coreClick(hit.id));
+      else if (hit?.zone === 'x') armDwell('x:' + hit.id + ':' + n, 320, () => release(hit.id));
+      else if (!hit) { clearTimeout(dwell?.t); dwell = null; }
+    }
+    if (!n) return;
     const k = [...Array(n).keys()].find((q) => d >= ringIn(q) - 4 && d <= ringOut(q) + 4);
     if (k == null) { if (st.hover && !st.hover.btn.matches(':hover')) hoverTool(null); return; }
     let best = null, bd = 1e9;

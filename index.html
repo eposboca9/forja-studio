@@ -892,6 +892,32 @@
     font: 11px var(--font-mono, monospace); text-align: right; outline: none; }
   .tw-num:focus { border-color: #2f7bff; }
   .tw-numw em { font-style: normal; font-size: 10px; color: var(--muted); max-width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* (v0.49) GLASSMORPHIC SOFT UI en las ventanas flotantes (herramienta: Align, Curva, Revolución...; elección rápida; Transform info):
+     cristal esmerilado translúcido (el modelo se difumina detrás), sin bordes sólidos, esquinas de 18 px, sombra de elevación profunda y
+     un reflejo de 1 px arriba. Selectores en cápsula y botones en gris mate: sin colores de acento saturados. Tema claro = mismo cristal claro. */
+  :root { --glass-bg: rgba(246,246,244,.6); --glass-shadow: 0 12px 32px rgba(30,28,24,.22); --glass-hi: rgba(255,255,255,.55);
+    --pill-bg: rgba(0,0,0,.07); --pill-on: rgba(0,0,0,.11); --pill-ink: rgba(20,20,22,.62); --glass-btn: rgba(0,0,0,.06); --glass-btn-on: rgba(0,0,0,.12); }
+  :root[data-theme="dark"] { --glass-bg: rgba(30,32,36,.6); --glass-shadow: 0 12px 32px rgba(0,0,0,.4); --glass-hi: rgba(255,255,255,.05);
+    --pill-bg: rgba(0,0,0,.28); --pill-on: rgba(255,255,255,.1); --pill-ink: rgba(255,255,255,.6); --glass-btn: rgba(255,255,255,.06); --glass-btn-on: rgba(255,255,255,.1); }
+  .toolwin, .quickpick, .hud { background: var(--glass-bg) !important; border: 0 !important; border-radius: 18px;
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    box-shadow: inset 0 1px 0 var(--glass-hi), var(--glass-shadow) !important; }
+  .tw-seg { gap: 2px; padding: 3px; border-radius: 999px; background: var(--pill-bg); }
+  .tw-seg button, .tw-seg button:first-child, .tw-seg button:last-child { border-radius: 999px; background: transparent; color: var(--pill-ink); padding: 4px 0; }
+  .tw-seg button:hover { color: var(--fg); }
+  .tw-seg button[aria-pressed="true"] { background: var(--pill-on); color: var(--fg); box-shadow: inset 0 1px 0 var(--glass-hi); }
+  .toolwin .tw-btn, .toolwin .btn { border: 0 !important; border-radius: 999px; background: var(--glass-btn) !important; color: var(--fg) !important; padding: 6px 13px; }
+  .toolwin .tw-btn:hover, .toolwin .btn:hover { background: var(--glass-btn-on) !important; }
+  .toolwin .tw-btn.primary { background: var(--glass-btn-on) !important; font-weight: 600; box-shadow: inset 0 1px 0 var(--glass-hi); }
+  .tw-hint { color: var(--fg); opacity: .78; font-weight: 400; }
+  .tw-num { border-radius: 999px; background: var(--pill-bg); }
+  .tw-num:focus { border-color: var(--pill-on); }
+  .quickpick button { background: var(--glass-btn); color: var(--fg); }
+  .quickpick button:hover { background: var(--glass-btn-on); color: var(--fg); }
+  .quickpick button.def { box-shadow: inset 0 0 0 1px var(--pill-on); }
+  .hud-f, .hud-list { background: var(--pill-bg); border-radius: 10px; }
+  .hud-f.on { box-shadow: inset 0 0 0 1px var(--pill-on) !important; background: var(--glass-btn-on); color: var(--fg); }
+  .win-btn { border-radius: 999px; }
   .float-win { background: transparent !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 0 !important; }
   .panel .sec h2, .panel .muted, .fw-count, .ly-n { color: inherit; }
   /* ===== Módulo FORGE en el panel de Forja: los controles de BumpForge con el aspecto de Forja =====
@@ -2061,6 +2087,6 @@
   "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
 } }
 </script>
-<script type="module" src="./src/main.js?v=0.48.0"></script>
+<script type="module" src="./src/main.js?v=0.49.0"></script>
 </body>
 </html>

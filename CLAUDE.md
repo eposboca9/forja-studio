@@ -893,3 +893,33 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   relación 'fillet' {srcs, consumed, names, outs (superficies + bordes de recorte), kind, n, dist}, editable, sin recálculo (OpenCascade no tiene historial);
   Revert borra outs y devuelve las originales. Prueba: scratchpad v48/t33.cjs (Playwright global, no el de fil/node_modules; OpenCascade servido desde
   /tmp/claude-0/-home-user/.../npmcdn/replicad-opencascadejs@0.20.2). Siguiente: v0.49 recorte con superficies (intersección).
+- (v0.49) Documento "State Machine, UX industrial y Glassmorphism" del usuario + Trim superficie-superficie.
+  (1) MÁQUINA DE ESTADOS (main.js, antes de "Herramientas"): UNA herramienta activa (var activeTool) o IDLE. beginTool(id, {label, cleanup(reason),
+  voidKill, hit(e)}) llama antes a endActiveTool('switch'); endActiveTool(reason) ejecuta el cleanup y cierra la ventana TW si reason ≠ 'done';
+  toolDone(id) = la herramienta terminó sola (sin cleanup). reason: 'switch' | 'esc' | 'void' | 'done'. Registradas: setTool (ids 'tool:curve|plane|circle|edge';
+  setToolRaw = el setTool de antes; dibujar no muere con clic en el vacío), 'xform' (setXform), 'pivot', 'trim' (Esc cancela, lo demás acepta; hit = malla
+  entera), 'untrim', 'revolve' (cleanup = commitRevolve), 'revaxis', 'extrude', 'fillet' (Esc cancela; otra cosa acepta si hay resultado; hit = arista) y
+  'await:<id>'. KILL SWITCH: escapeAll(reason) = cleanup + pivote/mover fuera + TW.hide + soltar todo; Esc (un solo manejador en captura; con menú abierto solo
+  cierra el menú; no con quickpick ni escribiendo) y CLIC EN EL VACÍO (pointerdown/up en captura en window, < 5 px, isVoidAt: ni objeto, ni CV, ni línea a 8 px,
+  ni flecha, ni gizmo, ni activeTool.hit). "Nada" (pickNothing) = escapeAll('void') salvo terminar una curva en dibujo. Se quitaron los Esc propios de
+  Trim, Untrim, Revolución, Extruir y Redondeo. Revolución: arrastrar en el vacío sigue cambiando el fin; un clic sin arrastrar = aceptar e IDLE.
+  La barra de estado dice la herramienta activa o "IDLE" (updateStatus). checkpoint() respeta var cpMuted (vistas previas en vivo).
+  (2) MENÚS: makeRadial({keepTool}): al soltar sobre una opción corta la herramienta activa (endActiveTool('switch')) salvo Visualización / Visu (keepTool);
+  mientras se mantiene el botón o la tecla manda la DIRECCIÓN (pasado el centro, hasta r + 90 px), ya abierto (sticky) la cercanía. Puck (puck3.js): pulsar en un
+  círculo lo abre al momento, arrastrar a la herramienta y soltar = ejecutar (st.drag, pointerup en captura); con Z mantenida, pasar por un círculo 170 ms lo abre y
+  por la zona de ondas 320 ms suelta otro anillo (catAt, armDwell). runPuck3 y los menús Editar/Borrar/Curvas/Superficies/Utilidades (TOOL_MENUS) cortan la anterior.
+  (3) SELECCIÓN EN LOS DOS SENTIDOS: withSelection(key) con SEL_SPECS {label, what, pick (filtro temporal), ok, ready, multi, run, preview, commit}; las funciones
+  públicas (revolveSelection, extrudeSelection, loftSelection, offsetSelection, mirrorSelection, projectSelection, trimSelection) la llaman y las de antes se
+  llaman *Run. Pre-selección lista → run al momento; si no → 'await:<id>' (var awaitSel, ventana awaitSpec con lo elegido), selectionChanged → awaitChanged:
+  las de una entrada se ejecutan solas al elegirla, las multi esperan Enter / clic derecho / Aceptar; Loft = vista previa en vivo (preview/commit, sin pasos de
+  deshacer extra); Esc la quita. syncToolWinToSelection no toca la ventana mientras se espera.
+  (4) CRISTAL (index.html, bloque "(v0.49) GLASSMORPHIC SOFT UI"): .toolwin, .quickpick y .hud con --glass-bg rgba(30,32,36,.6) en oscuro (claro: rgba(246,246,244,.6)),
+  blur 16 px, sin borde, radio 18 px, sombra 0 12 32 rgba(0,0,0,.4) + reflejo arriba de 1 px; .tw-seg = cápsula (activo rgba(255,255,255,.1)); botones .tw-btn
+  en gris mate (sin azul), casillas y HUD con --pill-bg.
+  (5) TRIM SUPERFICIE-SUPERFICIE: freeform.js intersectSurfaces(dA, dB, n = 40): rejillas n × n, cruce triángulo-triángulo con cubetas 3D, tramos encadenados
+  (sin repetidos; los trozos que se cortan sobre vértices de la rejilla se unen si sus extremos están a menos de una celda), Gauss-Newton de norma mínima sobre
+  SA − SB (solve3) → puntos exactos en las dos; extremos pegados al borde. trimToolUV devuelve LISTA de cortes; una superficie como herramienta = sus curvas de
+  intersección (entrada de la relación: moverla rehace el corte). trimRun: la 1.ª superficie elegida se recorta, las demás superficies y curvas cortan.
+  Medido: plano/plano exacto (2e-16), plano/esfera en 80 ms con puntos a 6e-9 de las dos.
+  Pruebas: scratchpad v49app/t34.cjs [state|menu|trim] (Playwright global), v49/tx.mjs (Node; node_modules = enlace a fil/node_modules, por eso las .cjs van en
+  v49app), v48/t33b.cjs y t33.cjs siguen igual. Capturas docs/capturas/v0.49-*.png.
