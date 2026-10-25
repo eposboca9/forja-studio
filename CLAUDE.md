@@ -945,3 +945,22 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   Localizador; Ctrl+Shift+medio › Borrar localizadores; SEL_SPECS locmin/locmax (2 objetos, pre o post selección). No van en el deshacer ni en el .forja.
   (3) INVERTIR NORMALES (Superficies › Invertir normales, Puck Superficies anillo 2, SEL_SPECS flip): invierte U (cvs y nudos 1 − k) y pasa los recortes (etapas, picks y
   curvas sobre superficie) a 1 − u. Prueba: scratchpad v49app/t36.cjs (locators 50 / 140 / 30 mm exactos y 50 mm tras mover la recta; normal y −1 → +1 con la misma forma).
+- (v0.50) Documento "Paleta Forja, Puck, Spans/Grados, coordenadas locales y .forja":
+  (1) PALETA FORJA: curvas en oscuro #E2E8F0 (THEME_3D.dark.curve); CVs dorado #D69E2E y elegido #F6E05E (handleMat / handleSelMat); ejes X #E53E3E, Y #38A169, Z #3182CE
+  (originAxes, AXIS_BLUE de las líneas de la rejilla, gizmo, HUD .ax*); historial #48BB78 (isoHistMat, curveHistMat); pivotes y locators turquesa #4FD1C5; recuadro de
+  selección azul eléctrico translúcido (.marquee). No se tocó ningún shader.
+  (2) PUCK: nada se abre por pasar el cursor (se quitó el bloque de gesto de st.pickAt en puck3.js): categorías centrales y laterales y ondas solo con clic; el pickAt
+  sigue marcando herramientas de anillos ya abiertos (mantener Z y soltar sobre una herramienta sigue valiendo).
+  (3) GRADO / SPANS: Revolución muestra siempre Grado y Spans (tocarlos pasa a no racional); Extruir tiene Grado (Curva = el de la curva) y Spans del perfil (r.deg, r.spans:
+  el perfil se reconstruye antes de extruir); la Curva ya los tenía. INSPECTOR en Transform info (modo single, curvas y superficies): casillas Grado/Spans (U/V) +
+  "parametrización uniforme" (geoInfo, geoRows, applyGeo): salida de una Revolución → cambia rel.deg/spans (historial intacto); salida de otra construcción no editable →
+  se quita esa relación con aviso; si no, N.rebuildCurve / rebuildSurface y updateObject (lo que depende se recalcula).
+  (4) ORIGEN LOCAL: initObj guarda obj.origin0 = pivote al crearse; Transform info (single / multi) muestra "Traslación (local)" = pivote − origin0 → todo nace en (0, 0, 0)
+  (rotación 0 y escala 1 ya empezaban así); origin0 va en snapshot / restore / .forja.
+  (5) CVs POR OBJETO: obj.showCVs (se enciende al elegirlo y sigue encendido al elegir otra cosa; los CVs de objetos con showCVs se pueden agarrar sin elegirlos);
+  se apagan con "Nada", Esc o clic en el vacío (escapeAll → cvsOff; la curva recién guardada los conserva) y con Mostrar › Apagar CVs (elegidos) / Apagar todos;
+  Mostrar › Encender CVs (elegidos). Va en snapshot / .forja.
+  (6) .FORJA v2 = la escena completa con el formato del deshacer (snapshot: ids, relaciones = historial, capas con color / modo / simetría, grupos, materiales, pivotes,
+  origin0, showCVs, recortes; mallas como posiciones + índices) + locators; reviveThree vuelve a crear Vector3/4 dentro de las relaciones; loadProjectV2 = restore + sin
+  deshacer previo. Los .forja v1 se siguen abriendo. ARCHIVOS RECIENTES (Archivo › Archivos recientes…): IndexedDB 'forja-recent' (nombre, fecha, contenido; 8 últimos), se
+  apuntan al guardar y al abrir; lista con quickPick. Prueba: scratchpad v49app/t37.cjs. OJO: t35.cjs (Puck por pasar el cursor) ya no vale por diseño.

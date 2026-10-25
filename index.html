@@ -780,7 +780,7 @@
     box-shadow: inset 2px 2px 5px var(--nm-lo), inset -2px -2px 5px var(--nm-hi); font-family: var(--font-mono); font-size: 12px; }
   .hud-f.on { box-shadow: inset 3px 3px 7px var(--nm-lo), inset -3px -3px 7px var(--nm-hi); color: #2f7bff; }
   .hud-f .ax { position: absolute; left: 7px; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; }
-  .hud-f .ax0 { background: #e5484d; } .hud-f .ax1 { background: #34c759; } .hud-f .ax2 { background: #2f7bff; }
+  .hud-f .ax0 { background: #e53e3e; } .hud-f .ax1 { background: #38a169; } .hud-f .ax2 { background: #3182ce; }
   .hud-f input { width: 100%; border: 0; background: none; color: var(--nm-text); font: inherit; text-align: right; outline: none; cursor: text; }
   /* extras (marking menus de Alias): pastillas en columna debajo del anillo, del mismo material */
   .puck.bloom .puck-item.extra { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) translate(0px, 0px) scale(var(--s)); }
@@ -920,7 +920,13 @@
   .win-btn { border-radius: 999px; }
   /* (v0.49.1) Marking menus y Puck a CERO latencia: sin transiciones ni animaciones (aparecen y resaltan al instante) */
   .puck:not(.puck3), .puck:not(.puck3) *, .puck:not(.puck3)::before, .radial-veil { transition: none !important; animation: none !important; }
-  .loc-label { color: #ffb020 !important; font-family: var(--font-mono, monospace); }
+  /* (v0.50) paleta Forja: recuadro de selección azul eléctrico translúcido; inspector de grado / spans en Transform info */
+  .marquee { border: 1px solid rgba(66,153,225,.55) !important; background: rgba(66,153,225,.07) !important; }
+  .hud-geo { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px 8px; margin: 2px 0 8px; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .hud-geo label { display: flex; flex-direction: column; gap: 3px; }
+  .hud-geo input { width: 100%; height: 26px; border: 0; border-radius: 999px; padding: 0 10px; background: var(--pill-bg); color: var(--fg); font: 12px var(--font-mono, monospace); text-align: center; }
+  .hud-geo em { grid-column: 1 / -1; font-style: normal; text-transform: none; letter-spacing: 0; }
+  .loc-label { color: #4fd1c5 !important; font-family: var(--font-mono, monospace); }
   .float-win { background: transparent !important; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; border: 0 !important; }
   .panel .sec h2, .panel .muted, .fw-count, .ly-n { color: inherit; }
   /* ===== Módulo FORGE en el panel de Forja: los controles de BumpForge con el aspecto de Forja =====
@@ -2090,6 +2096,6 @@
   "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
 } }
 </script>
-<script type="module" src="./src/main.js?v=0.49.2"></script>
+<script type="module" src="./src/main.js?v=0.50.0"></script>
 </body>
 </html>

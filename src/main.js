@@ -11,9 +11,9 @@ import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as N from './nurbs.js?v=0.47.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
-import { createPuck3 } from './puck3.js?v=0.49.2';
+import { createPuck3 } from './puck3.js?v=0.50.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.49.2';
+const FORJA_VERSION = '0.50.0';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -443,7 +443,7 @@ function makeCross(color, size, withBall) {
   g.children.forEach((c) => (c.renderOrder = 20));
   return g;
 }
-const pivotMarker = makeCross('#e07a1f', 0.5, true);
+const pivotMarker = makeCross('#4fd1c5', 0.5, true);   // paleta Forja: pivotes y locators en turquesa
 pivotMarker.visible = false;
 scene.add(pivotMarker);
 let pivotShowUntil = 0;
@@ -672,9 +672,9 @@ const isoMat = LM({ color: 0x4a8fe0, linewidth: 1.6 }); // líneas de parche en 
 const isoSelMat = LM({ color: 0xe07a1f, linewidth: 1.8 });
 const wireLineMat = LM({ color: 0xe8e8e8, linewidth: 1.1 });   // líneas del modo Malla (blancas u oscuras según el tema)
 // Colores del historial (como Alias): verde = tiene historial de construcción, rosa = depende de lo elegido, azul = sin historial
-const isoHistMat = LM({ color: 0x2fb36b, linewidth: 1.8 });
+const isoHistMat = LM({ color: 0x48bb78, linewidth: 1.8 });   // paleta Forja: historial = verde #48BB78
 const isoDepMat = LM({ color: 0xff5fb0, linewidth: 1.8 });
-const curveHistMat = LM({ color: 0x2fb36b, linewidth: 2.5 });
+const curveHistMat = LM({ color: 0x48bb78, linewidth: 2.5 });
 // bordes de recorte (límite entre caras): líneas finas y nítidas, como los filos de Plasticity
 const edgeCurveMat = LM({ color: 0x1b1d21, linewidth: 1.1, transparent: true, opacity: 0.9 });
 // aristas finas de cada cara (bordes de los parches) en ARCILLA, como el modo gris con aristas de Plasticity
@@ -693,8 +693,9 @@ const handleGeo = new THREE.SphereGeometry(2.2, 10, 8);
 const handlePickMat = new THREE.MeshBasicMaterial({ visible: false });
 const plusGeo = mergeGeometries([new THREE.BoxGeometry(1.2, 0.2, 0.055), new THREE.BoxGeometry(0.2, 1.2, 0.055)]);
 const cornerGeo = new THREE.BoxGeometry(0.42, 0.42, 0.42);
-const handleMat = new THREE.MeshStandardMaterial({ color: '#2f7bff', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true, opacity: 0.85 });
-const handleSelMat = new THREE.MeshStandardMaterial({ color: '#ff8a1f', emissive: '#5a2400', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true });
+// paleta Forja: CVs en dorado industrial, el elegido en ámbar claro brillante
+const handleMat = new THREE.MeshStandardMaterial({ color: '#d69e2e', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true, opacity: 0.85 });
+const handleSelMat = new THREE.MeshStandardMaterial({ color: '#f6e05e', emissive: '#6b5a10', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true });
 
 // ---------- Capas: color heredado, estado (elegible / referencia / inactiva) y simetría dinámica ----------
 // Color de capa: las líneas (isoparamétricas, bordes, curvas) y el polígono de control de todo lo que hay en la capa toman su color.
@@ -791,7 +792,7 @@ function scaleHandles() {
 }
 
 const THEME_3D = {
-  dark: { curve: 0xe8e6e1, grid: 0xffffff, iso: '#000000', shadow: 0.55 },
+  dark: { curve: 0xe2e8f0, grid: 0xffffff, iso: '#000000', shadow: 0.55 },
   light: { curve: 0x2b2a27, grid: 0x6e6b66, iso: '#0b0d10', shadow: 0.35 },
 };
 // la rejilla multiplica su color por el de los vértices (gris medio): en oscuro se deja blanca para que se vea clara sobre el fondo,
@@ -1155,7 +1156,10 @@ function applyVisibility(obj) {
   const p = obj.parts, vis = obj.visible, sel = selObjs.includes(obj), cvMode = pickMode === 'cv';
   const LY = layerById(obj.layer), lm = layerStyled(LY) ? layerMats(LY) : null;   // color / estado de la capa
   // los CVs se ven en el modo CV (los de los objetos encendidos) y, en cualquier modo, en los objetos elegidos: al crear, mover o alinear
-  p.handles.visible = p.hull.visible = vis && !modelClean && ((cvMode && cvTargets.has(obj.id)) || (sel && obj.kind !== 'mesh'));
+  // CVs por objeto: se encienden al elegirlo (obj.showCVs) y siguen encendidos aunque se elija otra cosa; se apagan con "Nada", Esc,
+  // el clic en el vacío o Mostrar › Apagar CVs
+  if (sel && obj.kind !== 'mesh') obj.showCVs = true;
+  p.handles.visible = p.hull.visible = vis && !modelClean && ((cvMode && cvTargets.has(obj.id)) || ((sel || obj.showCVs) && obj.kind !== 'mesh'));
   const showFaces = prefs.showFaces !== false, showCurves = prefs.showCurves !== false;
   if (obj.kind === 'mesh') {
     p.mesh.visible = vis && showFaces;
@@ -1252,8 +1256,9 @@ function selectionChanged() {
 const gizmo = new TransformControls(camera, renderer.domElement);
 gizmo.setSize(0.5);
 // Z arriba como Alias: el eje vertical (Y interno) se pinta azul y el de profundidad (Z interno) verde
-{ const seen = new Set(), G = 0x00ff00, B = 0x0000ff;
-  gizmo.traverse((o) => { const m = o.material; if (!m?.color || seen.has(m)) return; seen.add(m); const h = m.color.getHex(); if (h === G) m.color.setHex(B); else if (h === B) m.color.setHex(G); }); }
+{ const seen = new Set(), R = 0xff0000, G = 0x00ff00, B = 0x0000ff;
+  // vertical (Y interno) = azul Z de Alias; colores mate de la paleta Forja
+  gizmo.traverse((o) => { const m = o.material; if (!m?.color || seen.has(m)) return; seen.add(m); const h = m.color.getHex(); if (h === G) m.color.setHex(0x3182ce); else if (h === B) m.color.setHex(0x38a169); else if (h === R) m.color.setHex(0xe53e3e); }); }
 gizmo._getPointer = (e) => { const n = paneNDC(e, dragPane || paneAt(e.clientX)); return { x: n.x, y: n.y, button: e.button }; };
 scene.add(gizmo);
 const proxy = new THREE.Object3D();
@@ -1602,7 +1607,7 @@ const objPivotMarkers = new THREE.Group();
 scene.add(objPivotMarkers);
 function syncPivotMarkers() {
   const list = pickMode === 'object' ? selObjs.filter((o) => o.visible) : [];
-  while (objPivotMarkers.children.length < list.length) objPivotMarkers.add(makeCross('#2d6aa8', 0.35, false));
+  while (objPivotMarkers.children.length < list.length) objPivotMarkers.add(makeCross('#4fd1c5', 0.35, false));
   objPivotMarkers.children.forEach((m, i) => {
     m.visible = i < list.length;
     if (m.visible) { m.position.copy(list[i].pivot); m.scale.setScalar(pxWorld(list[i].pivot, 20)); }
@@ -1689,7 +1694,7 @@ function pickAt(e) {
     return oh ? { cvTarget: oh.object.userData.obj } : null;
   }
   // los CVs de los objetos elegidos se pueden tocar directamente (con Mover activo se arrastran sin cambiar de modo)
-  const bestCv = cvAtScreen(e, live.filter((o) => selObjs.includes(o) && o.kind !== 'mesh' && o.parts.handles.visible));
+  const bestCv = cvAtScreen(e, live.filter((o) => (selObjs.includes(o) || o.showCVs) && o.kind !== 'mesh' && o.parts.handles.visible));
   setRay(e);
   if (bestCv) return { cv: bestCv, enterCV: true };
   ray.params.Line.threshold = camera.position.distanceTo(pivot) * 0.012;
@@ -1803,7 +1808,7 @@ gridYZ.visible = false;
 scene.add(gridYZ);
 // Origen como Alias (Z arriba): líneas principales "infinitas" en azul nítido por el origen (las del plano de la rejilla visible)
 // y un marcador de 3 ejes (X rojo, Y verde, Z azul) de tamaño fijo en pantalla. AXES = ejes de Alias en coordenadas internas.
-const AXIS_BLUE = 0x2f7bff;
+const AXIS_BLUE = 0x3182ce;   // paleta Forja: ejes rojo carmesí / verde esmeralda / azul zafiro
 // las líneas van DENTRO de cada rejilla (sueltas en la escena no se veían en perspectiva): salen y se ocultan con su rejilla.
 // Coordenadas locales de GridHelper (plano local XZ): suelo x→X, z→Y; frente (gridXY) x→X, z→Z; lado (gridYZ) x→Z, z→Y.
 const axisLine = (parent, dir) => {
@@ -1817,7 +1822,7 @@ const LX = new THREE.Vector3(1, 0, 0), LZ = new THREE.Vector3(0, 0, 1);
 [[grid, LX], [grid, LZ], [gridXY, LX], [gridXY, LZ], [gridYZ, LX], [gridYZ, LZ]].forEach(([g, d]) => axisLine(g, d));
 const originAxes = new THREE.Group();
 originAxes.layers.set(DIAG);
-[[0xe5484d, 'x'], [0x34c759, 'y'], [AXIS_BLUE, 'z']].forEach(([col, name], i) => {
+[[0xe53e3e, 'x'], [0x38a169, 'y'], [AXIS_BLUE, 'z']].forEach(([col, name], i) => {
   const a = new THREE.ArrowHelper(AXES[i], new THREE.Vector3(), 46, col, 9, 5);
   a.traverse((o) => { o.layers.set(DIAG); o.renderOrder = 30; if (o.material) { o.material.depthTest = false; o.material.transparent = true; } });
   originAxes.add(a);
@@ -3070,7 +3075,64 @@ function view2DAxes() {
   return [new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion), new THREE.Vector3(0, 1, 0).applyQuaternion(camera.quaternion)];
 }
 
+// .forja v2: la escena COMPLETA (objetos con sus ids, historial de construcción, capas con color y simetría, grupos, materiales,
+// pivotes, origen local, CVs encendidos, recortes y locators), con el mismo formato que el deshacer
 function serializeProject() {
+  const st = snapshot();
+  st.objects = st.objects.map((it) => it.kind === 'mesh'
+    ? { ...it, data: { positions: Array.from(it.data.geometry.attributes.position.array), index: it.data.geometry.index ? Array.from(it.data.geometry.index.array) : null } } : it);
+  return JSON.stringify({ format: 'forja', version: 2, units: 'dm', up: 'y', app: FORJA_VERSION, scene: st, locators: locators.map(({ mode, a, b }) => ({ mode, a, b })) });
+}
+function reviveThree(v) {
+  if (Array.isArray(v)) return v.map(reviveThree);
+  if (!v || typeof v !== 'object') return v;
+  const k = Object.keys(v).sort().join(',');
+  if (k === 'w,x,y,z') return new THREE.Vector4(v.x, v.y, v.z, v.w);
+  if (k === 'x,y,z') return new THREE.Vector3(v.x, v.y, v.z);
+  return Object.fromEntries(Object.entries(v).map(([a, b]) => [a, reviveThree(b)]));
+}
+function loadProjectV2(j) {
+  const st = j.scene;
+  st.relations = reviveThree(st.relations || []);
+  st.objects = st.objects.map((it) => {
+    const o = { ...it, pivot: new THREE.Vector3(it.pivot.x, it.pivot.y, it.pivot.z), origin0: it.origin0 ? new THREE.Vector3(it.origin0.x, it.origin0.y, it.origin0.z) : null };
+    if (it.kind === 'mesh') { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(it.data.positions, 3)); if (it.data.index) g.setIndex(it.data.index); g.computeVertexNormals(); g.computeBoundingBox(); o.data = { geometry: g }; }
+    return o;
+  });
+  restore(st);
+  clearHistory();
+  locators.length = 0; (j.locators || []).forEach((L) => locators.push({ ...L, id: Math.random() })); locStamp = -1;
+}
+// archivos recientes: los últimos proyectos .forja (nombre, fecha y contenido) en la base local del navegador (IndexedDB)
+const RECENT_MAX = 8;
+function recentDB() {
+  return new Promise((ok, ko) => { const r = indexedDB.open('forja-recent', 1); r.onupgradeneeded = () => r.result.createObjectStore('files', { keyPath: 'name' }); r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); });
+}
+async function recentAll() {
+  try { const db = await recentDB(); return await new Promise((ok) => { const q = db.transaction('files').objectStore('files').getAll(); q.onsuccess = () => ok(q.result.sort((a, b) => b.date - a.date)); q.onerror = () => ok([]); }); } catch (e) { return []; }
+}
+async function recentAdd(name, text) {
+  try {
+    const db = await recentDB(), all = await recentAll();
+    const tx = db.transaction('files', 'readwrite'), os = tx.objectStore('files');
+    os.put({ name, date: Date.now(), text });
+    all.filter((x) => x.name !== name).slice(RECENT_MAX - 1).forEach((x) => os.delete(x.name));
+  } catch (e) { /* sin almacenamiento local */ }
+}
+async function openRecent() {
+  const all = await recentAll();
+  if (!all.length) return toast('Todavía no hay archivos recientes (se apuntan al guardar o abrir un .forja).');
+  const v = await quickPick(innerWidth / 2 - 150, 120, 'Archivos recientes', all.slice(0, 9).map((x, i) => [i, `${x.name} · ${new Date(x.date).toLocaleString()}`]), 0);
+  if (v == null) return;
+  const f = all[v];
+  checkpoint();
+  loadProjectV2orV1(JSON.parse(f.text), f.name);
+}
+function loadProjectV2orV1(j, name) {
+  if (j.version >= 2 && j.scene) { loadProjectV2(j); $('file-name').textContent = name.replace(/\.json$/, '.forja'); recentAdd(name, JSON.stringify(j)); toast(`${name} abierto`); return true; }
+  return false;
+}
+function serializeProjectV1() {
   const v4 = (q) => [q.x, q.y, q.z, q.w];
   return JSON.stringify({
     format: 'forja', version: 1, units: 'dm', up: 'y',
@@ -3105,7 +3167,9 @@ async function doExport(fmt) {
       if (!lines.length) return toast('Para 2D hacen falta superficies o curvas visibles.');
       await saveFile(name, fmt === 'svg' ? X.writeSVG(lines, o) : X.writeDXF(lines));
     } else if (fmt === 'forja') {
-      await saveFile(name, serializeProject());
+      const txt = serializeProject();
+      await saveFile(name, txt);
+      recentAdd(name, txt);
     } else {
       const sc = meshExportScene(targets, o);
       if (fmt === 'obj') await saveFile(name, new OBJExporter().parse(sc));
@@ -3164,8 +3228,9 @@ async function importFile(file) {
   const o = importOptions(ext);
   let created = [];
   if (ext === 'forja' || ext === 'json') {
-    const j = JSON.parse(await file.text());
+    const txt = await file.text(), j = JSON.parse(txt);
     if (j.format !== 'forja') throw new Error('no es un proyecto de Forja');
+    if (loadProjectV2orV1(j, file.name)) return;
     const V4 = (a) => new THREE.Vector4(...a);
     for (const it of j.objects) {
       let ob;
@@ -3973,17 +4038,18 @@ addEventListener('focusin', (e) => { if (!typing(e.target) && e.target !== docum
 // Esc con un menú abierto solo cierra el menú; si no, lo atiende escapeAll (kill switch)
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && MENUS.some((m) => m.open)) { e.stopImmediatePropagation(); MENUS.forEach((m) => m.close(false)); } }, true);
 // ---------- Kill switch: Esc o clic en el vacío → cleanup() de la herramienta activa, soltar todo y volver a IDLE ----------
+function cvsOff(list = objects) { list.forEach((o) => { o.showCVs = false; applyVisibility(o); }); }
 function escapeAll(reason = 'esc') {
   // Mover / Rotar / Escalar son PERSISTENTES: "Nada" o un clic en el vacío solo sueltan la selección (la herramienta sigue lista para
   // los siguientes CVs u objetos); solo Esc u otro comando las cierran
-  if (reason !== 'esc' && activeTool?.persist) { clearSelection(); updateHint(); return; }
+  if (reason !== 'esc' && activeTool?.persist) { clearSelection(); cvsOff(objects.filter((o) => o.showCVs)); updateHint(); return; }
   // la curva en dibujo con 2 o más CVs se guarda (commit) y queda en la escena; luego todo se suelta
   const made = activeTool?.id === 'tool:curve' ? commitWIP() : null;
   endActiveTool(reason);
   if (pivotEdit) togglePivotEdit();
   mouseXform = false;
   if (TW.spec) TW.hide();
-  clearSelection(); updateHint();
+  clearSelection(); cvsOff(objects.filter((o) => o.showCVs && o !== made)); updateHint();   // "Pick Nothing" apaga los CVs (la curva recién guardada los conserva)
   if (made) toast(`${made.name} guardada`);
 }
 addEventListener('keydown', (e) => {
@@ -4039,6 +4105,8 @@ addEventListener('pointerup', (e) => {
 // Elegir un objeto agrupado elige el grupo entero, como un nodo de grupo de Alias.
 const layerOn = (id) => layers.find((l) => l.id === id)?.visible !== false;
 function initObj(obj) {
+  // origen LOCAL: al crearse, el objeto está en (0, 0, 0) de su propio sistema; Transform info mide desde aquí
+  if (obj.pivot && !obj.origin0) obj.origin0 = obj.pivot.clone();
   obj.layer = activeLayer; obj.group = null;
   let own = obj.visible !== false;
   // visible = el objeto no está oculto Y su capa está encendida; ownVisible = solo el ojo del objeto
@@ -4159,7 +4227,7 @@ function snapshot() {
   return {
     layers: layers.map(cloneLayer), activeLayer, nextLayerId, groups: groups.map((g) => ({ ...g })), nextGroupId,
     relations: relations.map((r) => ({ ...r })), nextRelId,
-    objects: objects.map((o) => ({ id: o.id, kind: o.kind, name: o.name, mat: o.mat, own: o.ownVisible, layer: o.layer, group: o.group, pivot: o.pivot.clone(), data: cloneData(o) })),
+    objects: objects.map((o) => ({ id: o.id, kind: o.kind, name: o.name, mat: o.mat, own: o.ownVisible, layer: o.layer, group: o.group, pivot: o.pivot.clone(), origin0: (o.origin0 || o.pivot).clone(), showCVs: !!o.showCVs, data: cloneData(o) })),
   };
 }
 var cpMuted = 0;   // > 0: no se guardan pasos de deshacer (vistas previas en vivo; el paso se guardó al empezar)
@@ -4185,6 +4253,8 @@ function restore(st) {
     const d = cloneData({ kind: it.kind, data: it.data });
     const o = it.kind === 'surface' ? addSurface(d, it.name) : it.kind === 'curve' ? addCurve(d, it.name) : addMesh(d.geometry, it.name);
     o.name = it.name; o.mat = it.mat; o.visible = it.own; o.group = it.group; o.pivot.copy(it.pivot);
+    if (it.origin0) o.origin0 = new THREE.Vector3().copy(it.origin0);
+    o.showCVs = !!it.showCVs;
   }
   activeLayer = act;
   nextId = Math.max(1, ...objects.map((o) => o.id + 1));
@@ -4289,7 +4359,7 @@ function updateEvalUI() {
 const chk = (f) => ({ check: f });
 const MENUBAR = [
   ['Archivo', [
-    { label: 'Abrir…', key: 'Ctrl+O', run: () => $('io-file').click() }, { label: 'Guardar proyecto', key: 'Ctrl+S', run: () => doExport('forja') },
+    { label: 'Abrir…', key: 'Ctrl+O', run: () => $('io-file').click() }, { label: 'Guardar proyecto', key: 'Ctrl+S', run: () => doExport('forja') }, { label: 'Archivos recientes…', run: () => openRecent() },
     { sep: true }, { label: 'Importar y exportar…', key: 'Ctrl+E', run: () => toggleFilePanel() }]],
   ['Editar', [
     { label: 'Deshacer', key: 'Ctrl+Z · Ctrl+X', run: undo }, { label: 'Rehacer', key: 'Ctrl+Y', run: redo }, { sep: true },
@@ -4333,6 +4403,7 @@ const MENUBAR = [
     { label: 'Forge', run: () => switchLayout('forge'), ...chk(() => layout === 'forge') },
     { label: 'Dividida', run: () => switchLayout('split'), ...chk(() => layout === 'split') }, { label: 'Elegir módulo', key: 'mantener V', run: () => toast('Mantén V y haz clic en un módulo') }]],
   ['Mostrar', [
+    { label: 'Encender CVs (elegidos)', run: () => { selObjs.forEach((o) => { o.showCVs = true; applyVisibility(o); }); } }, { label: 'Apagar CVs (elegidos)', run: () => cvsOff(selObjs.slice()) }, { label: 'Apagar todos los CVs', run: () => cvsOff() },
     { label: 'Toggle Model', run: toggleModel, ...chk(() => modelClean) }, { label: 'Rejilla', run: toggleGrid, ...chk(() => gridUser) },
     { label: 'Líneas de parche', run: () => $('show-iso').click(), ...chk(() => $('show-iso').checked) },
     { label: 'Peine de curvatura', run: () => $('show-comb').click(), ...chk(() => $('show-comb').checked) },
@@ -4922,9 +4993,12 @@ defineConstruction('mirror', {
 });
 defineConstruction('extrude', {
   name: 'Extruir',
-  build: (r, ins) => HX.extrudeData(ins[0].data, r.dist, r.dir, r.both),
+  build: (r, ins) => HX.extrudeData(r.deg ? N.rebuildCurve(ins[0].data, r.deg, r.spans || Math.max(1, ins[0].data.cvs.length - r.deg)) : ins[0].data, r.dist, r.dir, r.both),
   panel(r, c) {
     const { group, fields, set, live, nm } = c;
+    // grado y spans del perfil (0 = los de la curva); la dirección de extrusión es lineal (grado 1, 1 span)
+    fields.push({ type: 'seg', label: 'Grado', opts: [[0, 'Curva'], [1, '1'], [2, '2'], [3, '3'], [5, '5']], get: () => r.deg || 0, set: (v) => set('deg', v || undefined) },
+      { type: 'range', label: 'Spans', min: 1, max: 32, step: 1, show: () => !!r.deg, get: () => r.spans || Math.max(1, (byId(r.src)?.data.cvs.length || 4) - (r.deg || 3)), start: checkpoint, set: live('spans'), fmt: (v) => String(v) });
     fields.push({ type: 'range', label: 'Distancia', min: -10, max: 10, step: 0.01, get: () => r.dist, start: checkpoint, set: live('dist'), fmt: (v) => v.toFixed(2) + ' dm' },
       { type: 'seg', label: 'Dirección', opts: [['auto', 'Normal'], ['x', 'X'], ['z', 'Y'], ['y', 'Z']], get: () => r.dir, set: (v) => { toolDef.extDir = v; saveToolDef(); set('dir', v); } },
       { type: 'check', label: 'Hacia los dos lados', get: () => r.both, set: (v) => { toolDef.extBoth = v; saveToolDef(); set('both', v); } });
@@ -4967,8 +5041,8 @@ defineConstruction('revolve', {
       { type: 'range', label: 'Barrido', min: 1, max: MAXA, step: 0.5, get: () => r.angle ?? 360, start: checkpoint, set: live('angle'), fmt: (v) => v.toFixed(1) + '°' },
       { type: 'range', label: 'Paso (hélice)', min: -5, max: 5, step: 0.01, get: () => r.pitch || 0, start: checkpoint, set: (v) => { toolDef.revPitch = v; saveToolDef(); live('pitch')(v); }, fmt: (v) => (v ? (v * 100).toFixed(0) + ' mm/vuelta' : 'no') },
       { type: 'check', label: 'Racional (arco exacto)', get: () => r.rational !== false && !r.pitch, set: (v) => { toolDef.revRational = v; saveToolDef(); set('rational', v); TW.show(relSpec(r, group)); } },
-      { type: 'seg', label: 'Grado', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], show: () => r.rational === false || !!r.pitch, get: () => r.deg || 3, set: (v) => { toolDef.revDeg = v; saveToolDef(); set('deg', v); } },
-      { type: 'range', label: 'Tramos', min: 1, max: 32, step: 1, show: () => r.rational === false || !!r.pitch, get: () => r.spans || 8, start: checkpoint, set: (v) => { toolDef.revSpans = v; saveToolDef(); live('spans')(v); }, fmt: (v) => String(v) },
+      { type: 'seg', label: 'Grado', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], get: () => (r.rational === false || r.pitch ? r.deg || 3 : 2), set: (v) => { toolDef.revDeg = v; toolDef.revRational = false; saveToolDef(); group.forEach((x) => (x.rational = false)); set('deg', v); } },
+      { type: 'range', label: 'Spans', min: 1, max: 32, step: 1, get: () => (r.rational === false || r.pitch ? r.spans || 8 : Math.ceil((r.angle || 360) / 90)), start: checkpoint, set: (v) => { toolDef.revSpans = v; toolDef.revRational = false; saveToolDef(); group.forEach((x) => (x.rational = false)); live('spans')(v); }, fmt: (v) => String(v) },
       { type: 'html', html: () => '<span class="tw-note">Flechas verdes = inicio y fin del barrido · azul = paso · cian = base y punta del eje (Manip). Clic derecho en la vista = aceptar y cerrar.</span>' });
     return group.length > 1 ? ` · ${group.length} curvas` : ` · ${nm(r.src)}`;
   },
@@ -6132,7 +6206,7 @@ const locators = [];
 let locStamp = -1;
 const locGroup = new THREE.Group(); locGroup.renderOrder = 30; scene.add(locGroup);
 const locBox = document.createElement('div'); locBox.className = 'rel-labels loc-labels'; document.body.append(locBox);
-const locMat = new THREE.LineBasicMaterial({ color: 0xffb020, depthTest: false, transparent: true });
+const locMat = new THREE.LineBasicMaterial({ color: 0x4fd1c5, depthTest: false, transparent: true });
 function locEval(o) {   // parámetros → punto; dominio 1D (curva) o 2D (superficie)
   if (o.kind === 'curve') { const c = N.curveOf(o.data), t = new THREE.Vector3(); return { dim: 1, at: (a) => { const q = c.getPoint(Math.min(1, Math.max(0, a[0]))); return t.set(q.x, q.y, q.z).clone(); } }; }
   const S = FF.surfEval(o.data), rm = o.removed;
@@ -6193,7 +6267,7 @@ function updateLocators() {
       L.r = measureLocator(L);
       if (!L.r) continue;
       const g = new THREE.BufferGeometry().setFromPoints([L.r.pa, L.r.pb]), ln = new THREE.Line(g, locMat);
-      const dot = (p) => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false })); m.position.copy(p); m.renderOrder = 31; m.userData.locDot = true; return m; };
+      const dot = (p) => { const m = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), new THREE.MeshBasicMaterial({ color: 0x4fd1c5, depthTest: false })); m.position.copy(p); m.renderOrder = 31; m.userData.locDot = true; return m; };
       ln.renderOrder = 30; locGroup.add(ln, dot(L.r.pa), dot(L.r.pb));
       const el = document.createElement('span'); el.className = 'rel-label loc-label';
       el.textContent = `${L.mode === 'max' ? 'máx' : 'mín'} ${(L.r.d * 100).toFixed(2)} mm`;
@@ -7214,7 +7288,13 @@ function hudTargets() {
 }
 const fmtA = (p) => { const a = toAlias(p); return [a.x * MM, a.y * MM, a.z * MM]; };
 const HUD_ROWS = { t: ['Traslación', 'mm', 4], r: ['Rotación', '°', 2], s: ['Escala', '', 3] };
-function hudVal(T, g, a) { const v = g === 't' ? fmtA(T.center)[a] : g === 'r' ? hud.rot[a] : hud.scl[a]; return Math.abs(v) < 5e-5 ? 0 : v; }
+// traslación LOCAL: desde donde se creó el objeto (origin0), así todo nace en (0, 0, 0); los CVs y el pivote se siguen viendo en mundo
+function hudT(T) {
+  if (T.mode !== 'single' && T.mode !== 'multi') return fmtA(T.center);
+  const o0 = new THREE.Vector3(); T.objs.forEach((o) => o0.add(o.origin0 || o.pivot)); o0.divideScalar(T.objs.length);
+  return fmtA(T.center.clone().sub(o0));
+}
+function hudVal(T, g, a) { const v = g === 't' ? hudT(T)[a] : g === 'r' ? hud.rot[a] : hud.scl[a]; return Math.abs(v) < 5e-5 ? 0 : v; }
 function hudRender() {
   const T = carousel ? null : hudTargets();
   hudEl.hidden = !T || !!winState('hud').closed;   // × la cierra hasta que se vuelva a abrir desde Ventanas
@@ -7232,12 +7312,46 @@ function hudRender() {
   const list = T.mode === 'multi' ? `<details class="hud-det" ${hud.listClosed ? '' : 'open'}><summary>${T.objs.length} elementos elegidos</summary><ol class="hud-list">${T.objs.map((o) => { const p = fmtA(o.pivot); return `<li><b>${esc(o.name)}</b><span>${KIND_NAMES[kindOf(o)]} · ${objInfo(o)}</span><em>pivote ${p.map((v) => v.toFixed(1)).join(' · ')}</em></li>`; }).join('')}</ol></details>` : '';
   const rows = (T.mode === 'pivot' ? ['t'] : ['t', 'r', 's']).map((g) => {
     const [lab, unit, dec] = HUD_ROWS[g];
-    return `<div class="hud-row"><label>${T.mode === 'pivot' && g === 't' ? 'Pivote' : T.mode === 'cv' && g === 't' ? 'Posición' : lab}</label>${[0, 1, 2].map((a) =>
+    return `<div class="hud-row"><label>${T.mode === 'pivot' && g === 't' ? 'Pivote' : T.mode === 'cv' && g === 't' ? 'Posición' : g === 't' && (T.mode === 'single' || T.mode === 'multi') ? 'Traslación (local)' : lab}</label>${[0, 1, 2].map((a) =>
       `<div class="hud-f" data-g="${g}" data-a="${a}" title="Arrastra en horizontal (Shift ×10, Ctrl ×0,1) · doble clic para escribir"><i class="ax ax${a}"></i><span>${hudVal(T, g, a).toFixed(dec)}</span></div>`).join('')}<u>${unit}</u></div>`;
   }).join('');
-  hudEl.innerHTML = `<div class="hud-head"><b>Transform info</b><span>${esc(title)}</span>${winButtons()}</div><p class="hud-sub">${esc(sub)}</p>${list}${rows}`;
+  hudEl.innerHTML = `<div class="hud-head"><b>Transform info</b><span>${esc(title)}</span>${winButtons()}</div><p class="hud-sub">${esc(sub)}</p>${list}${T.mode === 'single' ? geoRows(one) : ''}${rows}`;
   placeWin(hudEl, 'hud');
 }
+// Inspector del objeto: grado y spans (U y V en superficies) editables; parametrización uniforme (nudos sujetos). Si el objeto sale de
+// una construcción con grado / spans propios (Revolución), se cambian en la receta (historial intacto); si no, se reconstruye y los
+// que dependen de él se recalculan.
+function geoInfo(o) {
+  const d = o.data, sp = (k, deg) => N.uniqueKnots(k).length - 1;
+  if (o.kind === 'curve' && !d.cos) return [['deg', 'Grado', d.deg, 1, 7], ['spans', 'Spans', sp(d.knots), 1, N.MAX_SPANS]];
+  if (o.kind === 'surface') return [['degU', 'Grado U', d.degU, 1, 7], ['spansU', 'Spans U', sp(d.knotsU), 1, N.MAX_SPANS], ['degV', 'Grado V', d.degV, 1, 7], ['spansV', 'Spans V', sp(d.knotsV), 1, N.MAX_SPANS]];
+  return null;
+}
+function geoRows(o) {
+  const g = geoInfo(o);
+  if (!g) return '';
+  return `<div class="hud-geo">${g.map(([k, l, v, mn, mx]) => `<label>${l}<input type="number" data-geo="${k}" min="${mn}" max="${mx}" step="1" value="${v}"></label>`).join('')}<em>parametrización uniforme</em></div>`;
+}
+function applyGeo(o, k, val) {
+  const rel = relations.find((r) => outputOf(r) === o.id);
+  checkpoint();
+  if (rel?.type === 'revolve' && (k === 'degU' || k === 'spansU')) {   // la Revolución guarda grado / tramos de su barrido: se cambia la receta
+    rel.rational = false; rel[k === 'degU' ? 'deg' : 'spans'] = val; applyRelation(rel); propagateFrom(o);
+  } else {
+    if (rel && !constructionOf(rel).editable) { const i = relations.indexOf(rel); relations.splice(i, 1); toast('El objeto tenía historial de construcción: se quitó para cambiar su estructura'); }
+    const g = Object.fromEntries(geoInfo(o).map(([kk, , v]) => [kk, v])); g[k] = val;
+    o.data = o.kind === 'curve' ? N.rebuildCurve(o.data, g.deg, g.spans) : { ...N.rebuildSurface(o.data, g.degU, g.spansU, g.degV, g.spansV), ...(o.data.rtrims ? { rtrims: o.data.rtrims } : {}) };
+    updateObject(o);
+  }
+  renderHistory(); hudRender(); renderSelectionBody();
+}
+hudEl.addEventListener('change', (e) => {
+  const inp = e.target.closest('[data-geo]'), T = hudTargets();
+  if (!inp || T?.mode !== 'single') return;
+  const v = Math.round(+inp.value);
+  if (Number.isFinite(v) && v >= +inp.min && v <= +inp.max) applyGeo(T.objs[0], inp.dataset.geo, v);
+});
+hudEl.addEventListener('keydown', (e) => { if (e.target.closest('[data-geo]')) e.stopPropagation(); });
 function hudRefresh() {
   const T = hudTargets();
   if (!T || hudEl.hidden) return;
@@ -7426,7 +7540,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, trimSelection, finishTrim, untrimSelection, doUntrim, revertConstruction, endFillet, locators, addLocator, deleteLocators, flipNormalsRun, withSelection, activeTool: () => activeTool?.id || "idle", escapeAll, awaitSel: () => awaitSel, revolveDrag: () => revolveDrag, MENUS: () => MENUS, setXform, offsetSelection, loftSelection, revolveSelection, extrudeSelection, filPreview, trimStages, relSpecOf: (r) => relSpec(r), trimOp: () => trimOp, applyRelation, propagateFrom, renderHistory };
+window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, trimSelection, finishTrim, untrimSelection, doUntrim, revertConstruction, endFillet, serializeProject, loadProjectV2orV1, recentAll, locators, addLocator, deleteLocators, flipNormalsRun, withSelection, activeTool: () => activeTool?.id || "idle", escapeAll, awaitSel: () => awaitSel, revolveDrag: () => revolveDrag, MENUS: () => MENUS, setXform, offsetSelection, loftSelection, revolveSelection, extrudeSelection, filPreview, trimStages, relSpecOf: (r) => relSpec(r), trimOp: () => trimOp, applyRelation, propagateFrom, renderHistory };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

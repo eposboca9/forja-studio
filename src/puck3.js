@@ -202,12 +202,7 @@ export function createPuck3({ cats, lib, icon, esc, cfg, save, run, wallColor, s
   st.pickAt = (px, py) => {
     const c = cfg.active, n = c ? openOf(c) : 0;
     const dx = px - st.at.x, dy = py - st.at.y, d = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
-    if (!st.sticky || st.drag) {   // gesto en curso (Z mantenida o botón pulsado)
-      const hit = catAt(dx, dy);
-      if (hit?.zone === 'core' && (hit.id !== c || !n)) armDwell('core:' + hit.id, 0, () => coreClick(hit.id));
-      else if (hit?.zone === 'x') armDwell('x:' + hit.id, 0, () => release(hit.id));
-      else if (!hit) dwell = null;
-    }
+    // (v0.50) nada se abre por pasar el cursor: las categorías (también las laterales) y las ondas solo responden a un clic
     if (!n) return;
     const k = [...Array(n).keys()].find((q) => d >= ringIn(q) - 4 && d <= ringOut(q) + 4);
     if (k == null) { if (st.hover && !st.hover.btn.matches(':hover')) hoverTool(null); return; }
