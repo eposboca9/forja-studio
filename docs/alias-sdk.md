@@ -40,3 +40,10 @@ con la ventana de opciones de Alias.
 - Grupos = nodos padre (`AlGroupNode`), instancias (`isInstanceable`, `instanceCopy`), `createSymmetricGeometry` (≈ simetría de capa),
   capa como atributo del nodo, `persistentID`, `blindData` / `toolMetaData` (datos de herramientas pegados al nodo).
 - Borrar el nodo borra la geometría y al revés (1:1). Errores con tipo (`AlCurveNodeJoinErrors`) en vez de excepciones.
+
+## AlPickable, AlCurve, AlCurveCV, AlCurveOnSurface, AlCurveNode (v0.51)
+- `AlPickable::pick/unpick/isPicked`: elegir es un estado del NODO, separado de mostrar sus CVs. Adoptado: "Nada" suelta la selección y los CVs
+  encendidos (obj.showCVs) siguen a la vista hasta Mostrar › Apagar CVs.
+- `AlCurve::createLine(p0, p1)` → Curvas › Línea (2 puntos). `AlCurveCV::worldPosition` → con eje fijo (X/Y/Z) el punto toma la coordenada exacta
+  del punto de snap sobre ese eje. `AlCurve::extendCurve(double, double[4])` → Extender: curva hasta un punto exacto (tramo G1 y reajuste).
+- `AlCurveOnSurface::inTrim()`, `visible()`: una CoS puede existir sin recortar; Untrim deja la curva y quita solo su efecto (trim 'none').

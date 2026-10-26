@@ -964,3 +964,20 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   origin0, showCVs, recortes; mallas como posiciones + índices) + locators; reviveThree vuelve a crear Vector3/4 dentro de las relaciones; loadProjectV2 = restore + sin
   deshacer previo. Los .forja v1 se siguen abriendo. ARCHIVOS RECIENTES (Archivo › Archivos recientes…): IndexedDB 'forja-recent' (nombre, fecha, contenido; 8 últimos), se
   apuntan al guardar y al abrir; lista con quickPick. Prueba: scratchpad v49app/t37.cjs. OJO: t35.cjs (Puck por pasar el cursor) ya no vale por diseño.
+- (v0.51) .h AlPickable / AlCurve / AlCurveCV / AlCurveOnSurface / AlCurveNode (resumen en docs/alias-sdk.md):
+  (1) CVs: color AZUL #3182CE por omisión (handleMat; el elegido sigue ámbar #F6E05E). Bug de CVs gigantes: los handles nacían a escala 1 hasta el siguiente
+  cuadro; ahora nacen a 1e-6 y rebuildHandles llama scaleHandles(g) al terminar (tamaño correcto desde el principio). "Pick Nothing" (Nada, Esc, clic en el
+  vacío) suelta el NODO pero los CVs encendidos SE QUEDAN (se quitó cvsOff de escapeAll); solo Mostrar › Apagar CVs los oculta.
+  (2) CURVA CON EJE: tras el 1.er punto, teclas X / Y / Z (eje de Alias; otra vez = libre; capturan la Z antes que el Puck solo mientras se dibuja) o ventana
+  Curva › Recta Libre/Auto/X/Y/Z (toolDef.curveOrtho): draftPoint(e) = placePoint + recta por el último punto; con snap (lastPlaceSnap) toma la coordenada
+  exacta del punto sobre el eje; sin snap, el punto de la recta más cercano al rayo. Guía punteada del color del eje (draftAxisLine). Curvas › Línea (2 puntos)
+  (startLine, lineMode: a los 2 puntos se crea y la herramienta sigue).
+  (3) EXTENDER UNIFICADO (Curvas › Extender, Puck "Extender"; startExtendU, tool 'extendU'): clic cerca del extremo de una curva o del borde de una superficie,
+  luego clic en el destino con snaps. Curva: extendCurveData (tramo de Hermite G1 + N.fitCurve con el mismo grado; termina EXACTO en el punto; quita su
+  historial si era salida de una construcción). Superficie: surfaceExtendTo = distancia (secante, G1–G3 no son lineales) para que el punto medio del borde
+  opuesto llegue al plano de P perpendicular a la extensión → relación 'extend' con historial. Clic derecho / Esc cierran.
+  (4) UNTRIM: los carriles del redondeo G2 (fcurve) ya no se vuelven a recortar al recalcularse (r.untrimmed); REVERT del Freeform Blend deshace los recortes
+  automáticos que hizo (r.autoTrimmed) y borra el blend; en el redondeo G2 el botón se llama Revert.
+  (5) LÍNEAS más finas (LM × LINE_K 0,68, mínimo 1 px) y TESS_HI 2,4. La SIMETRÍA de capa ya era automática (fantasmas con la geometría compartida y la
+  matriz de reflexión en el grupo: la GPU la aplica; siguen a los CVs al momento).
+  Prueba: scratchpad v49app/t38.cjs, t38b.cjs.

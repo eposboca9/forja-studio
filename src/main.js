@@ -13,7 +13,7 @@ import * as N from './nurbs.js?v=0.47.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.50.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.50.0';
+const FORJA_VERSION = '0.51.0';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
@@ -662,7 +662,9 @@ function setSurfaceMaterial(o, diag, dm, wire, hy = backend.hybrid && (!diag || 
 const wireFeatMat = new THREE.LineBasicMaterial({ color: 0xe8e8e8, transparent: true, opacity: 0.8 });
 
 const lineMats = [];
-const LM = (o) => { const m = new LineMaterial({ alphaToCoverage: true, ...o }); lineMats.push(m); return m; };   // alphaToCoverage: bordes de línea suaves con MSAA
+// (v0.51) líneas más finas, estilo Alias: todo grosor × LINE_K (mínimo 1 px)
+const LINE_K = 0.68;
+const LM = (o) => { const m = new LineMaterial({ alphaToCoverage: true, ...o, linewidth: Math.max(1, (o.linewidth ?? 1) * LINE_K) }); lineMats.push(m); return m; };   // alphaToCoverage: bordes de línea suaves con MSAA
 const curveMat = LM({ color: 0x2b2a27, linewidth: 2.5 });
 const curveSelMat = LM({ color: 0xe07a1f, linewidth: 3 });
 const draftMat = LM({ color: 0xe07a1f, linewidth: 2 });
@@ -693,8 +695,8 @@ const handleGeo = new THREE.SphereGeometry(2.2, 10, 8);
 const handlePickMat = new THREE.MeshBasicMaterial({ visible: false });
 const plusGeo = mergeGeometries([new THREE.BoxGeometry(1.2, 0.2, 0.055), new THREE.BoxGeometry(0.2, 1.2, 0.055)]);
 const cornerGeo = new THREE.BoxGeometry(0.42, 0.42, 0.42);
-// paleta Forja: CVs en dorado industrial, el elegido en ámbar claro brillante
-const handleMat = new THREE.MeshStandardMaterial({ color: '#d69e2e', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true, opacity: 0.85 });
+// (v0.51) CVs en AZUL por omisión (pedido del usuario); el elegido en ámbar claro brillante
+const handleMat = new THREE.MeshStandardMaterial({ color: '#3182ce', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true, opacity: 0.85 });
 const handleSelMat = new THREE.MeshStandardMaterial({ color: '#f6e05e', emissive: '#6b5a10', roughness: 0.4, metalness: 0.1, depthTest: false, transparent: true });
 
 // ---------- Capas: color heredado, estado (elegible / referencia / inactiva) y simetría dinámica ----------
@@ -777,9 +779,9 @@ function pxWorld(p, px) {
   const vz = mi[2] * p.x + mi[6] * p.y + mi[10] * p.z + mi[14], vx = mi[0] * p.x + mi[4] * p.y + mi[8] * p.z + mi[12], vy = mi[1] * p.x + mi[5] * p.y + mi[9] * p.z + mi[13];
   return Math.max(1e-6, Math.abs(e[3] * vx + e[7] * vy + e[11] * vz + e[15])) * (2 / (e[5] * H)) * px;
 }
-function scaleHandles() {
-  const groups = objects.filter((o) => o.parts.handles.visible).map((o) => o.parts.handles);
-  if (draftHandles.visible) groups.push(draftHandles);
+function scaleHandles(only) {
+  const groups = only ? [only] : objects.filter((o) => o.parts.handles.visible).map((o) => o.parts.handles);
+  if (!only && draftHandles.visible) groups.push(draftHandles);
   // tamaño CONSTANTE en pantalla (perspectiva y ortogonal, con cualquier zoom): unidades de mundo por píxel = 2·w / (m5·alto),
   // con w = profundidad en la matriz de proyección (en ortogonal w = 1 y sale alto visible / alto en píxeles)
   const e = camera.projectionMatrix.elements, mi = camera.matrixWorldInverse.elements;
@@ -922,7 +924,7 @@ const line2Geo = (pts) => { const g = new LineGeometry(); g.setPositions(pts); r
 // curvas se vuelven a teselar más finas (silueta, líneas y reflejos nítidos) como hace Plasticity.
 let tessMul = 1, refineT = 0;
 let shadowEvery = false, sceneChangedAt = 0;   // shadowEvery: true = recalcular la sombra en todos los cuadros (solo para medir)
-const TESS_HI = 1.8;
+const TESS_HI = 2.4;   // (v0.51) teselado fino al quedarse quieto: uniones entre parches más continuas
 function scheduleRefine() {
   clearTimeout(refineT);
   refineT = setTimeout(refineTess, 450);
@@ -1148,7 +1150,9 @@ function rebuildHandles(obj) {
     orientHandle(h.children[0], obj, ref);
     h.userData = ref;
     g.add(h);
+    h.scale.setScalar(1e-6);   // hasta medirlo no se dibuja (antes nacía a escala 1 = CV gigante en el primer cuadro)
   }
+  scaleHandles(g);   // tamaño correcto en pantalla desde el primer cuadro
 }
 
 function applyVisibility(obj) {
@@ -1776,21 +1780,59 @@ const isTopoSnap = (s) => !!s && s.kind !== 'rejilla';
 // placeAnchor = a qué quedó pegado el último punto (como attachedTo() de AlBlendPoint): {obj, t} en una curva, {obj, u, v} en una
 // superficie, {obj} en un borde o un punto suelto de un objeto; null = punto libre (plano de dibujo o rejilla)
 let placeAnchor = null;
+// (v0.51) dibujo con EJE: tras el 1.er CV, el siguiente punto queda en la recta por el último punto paralela a X / Y / Z de Alias
+// (teclas X, Y, Z mientras se dibuja, o "Recta" en la ventana: Auto = el eje más cercano al movimiento). Con un snap (punto, curva,
+// rejilla...) se toma la coordenada EXACTA de ese punto sobre el eje (como createLine + worldPosition); sin snap, el punto de la recta
+// más cercano al rayo del ratón.
+let lastPlaceSnap = null, lineMode = false;
+const draftAxisLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0x3182ce, dashSize: 0.08, gapSize: 0.06, depthTest: false, transparent: true }));
+draftAxisLine.renderOrder = 7; draftAxisLine.visible = false; scene.add(draftAxisLine);
+function draftAxisIndex(p) {
+  const mode = draft?.axis || toolDef.curveOrtho || 'free';
+  if (!draft?.pts.length || mode === 'free') return -1;
+  if (mode !== 'auto') return { x: 0, y: 1, z: 2 }[mode];
+  const d = p.clone().sub(draft.pts[draft.pts.length - 1]); let bi = 0, bv = -1;
+  AXES.forEach((a, i) => { const v = Math.abs(d.dot(a)); if (v > bv) { bv = v; bi = i; } });
+  return bi;
+}
+function draftPoint(e) {
+  const p = placePoint(e);
+  draftAxisLine.visible = false;
+  if (!p || !draft?.pts.length) return p;
+  const i = draftAxisIndex(p);
+  if (i < 0) return p;
+  const o = draft.pts[draft.pts.length - 1], a = AXES[i];
+  let q;
+  if (lastPlaceSnap) q = o.clone().addScaledVector(a, p.clone().sub(o).dot(a));   // coordenada exacta del punto de referencia
+  else {   // punto de la recta del eje más cercano al rayo del ratón
+    setRay(e);
+    const r = ray.ray, w = o.clone().sub(r.origin), b = a.dot(r.direction), den = 1 - b * b;
+    const t = Math.abs(den) < 1e-6 ? p.clone().sub(o).dot(a) : (b * w.dot(r.direction) - w.dot(a)) / den;
+    q = o.clone().addScaledVector(a, t);
+  }
+  placeAnchor = null;
+  const L = Math.max(1, o.distanceTo(camera.position) * 2);
+  draftAxisLine.geometry.dispose();
+  draftAxisLine.geometry = new THREE.BufferGeometry().setFromPoints([o.clone().addScaledVector(a, -L), o.clone().addScaledVector(a, L)]);
+  draftAxisLine.computeLineDistances(); draftAxisLine.material.color.setHex([0xe53e3e, 0x38a169, 0x3182ce][i]); draftAxisLine.visible = true;
+  return q;
+}
 function placePoint(e, solid = false) {
+  lastPlaceSnap = null;
   const modes = snapModes(e);
   const s = findSnap(e.clientX, e.clientY, modes, {});
   placeAnchor = null;
-  if (s) { showSnap(s); if (s.obj) placeAnchor = { obj: s.obj.id, ...(s.edge ? { edge: s.edge } : {}), ...(s.param != null ? { t: s.param } : {}) }; return s.point; }
+  if (s) { lastPlaceSnap = s.kind || 'punto'; showSnap(s); if (s.obj) placeAnchor = { obj: s.obj.id, ...(s.edge ? { edge: s.edge } : {}), ...(s.param != null ? { t: s.param } : {}) }; return s.point; }
   setRay(e);
   // superficie: botón fijo o Shift mantenido al dibujar; con Ctrl o Ctrl+Alt, si no hay punto ni curva cerca, el punto se desliza
   // sobre la superficie que hay debajo (S(u, v) exacta en cada movimiento del ratón)
   if (modes.surface || modes.point || modes.curve || (e.shiftKey && !e.altKey)) {
     const q = surfacePointAt();
-    if (q) { showSnap({ point: q, kind: 'superficie' }); placeAnchor = surfAnchor; return q; }
+    if (q) { lastPlaceSnap = 'superficie'; showSnap({ point: q, kind: 'superficie' }); placeAnchor = surfAnchor; return q; }
   }
   const k = resolvePlaneKind(solid), gk = modes.grid && k === 'free' ? 'xz' : k;   // en perspectiva la rejilla es la del suelo
   const p = ray.ray.intersectPlane(planeFor(gk), new THREE.Vector3());
-  if (p && modes.grid) { snapGrid(p, gk); showSnap({ point: p, kind: 'rejilla' }); } else hideSnap();
+  if (p && modes.grid) { lastPlaceSnap = 'rejilla'; snapGrid(p, gk); showSnap({ point: p, kind: 'rejilla' }); } else hideSnap();
   return p;
 }
 function setDrawPlane(k) {
@@ -1881,7 +1923,7 @@ function setTool(t) {
   setToolRaw(t);
 }
 function setToolRaw(t) {
-  if (tool === 'curve' && t !== 'curve') cancelDraft();
+  if (tool === 'curve' && t !== 'curve') { cancelDraft(); lineMode = false; draftAxisLine.visible = false; }
   if (tool === 'edge' && t !== 'edge') endEdgeOp();
   if (t !== 'select') mouseXform = false;
   tool = t;
@@ -1913,7 +1955,7 @@ const draftLine = new Line2(new LineGeometry(), draftMat);
 const draftHandles = new THREE.Group();
 scene.add(draftLine, draftHandles);
 draftLine.visible = false;
-function startDraft() { draft = { pts: [], anchors: [], hover: null }; showDraft(); }
+function startDraft() { draft = { pts: [], anchors: [], hover: null, axis: null }; draftAxisLine.visible = false; showDraft(); }
 function showDraft() {
   draftHandles.clear();
   draftLine.visible = false;
@@ -1949,6 +1991,8 @@ function curveSpec() {
     fields: [
       { type: 'seg', label: 'Grado', opts: [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [7, '7']], get: () => toolDef.curveDeg, set: (v) => keep('curveDeg', v) },
       { type: 'seg', label: 'Spans', opts: [[0, 'Auto'], [1, '1'], [2, '2'], [3, '3'], [4, '4'], [6, '6'], [8, '8']], get: () => toolDef.curveSpans, set: (v) => keep('curveSpans', v) },
+      { type: 'seg', label: 'Recta', opts: [['free', 'Libre'], ['auto', 'Auto'], ['x', 'X'], ['y', 'Y'], ['z', 'Z']], get: () => toolDef.curveOrtho || 'free', set: (v) => keep('curveOrtho', v) },
+      { type: 'html', html: () => '<span class="tw-note">Tras el 1.er punto: teclas X / Y / Z = el siguiente punto en esa recta (otra vez = libre). Con snap (Ctrl punto, Alt rejilla, Ctrl+Alt curva) toma la coordenada exacta de ese punto sobre el eje.</span>' },
     ],
     actions: [{ label: 'Terminar curva', primary: true, run: () => finishDraft() }],
   };
@@ -2123,12 +2167,21 @@ renderer.domElement.addEventListener('pointermove', (e) => {
       marquee.hidden = false;
     }
   }
-  if (tool === 'curve' && draft && (!e.buttons || (down && e.buttons === 1))) { draft.hover = placePoint(e); showDraft(); }
+  if (tool === 'curve' && draft && (!e.buttons || (down && e.buttons === 1))) { draft.hover = draftPoint(e); showDraft(); }
 });
 renderer.domElement.addEventListener('pointerleave', () => { if (draft) { draft.hover = null; showDraft(); } });
+addEventListener('keydown', (e) => {
+  if (tool !== 'curve' || !draft?.pts.length || e.ctrlKey || e.altKey || e.metaKey || e.repeat || typing(e.target)) return;
+  const k = { KeyX: 'x', KeyY: 'y', KeyZ: 'z' }[e.code];
+  if (!k) return;
+  e.preventDefault(); e.stopImmediatePropagation();   // con un punto puesto, la Z fija el eje en vez de abrir el Puck
+  draft.axis = draft.axis === k ? null : k;
+  toast(draft.axis ? `Recta en ${k.toUpperCase()} desde el último punto (vuelve a pulsar ${k.toUpperCase()} para soltar)` : 'Eje libre');
+  draft.hover = draftPoint({ clientX: lastPtr.x, clientY: lastPtr.y, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }); showDraft();
+}, true);
 ['keydown', 'keyup'].forEach((t) => addEventListener(t, (e) => {
   if (!['Control', 'Alt', 'Shift', 'Meta'].includes(e.key) || tool !== 'curve' || !draft) return;
-  draft.hover = placePoint({ clientX: lastPtr.x, clientY: lastPtr.y, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey });
+  draft.hover = draftPoint({ clientX: lastPtr.x, clientY: lastPtr.y, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey });
   showDraft();
 }));
 addEventListener('pointerup', (e) => {
@@ -2143,8 +2196,9 @@ addEventListener('pointerup', (e) => {
   // se soltó, con su anclaje paramétrico. No hace falta un segundo clic aunque el ratón se haya movido.
   if (tool === 'curve' && !gizmo.dragging) {
     if (e.button !== 0 || !draft) return;
-    const p = placePoint(e);
-    if (p) { draft.pts.push(p); draft.anchors.push(placeAnchor); draft.hover = null; showDraft(); }
+    const p = draftPoint(e);
+    if (p) { draft.pts.push(p); draft.anchors.push(placeAnchor); draft.hover = null; draft.axis = null; draftAxisLine.visible = false; showDraft(); }
+    if (lineMode && draft.pts.length >= 2) finishDraft();   // Línea: 2 puntos y se crea (la herramienta sigue para la siguiente)
     return;
   }
   if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5 || gizmo.dragging) return;
@@ -3921,7 +3975,7 @@ function makeRadial(items, { r = 140, title = '', keepTool = false } = {}) {
 // desde un anillo se quedan solo con lo elegido de ese tipo (curvas / superficies / sólidos) y guardan sus opciones por contexto
 // (params = claves de toolDef, p. ej. el plano de la simetría de Superficies no es el de Curvas).
 const PUCK3_LIB = {
-  curve: { k: 'curve', label: 'Curva', run: () => setTool('curve') }, circle: { k: 'circle', label: 'Círculo', run: () => setTool('circle') },
+  curve: { k: 'curve', label: 'Curva', run: () => setTool('curve') }, line: { k: 'curve', label: 'Línea', run: () => startLine() }, circle: { k: 'circle', label: 'Círculo', run: () => setTool('circle') },
   ground: { k: 'ground', label: 'Curva en el suelo', run: () => { setDrawPlane('xz'); setTool('curve'); } },
   front: { k: 'front', label: 'Curva de frente', run: () => { setDrawPlane('xy'); setTool('curve'); } },
   project: { k: 'project', label: 'Proyectar', run: () => projectSelection() }, trim: { k: 'project', label: 'Trim', run: () => trimSelection() }, untrim: { k: 'project', label: 'Untrim', run: () => untrimSelection() }, flip: { k: 'symm', label: 'Invertir normales', run: () => withSelection('flip') },
@@ -3929,7 +3983,7 @@ const PUCK3_LIB = {
   plane: { k: 'plane', label: 'Plano', run: () => setTool('plane') }, revolve: { k: 'revolve', label: 'Revolución', run: () => OPS.revolve() },
   loft: { k: 'loft', label: 'Loft', run: () => OPS.loft() }, extrude: { k: 'extrude', label: 'Extruir', run: () => OPS.extrude() },
   skin: { k: 'loft', label: 'Skin', run: () => startEdgeOp('skin') }, blend: { k: 'edit', label: 'Blend', run: () => startEdgeOp('blend') },
-  align: { k: 'align', label: 'Align', run: () => startEdgeOp('align') }, extend: { k: 'extend', label: 'Extender', run: () => startEdgeOp('extend') },
+  align: { k: 'align', label: 'Align', run: () => startEdgeOp('align') }, extend: { k: 'extend', label: 'Extender', run: () => startExtendU() },
   offset: { k: 'offset', label: 'Offset', run: () => offsetSelection() },
   fillet: { k: 'round', label: 'Redondear', run: () => $('t-fillet').click() }, gfillet: { k: 'round', label: 'Redondeo G2', run: () => startEdgeOp('gfillet') }, chamfer: { k: 'round', label: 'Chaflán', run: () => $('t-chamfer').click() },
   bool: { k: 'object', label: 'Booleanas', soon: true }, forge: { k: 'cube', label: 'Forge (relieves)', run: () => switchLayout('forge') },
@@ -4042,14 +4096,15 @@ function cvsOff(list = objects) { list.forEach((o) => { o.showCVs = false; apply
 function escapeAll(reason = 'esc') {
   // Mover / Rotar / Escalar son PERSISTENTES: "Nada" o un clic en el vacío solo sueltan la selección (la herramienta sigue lista para
   // los siguientes CVs u objetos); solo Esc u otro comando las cierran
-  if (reason !== 'esc' && activeTool?.persist) { clearSelection(); cvsOff(objects.filter((o) => o.showCVs)); updateHint(); return; }
+  // "Pick Nothing" (como unpick de AlPickable): suelta el NODO; los CVs siguen a la vista hasta Mostrar › Apagar CVs
+  if (reason !== 'esc' && activeTool?.persist) { clearSelection(); updateHint(); return; }
   // la curva en dibujo con 2 o más CVs se guarda (commit) y queda en la escena; luego todo se suelta
   const made = activeTool?.id === 'tool:curve' ? commitWIP() : null;
   endActiveTool(reason);
   if (pivotEdit) togglePivotEdit();
   mouseXform = false;
   if (TW.spec) TW.hide();
-  clearSelection(); cvsOff(objects.filter((o) => o.showCVs && o !== made)); updateHint();   // "Pick Nothing" apaga los CVs (la curva recién guardada los conserva)
+  clearSelection(); updateHint();   // los CVs encendidos se quedan (solo Mostrar › Apagar CVs los oculta)
   if (made) toast(`${made.name} guardada`);
 }
 addEventListener('keydown', (e) => {
@@ -4376,7 +4431,8 @@ const MENUBAR = [
     { label: 'Curva', key: 'Ctrl+Alt', run: () => $('snap-curve').click(), ...chk(() => snapToggles.curve) },
     { label: 'Punto', key: 'Ctrl', run: () => $('snap-point').click(), ...chk(() => snapToggles.point) }]],
   ['Curvas', [
-    { label: 'Curva', key: 'C', run: () => setTool('curve') }, { label: 'Círculo', run: () => setTool('circle') },
+    { label: 'Curva', key: 'C', run: () => setTool('curve') }, { label: 'Línea (2 puntos)', run: () => startLine() }, { label: 'Círculo', run: () => setTool('circle') },
+    { label: 'Extender (curva o superficie)', run: () => startExtendU() },
     { sep: true }, { label: 'Proyectar en superficie', run: projectSelection }]],
   ['Superficies', [
     { label: 'Plano', run: () => setTool('plane') }, { label: 'Revolución', run: () => OPS.revolve() }, { label: 'Loft', run: () => OPS.loft() },
@@ -4918,6 +4974,15 @@ function gfilletPoints(r) {
 }
 defineConstruction('blend', {
   name: 'Freeform Blend', inputs: blendInputs, retool: true,
+  // Revert: borra el blend y DESHACE los recortes automáticos que hizo en sus lados (dominio paramétrico entero otra vez)
+  revert: (r, out) => {
+    (r.autoTrimmed || []).map(byId).filter(Boolean).forEach((c) => {
+      c.data = { ...c.data, cos: { ...c.data.cos, trim: 'none' } };
+      relations.filter((x) => x.type === 'project' && x.out === c.id).forEach((x) => (x.trim = 'none'));
+      updateObject(c);
+    });
+    if (out) removeObject(out);
+  },
   build: (r) => blendRelData(r), panel: blendPanel, diagnose: blendDiagnose, labels: blendLabels,
   summary: (r, nm) => `${nm(r.out)} · G${r.contA ?? r.cont}/G${r.contB ?? r.cont}`,
   points(r, out) {
@@ -5682,6 +5747,7 @@ function autoTrim(r) {
     const c = byId(id);
     if (!c?.data.cos || !toward || (c.data.cos.trim && c.data.cos.trim !== 'none')) return;
     c.data.cos.trim = toward;
+    (r.autoTrimmed ||= []).push(c.id);
     const pr = relations.find((x) => x.type === 'project' && x.out === c.id);
     if (pr) pr.trim = toward;
     updateObject(c);
@@ -5721,7 +5787,7 @@ function findMateEdge(obj, edge) {
 function fcurveData(r, src, other) {
   const uv = FF.filletRail(src.data, r.edge, other.data, r.otherEdge, r.dist, r.measure);
   const d = FF.cosCurveData(src.data, uv), cos = { surf: src.id, uv, closed: false, edge: true };
-  cos.trim = FF.railTrimSide(cos, r.edge) || 'none';
+  cos.trim = r.untrimmed ? 'none' : FF.railTrimSide(cos, r.edge) || 'none';
   d.cos = cos;
   return d;
 }
@@ -5762,7 +5828,7 @@ function gfilletSpec(r) {
       { type: 'range', label: 'Form factor', min: 0.2, max: 3, step: 0.05, get: () => bl?.tensionA ?? 1, start: checkpoint, set: (v) => { toolDef.gfForm = v; saveToolDef(); blendSet({ tension: v, tensionA: v, tensionB: v }); }, fmt: (v) => v.toFixed(2) },
       { type: 'html', html: () => '<span class="tw-note">Un solo nodo con historial: si mueves los CVs de las superficies, los carriles, el recorte y el redondeo se recalculan.</span>' }],
     actions: [
-      { label: 'Quitar redondeo', run: () => { checkpoint(); const outs = rels.map((x) => byId(x.out)).filter(Boolean); outs.reverse().forEach((o) => removeObject(o)); selectionChanged(); refreshOutliner(); renderHistory(); TW.hide(); toast('Redondeo quitado: las superficies vuelven a estar enteras'); } },
+      { label: 'Revert', run: () => { checkpoint(); const outs = rels.map((x) => byId(x.out)).filter(Boolean); outs.reverse().forEach((o) => removeObject(o)); selectionChanged(); refreshOutliner(); renderHistory(); TW.hide(); toast('Redondeo quitado: las superficies vuelven a estar enteras'); } },
       { label: 'Aceptar', primary: true, run: () => { TW.hide(); if (edgeOp?.type === 'gfillet') setTool('select'); } }],
   };
 }
@@ -5778,6 +5844,96 @@ function createExtend(p) {
   toast(`${o.name}: G${r.cont} con ${p.obj.name} · arrastra la flecha verde para la distancia`);
   continueEdgeOp(r);
 }
+// ---------- Línea y Extender unificado ----------
+function startLine() { setTool('curve'); lineMode = true; startDraft(); toast('Línea: 2 clics (con snaps; X / Y / Z fijan el eje tras el 1.er punto)'); }
+// Extender (como extendCurve(param, point[4]) de AlCurve, también para superficies): 1) clic cerca del EXTREMO de una curva o del
+// BORDE de una superficie; 2) clic en el punto de destino, con snap (Alt rejilla, Ctrl punto / CV, Ctrl+Alt curva). La curva se
+// alarga con continuidad tangente hasta ese punto EXACTO; la superficie se extiende (G1–G3, con historial) hasta el plano que pasa por
+// el punto, perpendicular a la dirección de extensión. La herramienta sigue para la siguiente; Esc o clic derecho la cierran.
+let extU = null;
+function startExtendU() {
+  beginTool('extendU', { label: 'Extender', voidKill: false, cleanup: () => { extU = null; hideSnap(); } });
+  extU = { stage: 'pick' };
+  toast('Extender: clic cerca del extremo de una curva o del borde de una superficie');
+}
+function curveEndAt(o, e) {
+  const d = o.data, c = N.curveOf(d), a = c.getPoint(0), b = c.getPoint(1);
+  const sa = toScreen(new THREE.Vector3(a.x, a.y, a.z)), sb = toScreen(new THREE.Vector3(b.x, b.y, b.z));
+  return Math.hypot(sa.x - e.clientX, sa.y - e.clientY) <= Math.hypot(sb.x - e.clientX, sb.y - e.clientY) ? 0 : 1;
+}
+function toScreen(v) {
+  const pn = paneAt(lastPtr.x), r = renderer.domElement.getBoundingClientRect(); useAspect(pn);
+  const q = v.clone().project(camera); return { x: r.left + pn.x + ((q.x + 1) / 2) * pn.w, y: r.top + ((1 - q.y) / 2) * pn.h };
+}
+// alarga la curva por su extremo `end` hasta P con continuidad G1 (tramo de Hermite) y la reajusta con el mismo grado
+function extendCurveData(d, end, P) {
+  let c = N.curveOf(d);
+  const at = (t) => { const q = c.getPoint(t); return new THREE.Vector3(q.x, q.y, q.z); };
+  const t0 = end ? 1 : 0, E = at(t0), h = 1e-4, T = at(end ? 1 - h : h).sub(E).multiplyScalar(-1).normalize();
+  const L = E.distanceTo(P);
+  if (L < 1e-9) return d;
+  const nOrig = Math.max(d.cvs.length + 2, 8), nExt = Math.max(3, Math.round(nOrig * 0.4));
+  const orig = []; for (let i = 0; i < nOrig; i++) { const u = i / (nOrig - 1); orig.push(at(end ? u : 1 - u)); }   // termina en E
+  const D = P.clone().sub(E), T1 = D.clone().normalize();
+  const ext = []; for (let k = 1; k <= nExt; k++) { const s = k / nExt, h00 = 2 * s ** 3 - 3 * s ** 2 + 1, h10 = s ** 3 - 2 * s ** 2 + s, h01 = -2 * s ** 3 + 3 * s ** 2, h11 = s ** 3 - s ** 2;
+    ext.push(E.clone().multiplyScalar(h00).addScaledVector(T, h10 * L).addScaledVector(P, h01).addScaledVector(T1, h11 * L)); }
+  let pts = orig.concat(ext);
+  if (!end) pts = pts.reverse();
+  const out = N.fitCurve(pts, d.deg, d.plane);
+  return { ...out, plane: d.plane };
+}
+function surfaceExtendTo(o, edge, P) {
+  // el borde lejano de la extensión (punto medio) debe llegar al plano de P perpendicular a la dirección de extensión; como con G2/G3 el
+  // desplazamiento no es lineal en la distancia, se ajusta con unos pasos de secante
+  const cont = toolDef.extendCont ?? 2, S0 = FF.surfEval(o.data), mids = (S) => [[0.5, 0], [0.5, 1], [0, 0.5], [1, 0.5]].map(([u, v]) => S(u, v));
+  const m0 = mids(S0);
+  // el borde lejano es el OPUESTO en parámetros al borde compartido (no el más distante: en una franja ancha lo serían los laterales)
+  const OPP = [1, 0, 3, 2];
+  const ends = (dist) => { const m = mids(FF.surfEval(FF.extendData(o.data, edge, dist, cont))); let ni = 0, nd = Infinity;
+    m.forEach((q, i) => { for (const r of m0) { const dd = q.distanceTo(r); if (dd < nd) { nd = dd; ni = i; } } });
+    return { M: m[ni], F: m[OPP[ni]] }; };
+  const e1 = ends(1), t = e1.F.clone().sub(e1.M);
+  if (t.length() < 1e-9) return null;
+  t.normalize();
+  const goal = P.clone().sub(e1.M).dot(t);
+  if (goal <= 1e-4) return null;
+  const f = (d) => { const e = ends(d); return e.F.clone().sub(e.M).dot(t) - goal; };
+  let d0 = 0.5, d1 = 1, f0 = f(d0), f1 = f(d1);
+  for (let it = 0; it < 12 && Math.abs(f1) > 1e-7; it++) { const d2 = d1 - f1 * (d1 - d0) / ((f1 - f0) || 1e-12); d0 = d1; f0 = f1; d1 = Math.max(1e-4, d2); f1 = f(d1); }
+  return d1;
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!extU || navHeld || e.button === 1 || (e.ctrlKey && e.shiftKey && !e.altKey)) return;
+  if (e.button === 2) { e.preventDefault(); e.stopImmediatePropagation(); return endActiveTool('done'); }
+  if (extU.stage === 'pick' && (e.ctrlKey || e.altKey)) return;
+  e.preventDefault(); e.stopImmediatePropagation(); down = null;
+  if (extU.stage === 'pick') {
+    const c = lineCandidates(e, 'both', 12, pickable)[0];
+    if (!c) return toast('Extender: haz clic cerca del extremo de una curva o del borde de una superficie.');
+    if (c.obj.kind === 'curve' && !c.obj.data.cos) extU = { stage: 'target', obj: c.obj, end: curveEndAt(c.obj, e) };
+    else if (c.obj.kind === 'surface' && c.edge) extU = { stage: 'target', obj: c.obj, edge: c.edge };
+    else return toast('Extender: elige una curva libre o el borde de una superficie.');
+    return toast(`Extender ${c.obj.name}: ahora clic en el punto de destino (Alt rejilla · Ctrl punto o CV · Ctrl+Alt curva)`);
+  }
+  const P = placePoint(e);
+  if (!P) return;
+  checkpoint();
+  const o = extU.obj;
+  if (o.kind === 'curve') {
+    const rel = relations.find((r) => outputOf(r) === o.id && !constructionOf(r).editable);
+    if (rel) relations.splice(relations.indexOf(rel), 1);
+    o.data = extendCurveData(o.data, extU.end, P); updateObject(o);
+    toast(`${o.name} extendida hasta el punto (${fmtA(P).map((v) => v.toFixed(1)).join(', ')} mm)`);
+  } else {
+    const dist = surfaceExtendTo(o, extU.edge, P);
+    if (!dist) { toast('Ese punto queda por dentro del borde: elige uno hacia fuera.'); return; }
+    const r = { type: 'extend', src: o.id, edge: extU.edge, dist, cont: toolDef.extendCont ?? 2 };
+    const out = addSurface(FF.extendData(o.data, r.edge, r.dist, r.cont), 'Extensión'); r.out = out.id; addRelation(r);
+    toast(`${out.name}: ${o.name} extendida G${r.cont} hasta el plano del punto (${(dist * 100).toFixed(1)} mm)`);
+  }
+  hideSnap(); extU = { stage: 'pick' };
+}, true);
+addEventListener('pointermove', (e) => { if (extU?.stage === 'target' && e.target === renderer.domElement) placePoint(e); });
 // Proyectar curvas sobre una superficie (curvas sobre superficie con historial: si mueves la curva, la proyección la sigue)
 function projectRun() {
   const cs = selCurves().filter((c) => !c.data.cos), srf = selObjs.find((o) => o.kind === 'surface');
@@ -5856,6 +6012,8 @@ function untrimSurface(o, all) {
   const dropStage = (x) => { const i = x.rel == null ? -1 : relations.findIndex((r) => r.id === x.rel); if (i >= 0) relations.splice(i, 1); };
   const dropCos = (c) => {
     relations.filter((r) => r.type === 'project' && r.out === c.id).forEach((r) => (r.trim = 'none'));
+    relations.filter((r) => r.type === 'fcurve' && r.out === c.id).forEach((r) => (r.untrimmed = true));   // si no, el carril se volvía a recortar al recalcularse
+    relations.filter((r) => r.autoTrimmed?.includes(c.id)).forEach((r) => (r.autoTrimmed = r.autoTrimmed.filter((x) => x !== c.id)));
     c.data = { ...c.data, cos: { ...c.data.cos, trim: 'none', edge: false } };   // un borde de recorte pasa a ser una curva sobre superficie
     updateObject(c);
   };
@@ -7540,7 +7698,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, trimSelection, finishTrim, untrimSelection, doUntrim, revertConstruction, endFillet, serializeProject, loadProjectV2orV1, recentAll, locators, addLocator, deleteLocators, flipNormalsRun, withSelection, activeTool: () => activeTool?.id || "idle", escapeAll, awaitSel: () => awaitSel, revolveDrag: () => revolveDrag, MENUS: () => MENUS, setXform, offsetSelection, loftSelection, revolveSelection, extrudeSelection, filPreview, trimStages, relSpecOf: (r) => relSpec(r), trimOp: () => trimOp, applyRelation, propagateFrom, renderHistory };
+window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, trimSelection, finishTrim, untrimSelection, doUntrim, revertConstruction, endFillet, serializeProject, loadProjectV2orV1, extendCurveData, surfaceExtendTo, cvsOff, startExtendU, startLine, untrimSurface, draftPoint, recentAll, locators, addLocator, deleteLocators, flipNormalsRun, withSelection, activeTool: () => activeTool?.id || "idle", escapeAll, awaitSel: () => awaitSel, revolveDrag: () => revolveDrag, MENUS: () => MENUS, setXform, offsetSelection, loftSelection, revolveSelection, extrudeSelection, filPreview, trimStages, relSpecOf: (r) => relSpec(r), trimOp: () => trimOp, applyRelation, propagateFrom, renderHistory };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;
