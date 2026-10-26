@@ -157,7 +157,12 @@ export function toSurfaces(oc, shape, fit, origin = [], evalPt = null) {
       const bs = ad.BSpline().get();
       try { bs.Segment(u0, u1, v0, v1, 1e-9, 1e-9); data = readBSpline(bs); } catch (e) { data = null; }
     }
-    // planos, cilindros, toros... y lo que no se dejó cortar: se ajusta una B-spline por puntos (como Rebuild)
+    // plano: parche bilineal EXACTO de sus 4 esquinas (el plano es lineal en u, v; así no sale una malla densa de CVs)
+    if (!data && ad.GetType() === oc.GeomAbs_SurfaceType.GeomAbs_Plane) {
+      const C = (u, v) => { const p = ad.Value(u, v), r = { x: p.X() / MM, y: p.Y() / MM, z: p.Z() / MM, w: 1 }; p.delete(); return r; };
+      data = { degU: 1, degV: 1, knotsU: [0, 0, 1, 1], knotsV: [0, 0, 1, 1], cvs: [[C(u0, v0), C(u0, v1)], [C(u1, v0), C(u1, v1)]] };
+    }
+    // cilindros, toros... y lo que no se dejó cortar: se ajusta una B-spline por puntos (como Rebuild)
     if (!data) {
       const N = 12, grid = [];
       for (let i = 0; i <= N; i++) { const row = []; for (let j = 0; j <= N; j++) { const p = ad.Value(u0 + ((u1 - u0) * i) / N, v0 + ((v1 - v0) * j) / N); row.push([p.X() / MM, p.Y() / MM, p.Z() / MM]); p.delete(); } grid.push(row); }
@@ -297,7 +302,9 @@ function flipU(d, loops) {
 export function previewMesh(oc, shape, defl = 0.05) {
   const m = new oc.BRepMesh_IncrementalMesh_2(shape, defl, false, 0.3, false); m.delete();
   const faces = [], REV = oc.TopAbs_Orientation.TopAbs_REVERSED;
+  let fi = -1;
   explore(oc, shape, T(oc).TopAbs_FACE, (f0) => {
+    fi++;
     const f = oc.TopoDS.Face_1(f0), loc = new oc.TopLoc_Location_1(), h = oc.BRep_Tool.Triangulation(f, loc, 0);
     if (h.IsNull()) { loc.delete(); return; }
     const tr = h.get(), tf = loc.Transformation(), P = [], I = [], rev = f.Orientation_1() === REV;
@@ -308,7 +315,7 @@ export function previewMesh(oc, shape, defl = 0.05) {
       t.delete();
     }
     loc.delete();
-    faces.push({ P, I });
+    faces.push({ P, I, fi });
   });
   let nTri = 0;
   for (const f of faces) nTri += f.I.length / 3;
@@ -320,7 +327,7 @@ export function previewMesh(oc, shape, defl = 0.05) {
     for (const p of T3) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], p[k]); mx[k] = Math.max(mx[k], p[k]); }
     solid = { T3, eps: Math.max(0.02, Math.hypot(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) * 2e-3) };
   }
-  const P = [], I = [];
+  const P = [], I = [], F = [];
   for (const f of faces) {
     if (solid && f.I.length) {
       const t = Math.floor(f.I.length / 6) * 3, a = f.I[t] * 3, b = f.I[t + 1] * 3, c = f.I[t + 2] * 3;
@@ -332,6 +339,78 @@ export function previewMesh(oc, shape, defl = 0.05) {
     const base = P.length / 3;
     for (let i = 0; i < f.P.length; i += 3) P.push(f.P[i] / MM, f.P[i + 1] / MM, f.P[i + 2] / MM);
     for (const k of f.I) I.push(k + base);
+    for (let i = 0; i < f.I.length; i += 3) F.push(f.fi);
   }
-  return { pos: new Float32Array(P), idx: new Uint32Array(I) };
+  // tri[k] = índice de la cara (orden de TopExp_Explorer, el mismo que faceShapes) del triángulo k
+  return { pos: new Float32Array(P), idx: new Uint32Array(I), tri: new Uint32Array(F) };
+}
+
+// ---------- Empujar / tirar (Push/Pull) como Plasticity ----------
+// Las caras en el mismo orden que previewMesh (tri) y edgeList.
+export function faceShapes(oc, shape) {
+  const out = [];
+  explore(oc, shape, T(oc).TopAbs_FACE, (f) => out.push(oc.TopoDS.Face_1(f)));
+  return out;
+}
+
+// Normal hacia fuera, centro, área y si es plana, de cada cara, sacadas de la malla ya orientada de previewMesh (dm).
+export function faceFrames(m, nFaces) {
+  const fr = Array.from({ length: nFaces }, () => ({ n: [0, 0, 0], c: [0, 0, 0], area: 0, ns: [] }));
+  const P = m.pos, I = m.idx;
+  for (let t = 0; t < I.length / 3; t++) {
+    const a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3, f = fr[m.tri[t]];
+    const u = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]], v = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
+    const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], A = Math.hypot(...n) / 2;
+    if (A < 1e-14) continue;
+    for (let k = 0; k < 3; k++) { f.n[k] += n[k] / 2; f.c[k] += ((P[a + k] + P[b + k] + P[c + k]) / 3) * A; }
+    f.area += A; f.ns.push([n[0] / (2 * A), n[1] / (2 * A), n[2] / (2 * A)]);
+  }
+  for (const f of fr) {
+    const l = Math.hypot(...f.n) || 1;
+    f.n = f.n.map((x) => x / l); f.c = f.c.map((x) => x / (f.area || 1));
+    // plana si todas las normales de sus triángulos coinciden con la media (< 0,5°)
+    f.planar = f.ns.every((q) => q[0] * f.n[0] + q[1] * f.n[1] + q[2] * f.n[2] > 0.99996);
+    delete f.ns;
+  }
+  return fr;
+}
+
+// Una curva cerrada y plana de Forja { deg, knots, cvs[{x,y,z,w}] } → cara plana (región que se puede empujar)
+export function curveFace(oc, d) {
+  const n = d.cvs.length, P = new oc.TColgp_Array1OfPnt_2(1, n), W = real1(oc, d.cvs.map((c) => c.w ?? 1));
+  d.cvs.forEach((c, i) => { const p = new oc.gp_Pnt_3(c.x * MM, c.y * MM, c.z * MM); P.SetValue(i + 1, p); p.delete(); });
+  const K = uniq(d.knots);
+  const bc = new oc.Geom_BSplineCurve_2(P, W, real1(oc, K.k), int1(oc, K.m), d.deg, false, true);
+  const me = new oc.BRepBuilderAPI_MakeEdge_24(new oc.Handle_Geom_Curve_2(bc));
+  if (!me.IsDone()) throw new Error('la curva no forma una arista');
+  const mw = new oc.BRepBuilderAPI_MakeWire_2(me.Edge());
+  if (!mw.IsDone()) throw new Error('la curva no está cerrada');
+  const mf = new oc.BRepBuilderAPI_MakeFace_15(mw.Wire(), true);
+  if (!mf.IsDone()) throw new Error('la curva no es plana o no está cerrada');
+  return mf.Face();
+}
+
+// Empujar / tirar: prisma de la cara a lo largo de vec (dm). Sólido: tirar hacia fuera (vec · normal > 0) = UNIÓN,
+// empujar hacia dentro = CORTE (se infiere solo, como en Plasticity). Sin sólido (una superficie suelta): el prisma = engrosar.
+// normal = normal hacia fuera de la cara (o de la cara del sólido donde está la región).
+export function pushPull(oc, shape, face, vec, normal, solid) {
+  const d = vec[0] * normal[0] + vec[1] * normal[1] + vec[2] * normal[2];
+  const v = new oc.gp_Vec_4(vec[0] * MM, vec[1] * MM, vec[2] * MM);
+  const pm = new oc.BRepPrimAPI_MakePrism_1(face, v, false, true);
+  v.delete();
+  if (!pm.IsDone()) throw new Error('no se pudo extruir la cara');
+  const tool = pm.Shape();
+  if (!solid) return { shape: tool, op: 'thicken', d };
+  const op = d >= 0 ? 'union' : 'cut';
+  const b = op === 'union' ? new oc.BRepAlgoAPI_Fuse_3(shape, tool, pr(oc)) : new oc.BRepAlgoAPI_Cut_3(shape, tool, pr(oc));
+  if (!b.IsDone() || b.HasErrors()) { b.delete(); throw new Error(op === 'union' ? 'la unión falló' : 'el corte falló'); }
+  let res = b.Shape();
+  b.delete();
+  // une las caras que quedaron en el mismo plano (si no, la cara de arriba queda partida en trozos)
+  try { const u = new oc.ShapeUpgrade_UnifySameDomain_2(res, true, true, false); u.Build(); res = u.Shape(); u.delete(); } catch (e) { /* se deja sin unificar */ }
+  let nf = 0;
+  explore(oc, res, T(oc).TopAbs_FACE, () => nf++);
+  if (!nf) throw new Error(op === 'cut' ? 'el corte se comió toda la pieza' : 'el resultado está vacío');
+  if (volume(oc, res) < 0) res.Reverse();
+  return { shape: res, op, d };
 }

@@ -13,13 +13,13 @@ import * as N from './nurbs.js?v=0.47.0';
 import { applyBackground, wallColorAt } from './concrete.js?v=0.39.3';
 import { createPuck3 } from './puck3.js?v=0.50.0';
 // versión visible (Ayuda › Acerca de). Los archivos que cambian llevan ?v= en su ruta para que el navegador no use una copia vieja guardada.
-const FORJA_VERSION = '0.51.0';
+const FORJA_VERSION = '0.52.0';
 import { drawLogo } from './logo.js';
 import * as X from './exporters.js';
 import * as AI from './ai.js';
 import * as HX from './history.js?v=0.44.1';
 import * as FF from './freeform.js?v=0.49.0';
-import * as FL from './fillet.js?v=0.42.0';
+import * as FL from './fillet.js?v=0.52.0';
 import { getOCC } from './occ.js';
 import { createAO } from './ao.js';
 import { createBackend } from './render/backend.js';
@@ -3010,6 +3010,7 @@ $('op-dist').addEventListener('input', (e) => { $('op-dist-o').textContent = (+e
 
 $('t-select').addEventListener('click', () => setTool('select'));
 $('t-fillet').addEventListener('click', () => startFillet());
+$('t-push').addEventListener('click', () => startPushPull());
 $('t-chamfer').addEventListener('click', async () => { await startFillet(); if (fil) { fil.dist = -Math.abs(fil.dist); filRefresh(); showFilletWin(); } });
 $('t-move').addEventListener('click', () => { setTool('select'); setXform('translate'); });
 $('t-rotate').addEventListener('click', () => { setTool('select'); setXform('rotate'); });
@@ -3652,6 +3653,7 @@ addEventListener('keydown', (e) => {
   else if (k === 'd' || k === 'insert') togglePivotEdit();
   else if (k === 'c') setTool('curve');
   else if (k === 'b') startFillet();
+  else if (k === 'q') startPushPull();
   else if (k === 'o' && e.shiftKey) toggleOrtho();
   else if (k === 'o') setPickMode('object');
   else if (k === 'p') setPickMode('cv');
@@ -3986,7 +3988,7 @@ const PUCK3_LIB = {
   align: { k: 'align', label: 'Align', run: () => startEdgeOp('align') }, extend: { k: 'extend', label: 'Extender', run: () => startExtendU() },
   offset: { k: 'offset', label: 'Offset', run: () => offsetSelection() },
   fillet: { k: 'round', label: 'Redondear', run: () => $('t-fillet').click() }, gfillet: { k: 'round', label: 'Redondeo G2', run: () => startEdgeOp('gfillet') }, chamfer: { k: 'round', label: 'Chaflán', run: () => $('t-chamfer').click() },
-  bool: { k: 'object', label: 'Booleanas', soon: true }, forge: { k: 'cube', label: 'Forge (relieves)', run: () => switchLayout('forge') },
+  bool: { k: 'object', label: 'Empujar / tirar', run: () => startPushPull() }, forge: { k: 'cube', label: 'Forge (relieves)', run: () => switchLayout('forge') },
   pivot: { k: 'pivot', label: 'Pivote', run: () => togglePivotEdit() }, undo: { k: 'undo', label: 'Deshacer', run: () => undo() },
   layers: { k: 'layers', label: 'Capas', run: () => layersWin.show() }, showAll: { k: 'show', label: 'Mostrar todo', run: () => unhideAll() },
   prefs: { k: 'gear', label: 'Personalizar el Puck', run: () => openPrefs('puck') },
@@ -4440,7 +4442,7 @@ const MENUBAR = [
     { label: 'Align (G0 · G1 · G2 · G3)', run: () => startEdgeOp('align') }, { label: 'Freeform Blend (bordes y curvas)', run: () => startEdgeOp('blend') },
     { label: 'Skin (entre curvas)', run: () => startEdgeOp('skin') }, { label: 'Extender', run: () => startEdgeOp('extend') },
     { label: 'Offset', run: offsetSelection }, { label: 'Simetría (plano YZ)', run: mirrorSelection },
-    { sep: true }, { title: 'Sólidos (como Plasticity)' }, { label: 'Redondear / chaflán aristas', key: 'B', run: () => startFillet() }, { label: 'Redondeo G2 / G3 (superficies)', run: () => startEdgeOp('gfillet') },
+    { sep: true }, { title: 'Sólidos (como Plasticity)' }, { label: 'Redondear / chaflán aristas', key: 'B', run: () => startFillet() }, { label: 'Empujar / tirar caras (unión / corte)', key: 'Q', run: () => startPushPull() }, { label: 'Redondeo G2 / G3 (superficies)', run: () => startEdgeOp('gfillet') },
     { sep: true }, { title: 'Curvas sobre superficie' },
     { label: 'Proyectar curva en superficie', run: projectSelection },
     { label: 'Trim (recortar por piezas)', run: () => trimSelection() },
@@ -5188,10 +5190,10 @@ defineConstruction('trim', {
 defineConstruction('fillet', {
   name: 'Redondeo', inputs: (r) => r.srcs, output: (r) => r.outs[0], editable: true,
   build: (r, ins, out) => out.data,
-  summary: (r, nm) => `${r.kind || 'Redondeo'} · ${r.n || 0} arista(s) · ${r.srcs.length} original(es) oculta(s)`,
+  summary: (r, nm) => `${r.kind || 'Redondeo'} · ${r.n || 0} ${r.what || 'arista(s)'} · ${r.srcs.length} original(es) oculta(s)`,
   panel(r, c) {
-    c.fields.push({ type: 'html', html: () => `<span class="tw-note">${r.kind || 'Redondeo'} de ${Math.abs((r.dist || 0) * 100).toFixed(1)} mm en ${r.n || 0} arista(s). Las superficies de origen (${r.srcs.map((id) => c.nm(id)).join(', ')}) están ocultas y atadas a esta operación: <b>Revert</b> borra el resultado y las devuelve.</span>` });
-    return ` · ${r.n || 0} arista(s)`;
+    c.fields.push({ type: 'html', html: () => `<span class="tw-note">${r.kind || 'Redondeo'} de ${Math.abs((r.dist || 0) * 100).toFixed(1)} mm en ${r.n || 0} ${r.what || 'arista(s)'}. Las superficies de origen (${r.srcs.map((id) => c.nm(id)).join(', ')}) están ocultas y atadas a esta operación: <b>Revert</b> borra el resultado y las devuelve.</span>` });
+    return ` · ${r.n || 0} ${r.what || 'arista(s)'}`;
   },
   revert: (r) => { r.outs.slice().reverse().map(byId).filter(Boolean).forEach(removeObject); },
 });
@@ -7136,50 +7138,56 @@ function showFilletWin() {
     ],
   });
 }
+// Resultado de OpenCascade → superficies NURBS de Forja (con sus recortes). Las de origen NO se borran: se ocultan y quedan atadas
+// a la operación (relación 'fillet', Revert las devuelve); las nuevas llevan su nombre, material, capa y grupo.
+// rel = { kind, n, dist, base } (base = nombre de las caras nuevas sin origen). clear() quita la vista previa. Devuelve las superficies o null.
+function commitSolid(oc, shape, origin, srcs, rel, clear) {
+  const fitData = (grid) => N.fitSurface(grid.map((row) => row.map(([x, y, z]) => new THREE.Vector3(x, y, z))), 3, 3);
+  let surfs;
+  try { surfs = FL.toSurfaces(oc, shape, fitData, origin || [], (d, u, v) => {
+    const t = new THREE.Vector3(); N.surfaceOf({ ...d, cvs: d.cvs.map((row) => row.map((c) => new THREE.Vector4(c.x, c.y, c.z, c.w ?? 1))) }).getPoint(Math.min(1, u), Math.min(1, v), t);
+    return [t.x, t.y, t.z];
+  }); } catch (e) { toast(`No se pudo convertir el resultado: ${e.message || e}`); return null; }
+  checkpoint();
+  const made = [];
+  const info = new Map(srcs.map((o) => [o.id, { name: o.name, mat: o.mat, layer: o.layer, group: o.group }]));
+  clear?.();
+  const names = {};
+  srcs.forEach((o) => { if (!byId(o.id)) return; names[o.id] = o.name; o.name = `${o.name} · original`; o.visible = false; applyVisibility(o); });
+  const edgesMade = [];
+  let nNew = 0;
+  const layer = activeLayer;
+  for (const s of surfs) {
+    const from = s.src != null ? info.get(s.src) : null;
+    activeLayer = from ? from.layer : info.get(srcs[0].id).layer;
+    const d = { ...s.data, cvs: s.data.cvs.map((row) => row.map((c) => new THREE.Vector4(c.x, c.y, c.z, c.w ?? 1))) };
+    const o = addSurface(d, from ? from.name : rel.base);
+    o.name = from ? from.name : `${rel.base} ${++nNew}`;
+    o.mat = (from || info.get(srcs[0].id)).mat; o.group = from?.group ?? null;
+    made.push(o);
+    // recortes: una curva sobre la superficie por lazo (fuera del borde exterior, dentro de cada agujero)
+    for (const l of s.loops) {
+      const cd = FF.cosCurveData(o.data, l.uv);
+      cd.cos = { surf: o.id, uv: l.uv, closed: true, trim: l.trim, edge: true };
+      const c = addCurve(cd, 'Borde de recorte');
+      c.group = o.group; edgesMade.push(c);
+    }
+    updateObject(o);
+  }
+  activeLayer = layer;
+  addRelation({ type: 'fillet', srcs: Object.keys(names).map(Number), consumed: Object.keys(names).map(Number), names,
+    outs: [...made.map((o) => o.id), ...edgesMade.map((c) => c.id)], kind: rel.kind, n: rel.n, dist: rel.dist, what: rel.what });
+  return made;
+}
 function endFillet(accept) {
   if (!fil) return;
   clearTimeout(filTimer);
   if (accept && fil.sel.length) {
     if (!fil.result) filPreview(true);
     if (!fil.result) { toast(`El redondeo no se pudo hacer: ${fil.error || 'sin resultado'}`); return; }
-    const fitData = (grid) => N.fitSurface(grid.map((row) => row.map(([x, y, z]) => new THREE.Vector3(x, y, z))), 3, 3);
-    let surfs;
-    try { surfs = FL.toSurfaces(fil.oc, fil.result.shape, fitData, fil.result.origin, (d, u, v) => {
-      const t = new THREE.Vector3(); N.surfaceOf({ ...d, cvs: d.cvs.map((row) => row.map((c) => new THREE.Vector4(c.x, c.y, c.z, c.w ?? 1))) }).getPoint(Math.min(1, u), Math.min(1, v), t);
-      return [t.x, t.y, t.z];
-    }); } catch (e) { toast(`No se pudo convertir el resultado: ${e.message || e}`); return; }
-    checkpoint();
-    const srcs = fil.items, made = [];
-    // las superficies de origen NO se borran: se ocultan y quedan atadas a la operación (Revert las devuelve); las nuevas llevan su
-    // nombre, material, capa y grupo
-    const info = new Map(srcs.map((o) => [o.id, { name: o.name, mat: o.mat, layer: o.layer, group: o.group }]));
-    filClearPreview();
-    const names = {};
-    srcs.forEach((o) => { if (!byId(o.id)) return; names[o.id] = o.name; o.name = `${o.name} · original`; o.visible = false; applyVisibility(o); });
-    const edgesMade = [];
-    let nFil = 0;
-    const layer = activeLayer;
-    for (const s of surfs) {
-      const from = s.src != null ? info.get(s.src) : null;
-      activeLayer = from ? from.layer : info.get(srcs[0].id).layer;
-      const d = { ...s.data, cvs: s.data.cvs.map((row) => row.map((c) => new THREE.Vector4(c.x, c.y, c.z, c.w ?? 1))) };
-      const o = addSurface(d, from ? from.name : 'Redondeo');
-      o.name = from ? from.name : `${fil.dist < 0 ? 'Chaflán' : 'Redondeo'} ${++nFil}`;
-      o.mat = (from || info.get(srcs[0].id)).mat; o.group = from?.group ?? null;
-      made.push(o);
-      // recortes: una curva sobre la superficie por lazo (fuera del borde exterior, dentro de cada agujero)
-      for (const l of s.loops) {
-        const cd = FF.cosCurveData(o.data, l.uv);
-        cd.cos = { surf: o.id, uv: l.uv, closed: true, trim: l.trim, edge: true };
-        const c = addCurve(cd, 'Borde de recorte');
-        c.group = o.group; edgesMade.push(c);
-      }
-      updateObject(o);
-    }
-    activeLayer = layer;
-    const n = fil.sel.length, kind = fil.dist < 0 ? 'Chaflán' : 'Redondeo';
-    addRelation({ type: 'fillet', srcs: Object.keys(names).map(Number), consumed: Object.keys(names).map(Number), names,
-      outs: [...made.map((o) => o.id), ...edgesMade.map((c) => c.id)], kind, n, dist: fil.dist });
+    const kind = fil.dist < 0 ? 'Chaflán' : 'Redondeo', n = fil.sel.length;
+    const made = commitSolid(fil.oc, fil.result.shape, fil.result.origin, fil.items, { kind, n, dist: fil.dist, base: kind }, filClearPreview);
+    if (!made) return;
     filCleanup();
     applySelection(made, 'replace');
     refreshOutliner();
@@ -7236,6 +7244,229 @@ addEventListener('keydown', (e) => {
     fil.vary.push([Math.round(fil.hoverT * 100) / 100, Math.abs(fil.dist) * 1.8]);
     filRefresh(); filPreview(true); showFilletWin();
   }
+}, true);
+
+// ---------- Empujar / tirar (Push/Pull) como Plasticity ----------
+// Las superficies elegidas (o todas las visibles) se cosen en OpenCascade. Se elige una CARA del sólido o una REGIÓN (curva cerrada
+// dibujada sobre una cara plana) y se arrastra: hacia fuera = UNIÓN (sale material), hacia dentro = CORTE (bolsillo). La operación
+// se deduce sola del signo de la distancia, sin menús. Sin sólido cerrado (una superficie suelta) = engrosar.
+// Enter / clic derecho / Aceptar = el resultado pasa a superficies NURBS (las de origen quedan ocultas; Revert las devuelve). Esc cancela.
+let pp = null;
+const ppHovMat = new THREE.MeshBasicMaterial({ color: 0x2f7bff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+const ppSelMat = ppHovMat.clone(); ppSelMat.opacity = 0.42;
+const ppGroup = new THREE.Group();
+scene.add(ppGroup);
+const ppDot = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshBasicMaterial({ color: 0xffd400, depthTest: false }));
+ppDot.renderOrder = 20;
+const ppStem = new LineSegments2(new LineSegmentsGeometry(), LM({ color: 0xffd400, linewidth: 2, depthTest: false }));
+ppStem.renderOrder = 19;
+ppGroup.add(ppDot, ppStem);
+ppGroup.visible = false;
+const ppTag = document.createElement('div');
+ppTag.className = 'xf-prompt';
+ppTag.hidden = true;
+document.body.append(ppTag);
+const PP_OP = { union: 'Unión', cut: 'Corte', thicken: 'Engrosar' };
+const triGeo = (pos, idx) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1)); return g; };
+
+async function startPushPull() {
+  const items = (selObjs.some((o) => o.kind === 'surface') ? selObjs : objects).filter((o) => o.kind === 'surface' && o.visible);
+  if (!items.length) return toast('Empujar / tirar: no hay superficies. Elige las caras del sólido (o deja nada elegido para usar todas).');
+  endActiveTool('switch');
+  toast('Preparando el núcleo CAD para empujar / tirar…');
+  let oc;
+  try { oc = await getOCC(); } catch (e) { return toast(`Empujar / tirar: ${e.message}`); }
+  let built;
+  try { built = FL.makeShape(oc, items.map((o) => ({ id: o.id, data: o.data }))); } catch (e) { return toast(`Empujar / tirar: no se pudieron coser las superficies (${e.message || e})`); }
+  const size = boundsOf(items).getSize(new THREE.Vector3()).length() || 1;
+  const m = FL.previewMesh(oc, built.shape, Math.max(0.004, size * 0.002));
+  const faces = FL.faceShapes(oc, built.shape), frames = FL.faceFrames(m, faces.length);
+  const targets = faces.map((face, i) => {
+    const ids = [];
+    m.tri.forEach((f, t) => { if (f === i) ids.push(m.idx[t * 3], m.idx[t * 3 + 1], m.idx[t * 3 + 2]); });
+    return { kind: 'face', face, n: frames[i].n, c: frames[i].c, planar: frames[i].planar, geo: triGeo(m.pos, new Uint32Array(ids)) };
+  });
+  // regiones: curvas cerradas visibles que están sobre una cara plana
+  const tol = size * 2e-4;
+  for (const o of objects) {
+    if (o.kind !== 'curve' || !o.visible || o.data.cos?.edge) continue;
+    const cv = o.data.cvs, a = cv[0], b = cv[cv.length - 1];
+    if (!a || Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) > tol * 5) continue;
+    const host = targets.find((t) => t.kind === 'face' && t.planar && cv.every((p) => Math.abs((p.x - t.c[0]) * t.n[0] + (p.y - t.c[1]) * t.n[1] + (p.z - t.c[2]) * t.n[2]) < tol * 5));
+    if (!host) continue;
+    try {
+      const face = FL.curveFace(oc, { deg: o.data.deg, knots: o.data.knots, cvs: cv.map((p) => ({ x: p.x, y: p.y, z: p.z, w: p.w ?? 1 })) });
+      const rm = FL.previewMesh(oc, face, Math.max(0.004, size * 0.002));
+      const c = FL.faceFrames(rm, 1)[0].c;
+      targets.push({ kind: 'region', face, n: host.n, c, curve: o.id, name: o.name, geo: triGeo(rm.pos, rm.idx) });
+    } catch (e) { /* curva que no forma región */ }
+  }
+  const pick = new THREE.Mesh(triGeo(m.pos, m.idx), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }));
+  const hov = new THREE.Mesh(new THREE.BufferGeometry(), ppHovMat), sel = new THREE.Mesh(new THREE.BufferGeometry(), ppSelMat);
+  hov.renderOrder = sel.renderOrder = 7;
+  ppGroup.add(pick, hov, sel);
+  ppGroup.visible = true;
+  pp = { oc, built, items, size, targets, pick, hov, sel, hover: -1, cur: -1, dist: 0, preview: null, result: null, error: null, drag: false, busy: false };
+  beginTool('pushpull', { label: 'Empujar / tirar', cleanup: (why) => { if (why !== 'esc' && pp?.result) endPushPull(true); if (pp) endPushPull(false); }, hit: (e) => ppTargetAt(e) >= 0 });
+  tool = 'pushpull';
+  ppRefresh();
+  showPushPullWin();
+  const nr = targets.filter((t) => t.kind === 'region').length;
+  toast(`Empujar / tirar: ${faces.length} caras${nr ? ` y ${nr} región(es)` : ''}${built.solid ? '' : ' · no es un sólido cerrado: se engrosa'} · pulsa sobre una cara y arrastra`);
+}
+// cara o región bajo el ratón (la región gana si está en el mismo sitio que la cara)
+function ppTargetAt(e) {
+  if (!pp) return -1;
+  const pn = paneAt(e.clientX);
+  useAspect(pn);
+  ray.setFromCamera(paneNDC(e, pn), camera);
+  const hit = ray.intersectObject(pp.pick, false)[0];
+  let best = -1, bd = hit ? hit.distance + pp.size * 1e-3 : Infinity;
+  pp.targets.forEach((t, i) => {
+    if (t.kind !== 'region') return;
+    const h = ray.intersectObject(new THREE.Mesh(t.geo, ppHovMat), false)[0];
+    if (h && h.distance <= bd) { bd = h.distance; best = i; }
+  });
+  if (best >= 0 || !hit) return best;
+  // cara del triángulo tocado
+  const t = hit.faceIndex, idx = pp.pick.geometry.index.array, key = [idx[t * 3], idx[t * 3 + 1], idx[t * 3 + 2]].join();
+  return pp.targets.findIndex((tg) => { if (tg.kind !== 'face') return false; const a = tg.geo.index.array; for (let k = 0; k < a.length; k += 3) if (a[k] + ',' + a[k + 1] + ',' + a[k + 2] === key) return true; return false; });
+}
+function ppRefresh() {
+  if (!pp) return;
+  pp.hov.geometry = pp.hover >= 0 && pp.hover !== pp.cur ? pp.targets[pp.hover].geo : new THREE.BufferGeometry();
+  pp.sel.geometry = pp.cur >= 0 && !pp.preview ? pp.targets[pp.cur].geo : new THREE.BufferGeometry();
+  const on = pp.cur >= 0;
+  ppDot.visible = ppStem.visible = on;
+  if (on) {
+    const t = pp.targets[pp.cur], c = new THREE.Vector3(...t.c), q = c.clone().addScaledVector(new THREE.Vector3(...t.n), pp.dist);
+    ppDot.position.copy(q);
+    ppDot.scale.setScalar(pxWorld(q, 6));
+    const g = new LineSegmentsGeometry(); g.setPositions([c.x, c.y, c.z, q.x, q.y, q.z]); setGeo(ppStem, g);
+  }
+}
+// distancia a lo largo de la normal según el ratón (proyección en pantalla); Alt = de 5 en 5 mm
+function ppDistAt(e) {
+  const t = pp.targets[pp.cur], pn = paneAt(e.clientX), r = renderer.domElement.getBoundingClientRect();
+  useAspect(pn);
+  const toScr = (v) => { const q = v.clone().project(camera); return new THREE.Vector2(r.left + pn.x + ((q.x + 1) / 2) * pn.w, r.top + ((1 - q.y) / 2) * pn.h); };
+  const c = new THREE.Vector3(...t.c), a = toScr(c), b = toScr(c.clone().add(new THREE.Vector3(...t.n))), ab = b.clone().sub(a);
+  let d;
+  if (ab.lengthSq() > 4) d = new THREE.Vector2(e.clientX, e.clientY).sub(pp.grab).dot(ab) / ab.lengthSq() + pp.dist0;
+  else d = pp.dist0 - (e.clientY - pp.grab.y) * pxWorld(c, 1);   // mirando la cara de frente: arriba/abajo
+  const snap = e.altKey ? 0.05 : 0.005;
+  return Math.round(d / snap) * snap;
+}
+let ppTimer = 0;
+function ppPreview(now = false) {
+  clearTimeout(ppTimer);
+  if (!pp || pp.cur < 0 || Math.abs(pp.dist) < 1e-6) { ppClearPreview(); TW.render(); return; }
+  if (!now) { ppTimer = setTimeout(() => ppPreview(true), 70); return; }
+  const t = pp.targets[pp.cur], t0 = performance.now();
+  try {
+    const res = FL.pushPull(pp.oc, pp.built.shape, t.face, t.n.map((x) => x * pp.dist), t.n, pp.built.solid);
+    pp.result = res;
+    const m = FL.previewMesh(pp.oc, res.shape, Math.max(0.004, pp.size * 0.002));
+    const g = triGeo(m.pos, m.idx); g.computeVertexNormals();
+    g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(m.pos.length).fill(1), 3));
+    if (!pp.preview) { pp.preview = new THREE.Mesh(g, materials[pp.items[0].mat]); pp.preview.castShadow = true; scene.add(pp.preview); }
+    else setGeo(pp.preview, g);
+    pp.items.forEach((o) => { o.parts.mesh.visible = false; o.parts.iso.visible = false; if (o.parts.bound) o.parts.bound.visible = false; if (o.parts.tedge) o.parts.tedge.visible = false; });
+    pp.error = null;
+  } catch (err) { pp.result = null; pp.error = err.message || String(err); }
+  pp.ms = performance.now() - t0;
+  sceneChangedAt = performance.now();
+  ppRefresh(); TW.render(); ppShowTag();
+}
+function ppClearPreview() {
+  if (!pp) return;
+  if (pp.preview) { scene.remove(pp.preview); pp.preview.geometry.dispose(); pp.preview = null; }
+  pp.result = null;
+  pp.items.forEach(applyVisibility);
+  sceneChangedAt = performance.now();
+}
+function ppOpName() {
+  if (!pp || pp.cur < 0 || !pp.dist) return '';
+  return !pp.built.solid ? PP_OP.thicken : pp.dist > 0 ? PP_OP.union : PP_OP.cut;
+}
+function ppShowTag(e) {
+  if (!pp || pp.cur < 0 || !pp.dist) { ppTag.hidden = true; return; }
+  if (e) { ppTag.style.left = e.clientX + 18 + 'px'; ppTag.style.top = e.clientY + 14 + 'px'; }
+  ppTag.textContent = `${ppOpName()} · ${(Math.abs(pp.dist) * 100).toFixed(1)} mm${pp.error ? ' · no se puede' : ''}`;
+  ppTag.hidden = false;
+}
+function showPushPullWin() {
+  TW.show({
+    title: 'Empujar / tirar (como Plasticity)',
+    hint: () => !pp ? '' : pp.cur < 0 ? 'Pulsa sobre una cara o una región (curva cerrada sobre una cara plana) y arrastra: hacia fuera suma material, hacia dentro lo quita.'
+      : pp.error ? `No se puede: ${pp.error}.` : `${pp.targets[pp.cur].kind === 'region' ? `Región «${pp.targets[pp.cur].name}»` : 'Cara'} · ${ppOpName() || 'arrastra el punto amarillo'}${pp.ms ? ` · ${Math.round(pp.ms)} ms` : ''} · Alt: de 5 en 5 mm · Enter: aceptar`,
+    fields: [
+      { type: 'html', html: () => `<span class="tw-note">Operación: <b>${ppOpName() || '—'}</b> (se deduce sola: hacia fuera = Unión, hacia dentro = Corte)</span>` },
+      { type: 'range', label: 'Distancia', min: -2, max: 2, step: 0.005, get: () => pp?.dist ?? 0, set: (v) => { pp.dist = v; ppRefresh(); ppPreview(); }, fmt: (v) => (v * 100).toFixed(1) + ' mm' },
+    ],
+    actions: [{ label: 'Cancelar', run: () => endPushPull(false) }, { label: 'Aceptar', primary: true, run: () => endPushPull(true) }],
+  });
+}
+function endPushPull(accept) {
+  if (!pp) return;
+  clearTimeout(ppTimer);
+  if (accept && pp.cur >= 0 && pp.dist) {
+    if (!pp.result) ppPreview(true);
+    if (!pp.result) { toast(`Empujar / tirar no se pudo hacer: ${pp.error || 'sin resultado'}`); return; }
+    const op = ppOpName(), t = pp.targets[pp.cur];
+    const made = commitSolid(pp.oc, pp.result.shape, null, pp.items, { kind: op, n: 1, dist: pp.dist, base: 'Cara', what: t.kind === 'region' ? 'región' : 'cara' }, ppClearPreview);
+    if (!made) return;
+    ppCleanup();
+    applySelection(made, 'replace');
+    refreshOutliner();
+    toast(`${op} hecho: ${made.length} superficies NURBS (Ctrl+Z deshace)`);
+    return;
+  }
+  ppClearPreview();
+  ppCleanup();
+}
+function ppCleanup() {
+  ppGroup.remove(pp.pick, pp.hov, pp.sel);
+  pp.pick.geometry.dispose();
+  ppGroup.visible = false; ppTag.hidden = true; pp = null; tool = 'select'; toolDone('pushpull');
+  TW.hide(); updateHint();
+}
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!pp || e.altKey && e.shiftKey) return;   // Shift+Alt: navegar como siempre
+  if (e.button === 2) { e.stopImmediatePropagation(); e.preventDefault(); endPushPull(true); return; }
+  if (e.button !== 0) return;
+  const pn = paneAt(e.clientX), r = renderer.domElement.getBoundingClientRect();
+  let grab = false;
+  if (pp.cur >= 0) {
+    useAspect(pn);
+    const q = ppDot.position.clone().project(camera), x = r.left + pn.x + ((q.x + 1) / 2) * pn.w, y = r.top + ((1 - q.y) / 2) * pn.h;
+    grab = Math.hypot(e.clientX - x, e.clientY - y) < 14;
+  }
+  if (!grab) {
+    const i = ppTargetAt(e);
+    if (i < 0) return;   // fuera de la pieza: el clic sigue su camino (navegar / vacío)
+    if (i !== pp.cur) { pp.cur = i; pp.dist = 0; ppClearPreview(); }
+  }
+  e.stopImmediatePropagation(); e.preventDefault();
+  pp.drag = true; pp.grab = new THREE.Vector2(e.clientX, e.clientY); pp.dist0 = pp.dist;
+  renderer.domElement.setPointerCapture(e.pointerId);
+  ppRefresh(); TW.render();
+}, true);
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!pp) return;
+  if (pp.drag) { pp.dist = ppDistAt(e); ppRefresh(); ppPreview(); ppShowTag(e); TW.render(); return; }
+  const i = ppTargetAt(e);
+  if (i !== pp.hover) { pp.hover = i; ppRefresh(); }
+});
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!pp || !pp.drag) return;
+  e.stopImmediatePropagation();
+  pp.drag = false; ppPreview(true);
+}, true);
+renderer.domElement.addEventListener('contextmenu', (e) => { if (pp) e.preventDefault(); });
+addEventListener('keydown', (e) => {
+  if (!pp || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key === 'Enter') { e.stopImmediatePropagation(); endPushPull(true); }
 }, true);
 
 // ---------- Módulo FORGE: relieve físico, patrones y cortes exactos para impresión 3D ----------
@@ -7698,7 +7929,7 @@ setTool('select');
 selectionChanged();
 
 renderer.setAnimationLoop(renderFrame);
-window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, trimSelection, finishTrim, untrimSelection, doUntrim, revertConstruction, endFillet, serializeProject, loadProjectV2orV1, extendCurveData, surfaceExtendTo, cvsOff, startExtendU, startLine, untrimSurface, draftPoint, recentAll, locators, addLocator, deleteLocators, flipNormalsRun, withSelection, activeTool: () => activeTool?.id || "idle", escapeAll, awaitSel: () => awaitSel, revolveDrag: () => revolveDrag, MENUS: () => MENUS, setXform, offsetSelection, loftSelection, revolveSelection, extrudeSelection, filPreview, trimStages, relSpecOf: (r) => relSpec(r), trimOp: () => trimOp, applyRelation, propagateFrom, renderHistory };
+window.__forja = { layers, setLayerMode, setLayerColor, toggleSym, syncGhosts, mirrorRoots, layerMats, pickable, importFile, removeObject, backend, lineCandidates, pickMode: () => pickMode, undoDepth: () => undoStack.length, pickNothing, tool: () => tool, draft: () => draft, toolDef, grids: () => [grid.visible, gridXY.visible, gridYZ.visible], sceneStamp: () => sceneChangedAt, renderer, setShadowEvery: (v) => (shadowEvery = v), setDiagMode: (m) => setDiag(m), THREE, refineTess, tess: () => tessMul, addSurface, startFillet, fil: () => fil, startPushPull, pp: () => pp, endPushPull, ppPreview, FL, camera, objects, panes, pivot, selObjs, selCVs, gizmo, proxy, carousel: () => carousel, runAI, relations, createAlign, createAlignCurve, alignDiag, masterField, edgeInfo: () => edgeOp && edgeOp.picks.map((p) => [p.obj.name, p.edge, p.end]), moveSnap, snapModes, N, createBlend, createSkin, createExtend, blendDemo, projectSelection, applySelection, addCurve, circleData, startEdgeOp, updateObject, undo, proj, setProjection, goToView, cubeRegionAt, forgeFromForja, forge: () => forge, setTool, setDrawPlane, snapToggles, HX, FF, TW: () => TW, arrows: () => relArrows.children, cvAll: () => { objects.forEach((o) => o.kind !== "mesh" && cvTargets.add(o.id)); selectionChanged(); }, createGFillet, findMateEdge, FFm: FF, relSpec, relHandles, relDiag, addRelation, trimSelection, finishTrim, untrimSelection, doUntrim, revertConstruction, endFillet, serializeProject, loadProjectV2orV1, extendCurveData, surfaceExtendTo, cvsOff, startExtendU, startLine, untrimSurface, draftPoint, recentAll, locators, addLocator, deleteLocators, flipNormalsRun, withSelection, activeTool: () => activeTool?.id || "idle", escapeAll, awaitSel: () => awaitSel, revolveDrag: () => revolveDrag, MENUS: () => MENUS, setXform, offsetSelection, loftSelection, revolveSelection, extrudeSelection, filPreview, trimStages, relSpecOf: (r) => relSpec(r), trimOp: () => trimOp, applyRelation, propagateFrom, renderHistory };
 syncMaterialEditor();
 showModule(layout);
 window.__ready = true;

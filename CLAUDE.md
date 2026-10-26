@@ -981,3 +981,11 @@ GitHub Pages ya está activo: https://eposboca9.github.io/forja-studio/
   (5) LÍNEAS más finas (LM × LINE_K 0,68, mínimo 1 px) y TESS_HI 2,4. La SIMETRÍA de capa ya era automática (fantasmas con la geometría compartida y la
   matriz de reflexión en el grupo: la GPU la aplica; siguen a los CVs al momento).
   Prueba: scratchpad v49app/t38.cjs, t38b.cjs.
+- (v0.52) EMPUJAR / TIRAR como Plasticity (tecla Q, barra izquierda › Sólidos, Superficies › Empujar / tirar, Puck Sólidos "bool"): startPushPull cose las
+  superficies elegidas (o todas las visibles) con OCC (FL.makeShape); caras = FL.faceShapes + FL.faceFrames (normal hacia fuera, centro, plana; sale de la malla
+  ya orientada de previewMesh, que ahora devuelve tri = cara de cada triángulo); REGIONES = curvas cerradas visibles sobre una cara plana (FL.curveFace).
+  Pulsar sobre cara/región y arrastrar (o el punto amarillo); Alt de 5 en 5 mm. La operación se deduce del signo: hacia fuera = UNIÓN (BRepAlgoAPI_Fuse),
+  hacia dentro = CORTE (BRepAlgoAPI_Cut), sin sólido cerrado = engrosar (prisma); FL.pushPull = BRepPrimAPI_MakePrism + booleana + ShapeUpgrade_UnifySameDomain.
+  Etiqueta junto al cursor ("Corte · 55.5 mm"). Enter / clic derecho / Aceptar: commitSolid() (sacado de endFillet, lo comparten los dos) → superficies NURBS +
+  bordes de recorte, origen oculto, relación 'fillet' con kind Unión/Corte y what 'cara'/'región' (Revert devuelve el original). Esc cancela.
+  toSurfaces: las caras PLANAS salen como parche bilineal exacto (antes ajuste denso 13×13). Pruebas: scratchpad fil/tpp.mjs (Node), v49app/t39.cjs (ratón real).
